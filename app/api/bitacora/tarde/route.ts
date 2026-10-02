@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { bitacoraDe, estadoDia, tareasDe } from "@/lib/dominio";
 import { esquemaTarde } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
@@ -8,9 +7,8 @@ import { ahoraIso, hoyLocal } from "@/lib/tiempo";
 
 // La bitácora se deriva de (usuario de la sesión, hoy): nunca de un id enviado por el cliente.
 export const POST = manejar(async (req: NextRequest) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
+  const { u, db, empresa } = await contexto(req, ["team"]);
   const { tareas, bloqueo } = await leerJson(req, esquemaTarde);
-  const db = getDb();
   const hoy = hoyLocal();
 
   const b = bitacoraDe(db, u.id, hoy);
@@ -54,5 +52,5 @@ export const POST = manejar(async (req: NextRequest) => {
     }
   })();
 
-  return NextResponse.json(estadoDia(db, u));
+  return NextResponse.json(estadoDia(db, u, empresa));
 });

@@ -12,6 +12,7 @@ export interface ClaimsSesion {
   rol: Rol;
   ver: number; // version_sesion del usuario al emitir
   cp: boolean; // debe cambiar código
+  emp: string | null; // empresa de la cuenta (null para administradores: operan sobre todas)
   iat?: number;
   exp?: number;
 }
@@ -32,7 +33,7 @@ function secreto(): Uint8Array {
 }
 
 export async function firmarSesion(c: Omit<ClaimsSesion, "iat" | "exp">): Promise<string> {
-  return new SignJWT({ rol: c.rol, ver: c.ver, cp: c.cp })
+  return new SignJWT({ rol: c.rol, ver: c.ver, cp: c.cp, emp: c.emp })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(c.sub)
     .setIssuedAt()
@@ -52,6 +53,7 @@ export async function verificarSesion(token: string | undefined): Promise<Claims
       rol,
       ver: Number(payload.ver ?? -1),
       cp: payload.cp === true,
+      emp: typeof payload.emp === "string" ? payload.emp : null,
       iat: payload.iat,
       exp: payload.exp,
     };

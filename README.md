@@ -1,21 +1,39 @@
 # Aether Ops (`ops.aether.cl`)
 
 Bitácora diaria (objetivos de la mañana → cierre de la tarde), ausencias (OOO), rendición de compras con
-separación de IVA, racha y Say-Do. Un solo contenedor: Next.js 15 (standalone) + SQLite (WAL).
+separación de IVA, racha y Say-Do, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada una
+con su propia base de datos. Un solo contenedor: Next.js 15 (standalone) + SQLite (WAL).
 
 - Revisión técnica de la especificación original y decisiones tomadas: [`docs/REVISION.md`](docs/REVISION.md) (en inglés)
 - English version of this README: [`README.en.md`](README.en.md)
+
+## Empresas y roles
+
+| Quién | Email | Qué ve |
+|---|---|---|
+| **Equipo** | del dominio de su empresa | `/checkin` y `/mi-progreso` de su empresa |
+| **Gerencia general** | del dominio de su empresa | `/exec` (tablero móvil) **solo de su empresa** |
+| **Administradores** (jefatura intermedia) | **cualquier dominio** | `/admin` con **selector de empresa**, y `/exec` de cualquiera de las dos |
+
+- El dominio del email decide la empresa y la base de datos: `@aether-tech.dev` → Aether Tech,
+  `@datasheq.cl` → Datasheq (configurable con `EMPRESAS`). Un email de otro dominio solo puede ser administrador.
+- El primer administrador es `ADMIN_EMAIL`. Desde `/admin` → **Administradores** se agregan otros, con el mismo
+  tablero y los mismos permisos.
+- **Supervisión**: al crear a un integrante se elige qué administradores lo supervisan (por defecto, quien lo
+  crea). Puede ser compartida o exclusiva y se cambia en **Equipo**. Standup, capacidad y compras se filtran por
+  «Mis supervisados» o «Todo el equipo».
 
 ## Contenido de esta versión
 
 | Incluido | Próxima etapa |
 |---|---|
-| Ingreso con email + código de 6 dígitos (inicial `000000`, cambio obligatorio, bloqueo por intentos) | Vista `/exec` (gasto por solución, IVA recuperado, lead time, Say-Do global) |
-| `/checkin`: objetivos de la mañana (2 a 4), cierre de la tarde, anillo Say-Do en vivo, racha | `/admin`: matriz de standup, capacidad 14 días, mesa de validación financiera |
-| Fuera de oficina: día completo / parcial, cancelar; lo postergado no cuenta en Say-Do | Editor de feriados (vienen cargados los de Chile 2026) |
+| Ingreso con email + código de 6 dígitos (inicial `000000`, cambio obligatorio, bloqueo por intentos) | Editor de feriados (vienen cargados los de Chile 2026) |
+| `/checkin`: objetivos de la mañana (2 a 4), cierre de la tarde, anillo Say-Do en vivo, racha | |
+| Fuera de oficina: día completo / parcial, cancelar; lo postergado no cuenta en Say-Do | |
 | Compras: factura / boleta / extranjero, validación de RUT, folio duplicado, foto o PDF | |
 | `/mi-progreso`: racha, historial de 14 días, mis compras, cambio de código | |
-| `/admin`: agregar/quitar personas, roles, resetear código, proyectos | |
+| `/admin`: standup (bloqueos → Say-Do < 70% → ausentes), capacidad 14 días, validación de compras con vista del comprobante, equipo con supervisores, proyectos, administradores | |
+| `/exec`: costo de prototipo por solución (componentes + flete vs presupuesto), recuperación de IVA, lead time, Say-Do global 14 días | |
 
 ---
 
@@ -89,7 +107,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 40 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 38 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -127,10 +145,13 @@ Datos en `./data` (bórrala para empezar de cero). Detener con `Ctrl+C`.
 ## 3. Primer día
 
 1. Ingresa con tu email y `000000`, crea tu código.
-2. `/admin` → **Proyectos**: crea los proyectos activos (sin al menos uno, el equipo no puede registrar objetivos).
-3. `/admin` → **Equipo**: agrega a cada persona. **Pídeles que ingresen ese mismo día**: hasta que cambien
-   el código inicial, cualquiera que conozca su email podría entrar con `000000`.
-4. Antes de enero: agrega los feriados 2027 a la tabla `feriados` (formato en `lib/migraciones.ts`).
+2. Con el selector en **Aether Tech** y luego en **Datasheq**:
+   - **Proyectos**: crea los proyectos activos (sin al menos uno, el equipo no puede registrar objetivos).
+   - **Equipo**: agrega a cada persona (rol Equipo o Gerencia) y elige quién la supervisa.
+3. **Administradores**: agrega a otros jefes si corresponde.
+4. **Pide a cada persona que ingrese ese mismo día**: hasta que cambie el código inicial, cualquiera que conozca
+   su email podría entrar con `000000`.
+5. Antes de enero: agrega los feriados 2027 a la tabla `feriados` de cada empresa (formato en `lib/migraciones.ts`).
 
 ---
 
@@ -174,9 +195,19 @@ server {
 30 2 * * * root docker exec aether-ops node scripts/backup.mjs && rsync -a /var/lib/aether-ops/ respaldo:/srv/aether-ops/
 ```
 
-No copies `app.db` con `cp` mientras la aplicación corre: sin el archivo `-wal` la copia puede quedar
-inconsistente. `scripts/backup.mjs` usa la API de respaldo en caliente de SQLite y verifica la copia con
-`integrity_check`.
+`scripts/backup.mjs` respalda **todas** las bases (`control.db` y una por empresa) con la API de respaldo en
+caliente de SQLite, verifica cada copia con `integrity_check` y deja `respaldos/AAAAMMDD-HHMMSS/`. No copies los
+`.db` con `cp` mientras la aplicación corre: sin el archivo `-wal` la copia puede quedar inconsistente.
+
+Estructura de datos:
+
+```
+/data/control.db                         administradores y supervisión
+/data/empresas/aether-tech/app.db        datos de Aether Tech
+/data/empresas/aether-tech/comprobantes/ fotos y PDF de compras de Aether Tech
+/data/empresas/datasheq/app.db           datos de Datasheq
+/data/empresas/datasheq/comprobantes/
+```
 
 ---
 
@@ -185,14 +216,16 @@ inconsistente. `scripts/backup.mjs` usa la API de respaldo en caliente de SQLite
 | Variable | Por defecto | |
 |---|---|---|
 | `JWT_SECRET` | — | Obligatoria en producción, ≥ 32 caracteres |
-| `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | Administrador que se crea en el primer arranque (si no hay usuarios) |
+| `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | Primer administrador (se crea si no hay ninguno); cualquier dominio |
+| `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | Empresas: `clave\|Nombre\|dominios` separadas por `;` |
+| `JORNADA` | `08:30-18:00` | Horario base para descontar ausencias parciales en la capacidad |
 | `PIN_INICIAL` | `000000` | Código inicial de cuentas nuevas o reseteadas |
-| `DATA_DIR` | `/data` (Docker), `./data` (local) | Base SQLite + comprobantes |
+| `DATA_DIR` | `/data` (Docker), `./data` (local) | Bases SQLite + comprobantes |
 | `TZ_NEGOCIO` | `America/Santiago` | Define "hoy", el corte de las 19:30 y la racha |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 
-`ADMIN_EMAIL` solo se usa cuando la base está vacía. Para cambiar de administrador después, hazlo desde
-`/admin` (asignar rol "Jefatura (admin)" a otra persona).
+`ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.
+No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 
 ---
 
@@ -201,13 +234,13 @@ inconsistente. `scripts/backup.mjs` usa la API de respaldo en caliente de SQLite
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, racha, Say-Do, restricciones del esquema, RUT, códigos (16 pruebas)
+npm run test:logica       # zona horaria, racha, Say-Do, esquema, empresas, capacidad, gerencia, RUT, códigos (20 pruebas)
 
-# extremo a extremo contra un servidor con base VACÍA (40 pruebas)
+# extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión, tableros (38 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
-  -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether.cl -e COOKIE_SECURE=false aether-ops:test
-BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether.cl npm run test:e2e
+  -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
+BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 docker rm -f aether-test
 ```
 
@@ -217,10 +250,14 @@ docker rm -f aether-test
 
 ```
 app/                páginas (login, cambiar-pin, checkin, mi-progreso, admin, exec) y api/ (route handlers)
-components/         componentes cliente (PinPad, Checkin, FormGasto, ModalOoo, AdminPanel, Anillo)
-lib/db.ts           conexión única a SQLite + PRAGMA por conexión + migraciones
-lib/migraciones.ts  esquema (versionado con PRAGMA user_version)
+components/         componentes cliente (PinPad, Checkin, FormGasto, ModalOoo, Anillo)
+components/admin/   tablero de jefatura (selector, standup, capacidad, compras, equipo, proyectos, administradores)
+lib/empresas.ts     empresas y dominios
+lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
+lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
 lib/metricas.ts     reglas de racha y Say-Do
+lib/tableros.ts     cálculos de standup, capacidad, compras y gerencia
+lib/supervision.ts  administradores ↔ integrantes supervisados
 lib/tiempo.ts       fechas de negocio en America/Santiago
 lib/auth.ts, jwt.ts, pin.ts, limites.ts   sesiones, hash de códigos, bloqueo por intentos
 middleware.ts       enrutamiento de páginas por rol (las rutas /api se autentican solas)

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { bitacoraDe, estadoDia, proyectosActivos } from "@/lib/dominio";
 import { esquemaManana } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
@@ -9,13 +8,12 @@ import { ahoraIso, hoyLocal } from "@/lib/tiempo";
 
 // Idempotente: si la bitácora de hoy ya existe, devuelve la existente (200) en vez de fallar.
 export const POST = manejar(async (req: NextRequest) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
+  const { u, db, empresa } = await contexto(req, ["team"]);
   const { tareas } = await leerJson(req, esquemaManana);
-  const db = getDb();
   const hoy = hoyLocal();
 
   if (bitacoraDe(db, u.id, hoy)) {
-    return NextResponse.json({ ya_existia: true, ...estadoDia(db, u) });
+    return NextResponse.json({ ya_existia: true, ...estadoDia(db, u, empresa) });
   }
 
   const oooCompleto = db
@@ -45,10 +43,10 @@ export const POST = manejar(async (req: NextRequest) => {
   } catch (e) {
     // Doble envío simultáneo: la otra petición ganó la carrera.
     if ((e as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE") {
-      return NextResponse.json({ ya_existia: true, ...estadoDia(db, u) });
+      return NextResponse.json({ ya_existia: true, ...estadoDia(db, u, empresa) });
     }
     throw e;
   }
 
-  return NextResponse.json({ ya_existia: false, ...estadoDia(db, u) }, { status: 201 });
+  return NextResponse.json({ ya_existia: false, ...estadoDia(db, u, empresa) }, { status: 201 });
 });

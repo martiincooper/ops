@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { ausenciasDesde, estadoDia } from "@/lib/dominio";
 import { esquemaOoo } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
@@ -10,14 +9,13 @@ import { ahoraIso, hoyLocal, sumarDias } from "@/lib/tiempo";
 export const dynamic = "force-dynamic";
 
 export const GET = manejar(async (req: NextRequest) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
-  return NextResponse.json({ ausencias: ausenciasDesde(getDb(), u.id, hoyLocal()) });
+  const { u, db, empresa } = await contexto(req, ["team"]);
+  return NextResponse.json({ ausencias: ausenciasDesde(db, u.id, hoyLocal()) });
 });
 
 export const POST = manejar(async (req: NextRequest) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
+  const { u, db, empresa } = await contexto(req, ["team"]);
   const a = await leerJson(req, esquemaOoo);
-  const db = getDb();
   const hoy = hoyLocal();
   if (a.fecha < hoy) throw new HttpError(400, "La fecha no puede ser pasada");
   if (a.fecha > sumarDias(hoy, 365)) throw new HttpError(400, "Máximo un año hacia adelante");
@@ -61,5 +59,5 @@ export const POST = manejar(async (req: NextRequest) => {
     }
   })();
 
-  return NextResponse.json({ id, ...estadoDia(db, u) }, { status: 201 });
+  return NextResponse.json({ id, ...estadoDia(db, u, empresa) }, { status: 201 });
 });

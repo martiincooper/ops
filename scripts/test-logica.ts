@@ -2,7 +2,9 @@
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
-import { MIGRACIONES } from "../lib/migraciones";
+import { empresaPorEmail } from "../lib/empresas";
+import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
+import { capacidad, equipoActivo, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
 import { normalizarRut } from "../lib/rut";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
@@ -22,7 +24,7 @@ async function prueba(nombre: string, fn: () => void | Promise<void>) {
 function dbNueva() {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
-  MIGRACIONES.forEach((m) => db.exec(m));
+  MIGRACIONES_EMPRESA.forEach((m) => db.exec(m));
   db.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p1','AETH-01','Sensor',1000000,'2026-09-01','2026-12-31')").run();
   db.prepare("INSERT INTO usuarios (id, nombre, email, rol, creado_en) VALUES ('u1','Ana','ana@aether.cl','team','2026-09-01T12:00:00.000Z')").run();
   return db;
@@ -122,6 +124,57 @@ async function main() {
     const d7 = dbNueva();
     bitacora(d7, hoy, "", null);
     assert.throws(() => d7.prepare("INSERT INTO tareas_diarias (id, bitacora_id, proyecto_id, descripcion) VALUES ('t','b" + n + "','nope','x')").run());
+  });
+
+  console.log("Empresas y tableros");
+  await prueba("dominio del email decide la empresa", () => {
+    assert.equal(empresaPorEmail("ana@aether-tech.dev")?.clave, "aether-tech");
+    assert.equal(empresaPorEmail("Pedro@DATASHEQ.CL")?.clave, "datasheq");
+    assert.equal(empresaPorEmail("x@gmail.com"), undefined);
+    assert.equal(empresaPorEmail("x@sub.aether-tech.dev"), undefined);
+  });
+  await prueba("capacidad: parcial 14:00–17:00 en jornada 08:30–18:00 deja 68%; OOO = 0; fin de semana fuera", () => {
+    const d = dbNueva();
+    d.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo, hora_inicio, hora_fin) VALUES ('a','u1','2026-10-02',0,'14:00','17:00')").run();
+    d.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo) VALUES ('b','u1','2026-10-05',1)").run();
+    const c = capacidad(d, hoy, equipoActivo(d), 14);
+    const celda = (f: string) => c.filas[0].celdas.find((x) => x.fecha === f)!;
+    assert.equal(celda("2026-10-01").estado, "disponible");
+    assert.equal(celda("2026-10-02").estado, "parcial");
+    assert.equal(celda("2026-10-02").fraccion, 0.68); // 1 − 180/570
+    assert.equal(celda("2026-10-03").estado, "fin_de_semana");
+    assert.equal(celda("2026-10-05").estado, "ooo");
+    assert.equal(celda("2026-10-12").estado, "feriado");
+    // 9 días hábiles entre jue 1 y mié 14 (sin 12-oct feriado) − 1 OOO − 0,32 parcial = 7,68
+    assert.equal(c.filas[0].dias_disponibles, 7.7);
+  });
+  await prueba("gerencia: IVA recuperable, IVA absorbido en boletas, rechazadas excluidas", () => {
+    const d = dbNueva();
+    const g = d.prepare(`INSERT INTO gastos (id, usuario_id, proyecto_id, fecha_documento, item, monto_item_clp, monto_envio_clp, iva_clp,
+      tipo_documento, rut_emisor, folio_documento, comprobante_archivo, comprobante_mime, estado)
+      VALUES (?, 'u1', 'p1', '2026-10-01', 'x', ?, ?, ?, ?, ?, ?, 'f', 'image/jpeg', ?)`);
+    g.run("g1", 32000, 4500, 6935, "factura", "76086428-5", "1", "aprobado");
+    g.run("g2", 11900, 0, 0, "boleta", null, "2", "pendiente");
+    g.run("g3", 99999, 0, 0, "boleta", null, "3", "rechazado");
+    const m = metricasExec(d, hoy);
+    assert.equal(m.totales.componentes_clp, 43900);
+    assert.equal(m.totales.flete_clp, 4500);
+    assert.equal(m.totales.por_validar_clp, 11900);
+    assert.equal(m.iva.iva_recuperable_clp, 6935);
+    assert.equal(m.iva.iva_absorbido_boleta_clp, 1900); // 11.900 × 19/119
+    assert.equal(m.proyectos[0].dias_comprometidos, 121); // 1-sep → 31-dic
+    assert.equal(m.proyectos[0].dias_transcurridos, 30);
+  });
+  await prueba("standup: bloqueo sin resolver va primero; resuelto deja de contar", () => {
+    const d = dbNueva();
+    d.prepare("INSERT INTO usuarios (id, nombre, email, rol, creado_en) VALUES ('u2','Beto','beto@aether.cl','team','2026-09-01T12:00:00.000Z')").run();
+    d.prepare("INSERT INTO bitacoras (id, usuario_id, fecha, checkin_manana, bloqueos) VALUES ('bx','u2','2026-09-30','2026-09-30T12:00:00Z','Falta stock')").run();
+    let s = standup(d, hoy, equipoActivo(d));
+    assert.equal(s[0].nombre, "Beto");
+    assert.equal(s[0].prioridad, 1);
+    d.prepare("UPDATE bitacoras SET bloqueo_resuelto_en = '2026-10-01T12:00:00Z' WHERE id = 'bx'").run();
+    s = standup(d, hoy, equipoActivo(d));
+    assert.ok(s.every((f) => f.bloqueos.length === 0));
   });
 
   console.log("RUT y códigos");

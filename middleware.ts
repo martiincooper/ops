@@ -20,8 +20,8 @@ const PERMITIDAS_CAMBIO_PIN = ["/cambiar-pin"];
 const ACCESO_PAGINAS: { prefijo: string; roles: Rol[] }[] = [
   { prefijo: "/admin", roles: ["admin"] },
   { prefijo: "/exec", roles: ["executive", "admin"] },
-  { prefijo: "/checkin", roles: ["team", "admin"] },
-  { prefijo: "/mi-progreso", roles: ["team", "admin"] },
+  { prefijo: "/checkin", roles: ["team"] },
+  { prefijo: "/mi-progreso", roles: ["team"] },
 ];
 
 function coincide(path: string, prefijo: string) {
@@ -54,7 +54,7 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
   const ahora = Math.floor(Date.now() / 1000);
   if (claims.iat && ahora - claims.iat > RENOVAR_TRAS_S) {
-    const token = await firmarSesion({ sub: claims.sub, rol: claims.rol, ver: claims.ver, cp: claims.cp });
+    const token = await firmarSesion({ sub: claims.sub, rol: claims.rol, ver: claims.ver, cp: claims.cp, emp: claims.emp });
     res.cookies.set(COOKIE_SESION, token, opcionesCookie());
   }
   return res;

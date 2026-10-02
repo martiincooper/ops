@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { adjuntarSesion } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getDbControl, getDbEmpresa, type DB } from "@/lib/db";
+import { empresaPorEmail } from "@/lib/empresas";
 import { esquemaLogin } from "@/lib/esquemas";
 import { HttpError, ipCliente, leerJson, manejar } from "@/lib/http";
 import { inicioPorRol, type Rol } from "@/lib/jwt";
@@ -32,13 +33,21 @@ export const POST = manejar(async (req: NextRequest) => {
     throw new HttpError(429, "Demasiados intentos desde esta conexión. Espera 15 minutos.");
   }
   const { email, pin } = await leerJson(req, esquemaLogin);
-  const db = getDb();
-  const u = db
-    .prepare(
-      `SELECT id, rol, activo, pin_hash, debe_cambiar_pin, version_sesion, bloqueado_hasta
-         FROM usuarios WHERE email = ?`,
-    )
-    .get(email) as FilaLogin | undefined;
+
+  // 1) Administradores (cualquier dominio). 2) Si no, la empresa que corresponde al dominio del email.
+  const SQL = `SELECT id, rol, activo, pin_hash, debe_cambiar_pin, version_sesion, bloqueado_hasta
+                 FROM usuarios WHERE email = ?`;
+  let db: DB = getDbControl();
+  let empresa: string | null = null;
+  let u = db.prepare(SQL).get(email) as FilaLogin | undefined;
+  if (!u) {
+    const emp = empresaPorEmail(email);
+    if (emp) {
+      db = getDbEmpresa(emp.clave);
+      empresa = emp.clave;
+      u = db.prepare(SQL).get(email) as FilaLogin | undefined;
+    }
+  }
 
   if (!u || u.activo !== 1) {
     await verificarPin(pin, await senuelo()); // mismo costo de tiempo que un usuario real
@@ -71,5 +80,5 @@ export const POST = manejar(async (req: NextRequest) => {
   const res = NextResponse.json({
     redirigir: u.debe_cambiar_pin === 1 ? "/cambiar-pin" : inicioPorRol(u.rol),
   });
-  return adjuntarSesion(res, u);
+  return adjuntarSesion(res, { ...u, empresa });
 });

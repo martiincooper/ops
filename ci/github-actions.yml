@@ -54,10 +54,10 @@ jobs:
       - name: Pruebas extremo a extremo contra el contenedor
         run: |
           docker run -d --name aether -p 127.0.0.1:3100:3000 \
-            -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=admin@aether.cl -e COOKIE_SECURE=false \
+            -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false \
             aether-ops:ci
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:3100/api/health && break; sleep 1; done
-          BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether.cl node scripts/e2e.mjs
+          BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
           test "$(docker inspect -f '{{.Config.User}}' aether)" = "1001"
 
       - name: Registros del contenedor

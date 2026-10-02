@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adjuntarSesion, requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { adjuntarSesion, dbDeCuenta, requireUsuario } from "@/lib/auth";
 import { esquemaCambioPin } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { inicioPorRol, type Rol } from "@/lib/jwt";
@@ -10,7 +9,7 @@ import { PIN_INICIAL, hashPin, motivoPinDebil, verificarPin } from "@/lib/pin";
 export const POST = manejar(async (req: NextRequest) => {
   const u = await requireUsuario(req, undefined, { permitirCambioPendiente: true });
   const { pin_actual, pin_nuevo } = await leerJson(req, esquemaCambioPin);
-  const db = getDb();
+  const db = dbDeCuenta(u);
   const fila = db
     .prepare("SELECT pin_hash, bloqueado_hasta FROM usuarios WHERE id = ?")
     .get(u.id) as { pin_hash: string | null; bloqueado_hasta: string | null };
@@ -43,5 +42,5 @@ export const POST = manejar(async (req: NextRequest) => {
     )
     .get(hash, u.id) as { id: string; rol: Rol; version_sesion: number; debe_cambiar_pin: number };
 
-  return adjuntarSesion(NextResponse.json({ redirigir: inicioPorRol(act.rol) }), act);
+  return adjuntarSesion(NextResponse.json({ redirigir: inicioPorRol(act.rol) }), { ...act, empresa: u.empresa });
 });

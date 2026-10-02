@@ -81,18 +81,47 @@ export const esquemaGasto = z
     path: ["monto_item_clp"],
   });
 
+const emailNormalizado = z.string().trim().toLowerCase().pipe(z.email("Email inválido"));
+const listaIds = z.array(z.string().min(1)).max(20);
+
+/** Cuenta de una empresa: equipo o gerencia. Los supervisores (administradores) aplican al equipo. */
 export const esquemaUsuarioNuevo = z.object({
-  email: z.string().trim().toLowerCase().pipe(z.email("Email inválido")),
+  email: emailNormalizado,
   nombre: texto(80),
-  rol: z.enum(["team", "admin", "executive"]),
+  rol: z.enum(["team", "executive"]),
+  supervisores: listaIds.optional(),
 });
 
 export const esquemaUsuarioCambio = z.object({
   nombre: texto(80).optional(),
-  rol: z.enum(["team", "admin", "executive"]).optional(),
+  rol: z.enum(["team", "executive"]).optional(),
+  activo: z.boolean().optional(),
+  resetear_pin: z.literal(true).optional(),
+  supervisores: listaIds.optional(),
+});
+
+/** Administrador (jefatura intermedia): email de cualquier dominio, ve todas las empresas. */
+export const esquemaAdminNuevo = z.object({
+  email: emailNormalizado,
+  nombre: texto(80),
+});
+
+export const esquemaAdminCambio = z.object({
+  nombre: texto(80).optional(),
   activo: z.boolean().optional(),
   resetear_pin: z.literal(true).optional(),
 });
+
+export const esquemaValidacionGasto = z
+  .object({
+    estado: z.enum(["aprobado", "rechazado", "pendiente"]),
+    observacion: z.string().trim().max(300).optional().nullable(),
+    iva_clp: z.number().int().min(0).max(1_000_000_000).optional(),
+  })
+  .refine((v) => v.estado !== "rechazado" || !!v.observacion, {
+    message: "Indica el motivo del rechazo",
+    path: ["observacion"],
+  });
 
 const estadoProyecto = z.enum(["concepto", "prototipado", "pruebas", "entregado", "pausado"]);
 

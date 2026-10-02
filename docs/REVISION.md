@@ -77,6 +77,25 @@ Each finding lists the failure and what this codebase does instead. Severity:
 | D6 | `better-sqlite3` is a native addon | Built and run on the same base image (`node:22-bookworm-slim`) so the binary matches libc/arch; marked as server-external package. |
 | D7 | (Found while testing this build, not in the spec) Next 15.5 Node.js middleware on `/api/*` | Intermittent 500 on multipart receipt uploads ("Response body object should not be disturbed or locked"), ~1 in 3 test runs. Middleware now only matches pages; every route handler authenticates on its own. 5 consecutive clean runs after the change. |
 
-## 7. Not in this pass (scope "team flow + API first")
+## 7. Pass 2 — two companies and management dashboards
 
-`/exec` metrics, `/admin` standup matrix, 14-day capacity strip, finance validation desk, holiday editor. The schema and stored fields (`iva_clp`, `estado`, `bloqueo_resuelto_*`, `fecha_inicio`) are already in place for them. The 14-day capacity strip also needs a baseline (working hours per person) that the spec doesn't define.
+**Tenancy.** One SQLite file per company (`/data/empresas/<clave>/app.db` + its own `comprobantes/`) and a
+`control.db` for admins and supervision. The login email's domain selects the company; team and executive
+sessions carry that company and every query runs against its file, so cross-company reads aren't possible by
+construction (a gasto id from the other company simply doesn't exist in this DB → 404). Admins live in
+`control.db`, may use any email domain, and pick the company per request (`?empresa=`), validated server-side;
+for team and executive accounts that parameter is ignored. Emails are unique across admins and all companies.
+
+**Supervision.** Many-to-many (`control.db.supervision`: admin × company × member), set when creating a team
+account (defaults to the creator) and editable later; removing an admin removes their supervision rows. Standup,
+capacity and expense views filter by "my supervised" or "whole team".
+
+**Decisions taken here (change if needed):**
+- Admins don't keep a daily log (they have no account in a company DB). If you also want to log your own day,
+  create a separate team account with your company email.
+- Any admin can validate any expense of either company; validations store the admin's id and name.
+- Capacity baseline: workday 08:30–18:00 (env `JORNADA`); a partial absence subtracts its overlap with it.
+- Executive "cost per solution" excludes rejected expenses and includes pending ones (shown separately).
+- The IVA share uses net factura amounts vs gross boleta amounts (what each document shows).
+
+**Still open:** holiday editor (2026 Chilean holidays seeded in each company DB; add 2027 before January).

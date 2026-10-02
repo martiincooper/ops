@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { esquemaProyectoCambio } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const PATCH = manejar<Ctx>(async (req, { params }) => {
-  await requireUsuario(req, ["admin"]);
+  const { db } = await contexto(req, ["admin"]);
   const { id } = await params;
   const c = await leerJson(req, esquemaProyectoCambio);
-  const db = getDb();
   const p = db.prepare("SELECT fecha_inicio FROM proyectos WHERE id = ?").get(id) as
     | { fecha_inicio: string }
     | undefined;

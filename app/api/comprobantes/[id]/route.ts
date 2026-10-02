@@ -1,25 +1,25 @@
 import fs from "node:fs/promises";
 import { rutaAbsoluta } from "@/lib/archivos";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { HttpError, manejar } from "@/lib/http";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const dynamic = "force-dynamic";
 
-// Dueño del gasto, admin o gerencia. Para el resto responde 404 (no revela existencia).
+// Equipo: solo sus propios comprobantes. Gerencia: los de su empresa. Administradores: los de la empresa elegida.
+// Cada empresa tiene su base y su carpeta: un id de otra empresa simplemente no existe aquí (404).
 export const GET = manejar<Ctx>(async (req, { params }) => {
-  const u = await requireUsuario(req);
+  const { u, empresa, db } = await contexto(req);
   const { id } = await params;
-  const g = getDb()
+  const g = db
     .prepare("SELECT usuario_id, comprobante_archivo, comprobante_mime FROM gastos WHERE id = ?")
     .get(id) as { usuario_id: string; comprobante_archivo: string; comprobante_mime: string } | undefined;
   if (!g || (u.rol === "team" && g.usuario_id !== u.id)) throw new HttpError(404, "No encontrado");
 
   let datos: Buffer;
   try {
-    datos = await fs.readFile(rutaAbsoluta(g.comprobante_archivo));
+    datos = await fs.readFile(rutaAbsoluta(empresa.clave, g.comprobante_archivo));
   } catch {
     throw new HttpError(404, "Archivo no disponible");
   }

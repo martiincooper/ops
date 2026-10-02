@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { esquemaProyectoNuevo } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
 export const GET = manejar(async (req: NextRequest) => {
-  await requireUsuario(req, ["admin"]);
-  const proyectos = getDb()
+  const { db } = await contexto(req, ["admin"]);
+  const proyectos = db
     .prepare(
       `SELECT id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado
          FROM proyectos ORDER BY estado IN ('entregado', 'pausado'), codigo`,
@@ -19,9 +18,8 @@ export const GET = manejar(async (req: NextRequest) => {
 });
 
 export const POST = manejar(async (req: NextRequest) => {
-  await requireUsuario(req, ["admin"]);
+  const { db } = await contexto(req, ["admin"]);
   const p = await leerJson(req, esquemaProyectoNuevo);
-  const db = getDb();
   if (db.prepare("SELECT 1 FROM proyectos WHERE codigo = ?").get(p.codigo)) {
     throw new HttpError(409, `El código ${p.codigo} ya existe`);
   }

@@ -143,7 +143,7 @@ export default function Checkin({ inicial, nombre }: { inicial: EstadoDia; nombr
       {/* Cabecera */}
       <header className="mb-5 flex items-center justify-between border-b border-aether-border py-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-aether-muted">Aether Ops</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-aether-muted">{estado.empresa.nombre}</p>
           <p className="text-base font-bold text-white">Hola, {nombre.split(" ")[0]}</p>
         </div>
         <div className="flex items-center gap-2">

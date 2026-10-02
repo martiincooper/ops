@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { estadoDia } from "@/lib/dominio";
 import { HttpError, manejar } from "@/lib/http";
 import { ahoraIso, hoyLocal } from "@/lib/tiempo";
@@ -8,9 +7,8 @@ import { ahoraIso, hoyLocal } from "@/lib/tiempo";
 type Ctx = { params: Promise<{ id: string }> };
 
 export const DELETE = manejar<Ctx>(async (req, { params }) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
+  const { u, db, empresa } = await contexto(req, ["team"]);
   const { id } = await params;
-  const db = getDb();
   const a = db
     .prepare("SELECT fecha, dia_completo FROM ausencias_ooo WHERE id = ? AND usuario_id = ?")
     .get(id, u.id) as { fecha: string; dia_completo: number } | undefined;
@@ -28,5 +26,5 @@ export const DELETE = manejar<Ctx>(async (req, { params }) => {
     }
   })();
 
-  return NextResponse.json(estadoDia(db, u));
+  return NextResponse.json(estadoDia(db, u, empresa));
 });

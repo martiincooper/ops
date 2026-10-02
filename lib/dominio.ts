@@ -1,6 +1,7 @@
 import "server-only";
 import type { DB } from "./db";
 import type { Usuario } from "./auth";
+import type { Empresa } from "./empresas";
 import { calcularProgreso } from "./metricas";
 import { fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
 
@@ -45,6 +46,7 @@ export interface GastoResumen {
 export type Fase = "ooo_completo" | "pendiente_manana" | "pendiente_tarde" | "cerrado";
 
 export interface EstadoDia {
+  empresa: { clave: string; nombre: string };
   hoy: string;
   hoy_texto: string;
   fase: Fase;
@@ -113,7 +115,7 @@ export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoRe
     .all(usuarioId, limite) as GastoResumen[];
 }
 
-export function estadoDia(db: DB, u: Usuario): EstadoDia {
+export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
   const hoy = hoyLocal();
   const bitacora = bitacoraDe(db, u.id, hoy) ?? null;
   const tareas = bitacora ? tareasDe(db, bitacora.id) : [];
@@ -137,6 +139,7 @@ export function estadoDia(db: DB, u: Usuario): EstadoDia {
     .all(u.id) as { proyecto_id: string }[];
 
   return {
+    empresa: { clave: empresa.clave, nombre: empresa.nombre },
     hoy,
     hoy_texto: fechaLarga(hoy),
     fase,

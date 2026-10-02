@@ -1,7 +1,7 @@
 import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { DIR_COMPROBANTES } from "./db";
+import { dirComprobantes } from "./db";
 
 export const MAX_COMPROBANTE_BYTES = 10 * 1024 * 1024;
 
@@ -30,26 +30,27 @@ export function detectarTipo(b: Buffer): TipoArchivo | null {
   return null;
 }
 
-/** Guarda en comprobantes/AAAA/MM/<id>.<ext> y devuelve la ruta relativa. */
-export async function guardarComprobante(id: string, datos: Buffer, tipo: TipoArchivo): Promise<string> {
+/** Guarda en empresas/<clave>/comprobantes/AAAA/MM/<id>.<ext> y devuelve la ruta relativa. */
+export async function guardarComprobante(empresa: string, id: string, datos: Buffer, tipo: TipoArchivo): Promise<string> {
   const ahora = new Date();
   const rel = path.posix.join(
     String(ahora.getUTCFullYear()),
     String(ahora.getUTCMonth() + 1).padStart(2, "0"),
     `${id}.${tipo.ext}`,
   );
-  const abs = rutaAbsoluta(rel);
+  const abs = rutaAbsoluta(empresa, rel);
   await fs.mkdir(path.dirname(abs), { recursive: true });
   await fs.writeFile(abs, datos, { flag: "wx" });
   return rel;
 }
 
-export function rutaAbsoluta(rel: string): string {
-  const abs = path.resolve(DIR_COMPROBANTES, rel);
-  if (!abs.startsWith(DIR_COMPROBANTES + path.sep)) throw new Error("Ruta de comprobante fuera del directorio");
+export function rutaAbsoluta(empresa: string, rel: string): string {
+  const base = dirComprobantes(empresa);
+  const abs = path.resolve(base, rel);
+  if (!abs.startsWith(base + path.sep)) throw new Error("Ruta de comprobante fuera del directorio");
   return abs;
 }
 
-export async function borrarComprobante(rel: string) {
-  await fs.rm(rutaAbsoluta(rel), { force: true });
+export async function borrarComprobante(empresa: string, rel: string) {
+  await fs.rm(rutaAbsoluta(empresa, rel), { force: true });
 }

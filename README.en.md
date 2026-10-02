@@ -4,6 +4,17 @@ Daily log (morning objectives → afternoon close), out-of-office, purchase rece
 Single container: Next.js 15 standalone + SQLite (WAL). UI in Spanish.
 
 **Read first:** [`docs/REVISION.md`](docs/REVISION.md) — what was wrong in the original spec and what this code does instead.
+The Spanish [`README.md`](README.md) is the maintained one; this file is a summary.
+
+## Two companies, one site
+
+- The login email's domain picks the company and its database: `@aether-tech.dev` → Aether Tech,
+  `@datasheq.cl` → Datasheq (env `EMPRESAS`). Team and executive accounts only ever see their own company.
+- Admins (middle management) live in `control.db`, can have any email domain, and switch companies with a
+  selector in `/admin` (standup, 14-day capacity, expense validation, team with supervisors, projects, admins)
+  and `/exec`. The first admin is `ADMIN_EMAIL`; admins add other admins.
+- Supervision is many-to-many (admin ↔ team member, per company), set when creating an account and editable later.
+- Data: `/data/control.db`, `/data/empresas/<clave>/app.db` and `/data/empresas/<clave>/comprobantes/`.
 
 ## Scope of this version
 
@@ -30,13 +41,13 @@ Data goes to `./data` (`app.db` + `comprobantes/`). Delete the folder to start o
 
 ```bash
 npm run typecheck
-npm run test:logica               # timezone, streak, Say-Do, schema constraints, RUT, codes (16 tests)
+npm run test:logica               # timezone, streak, Say-Do, schema, companies, capacity, executive metrics, RUT, codes (20 tests)
 
-# end-to-end against a running server with an EMPTY data dir (40 tests)
+# end-to-end against a running server with an EMPTY data dir: two companies, isolation, supervision, dashboards (38 tests)
 npm run build
-DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether.cl JWT_SECRET=$(openssl rand -base64 48) \
+DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=$(openssl rand -hex 32) \
   COOKIE_SECURE=false PORT=3100 node .next/standalone/server.js &
-BASE=http://127.0.0.1:3100 npm run test:e2e
+BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 
 (For the standalone server outside Docker, copy `public/` and `.next/static/` into `.next/standalone/` first.)

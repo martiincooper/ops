@@ -2,8 +2,8 @@ import { ArrowLeft, CircleCheck, FileText, Flame, KeyRound, Plane } from "lucide
 import Link from "next/link";
 import Anillo from "@/components/Anillo";
 import BotonSalir from "@/components/BotonSalir";
-import { requirePagina } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { empresaDe, requirePagina } from "@/lib/auth";
+import { getDbEmpresa } from "@/lib/db";
 import { ausenciasDesde, gastosRecientes } from "@/lib/dominio";
 import { calcularProgreso, type DiaResumen } from "@/lib/metricas";
 import { fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
@@ -53,8 +53,9 @@ const ESTADO_GASTO = {
 } as const;
 
 export default async function MiProgreso() {
-  const u = await requirePagina(["team", "admin"]);
-  const db = getDb();
+  const u = await requirePagina(["team"]);
+  const empresa = empresaDe(u);
+  const db = getDbEmpresa(empresa.clave);
   const hoy = hoyLocal();
   const p = calcularProgreso(db, u.id, hoy, fechaLocal(u.creado_en));
   const gastos = gastosRecientes(db, u.id, 15);
@@ -66,7 +67,10 @@ export default async function MiProgreso() {
         <Link href="/checkin" className="flex items-center gap-1.5 text-xs text-slate-400">
           <ArrowLeft size={14} /> Mi jornada
         </Link>
-        <p className="text-sm font-bold text-white">Mi Progreso</p>
+        <div className="text-center">
+          <p className="text-sm font-bold text-white">Mi Progreso</p>
+          <p className="text-[10px] uppercase tracking-wider text-aether-muted">{empresa.nombre}</p>
+        </div>
         <BotonSalir conTexto={false} className="p-1.5" />
       </header>
 

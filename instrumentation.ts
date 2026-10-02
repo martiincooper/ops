@@ -5,6 +5,6 @@ export async function register() {
     console.error("[aether-ops] JWT_SECRET no definido o con menos de 32 caracteres. Genera uno con: openssl rand -hex 32");
     process.exit(1);
   }
-  const { getDb } = await import("./lib/db");
-  getDb();
+  const { abrirTodas } = await import("./lib/db");
+  abrirTodas();
 }

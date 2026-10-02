@@ -26,7 +26,7 @@ ENV NODE_ENV=production \
     TZ_NEGOCIO=America/Santiago
 
 RUN groupadd --system --gid 1001 aether && useradd --system --uid 1001 --gid aether --no-create-home aether \
-    && mkdir -p /data/comprobantes && chown -R 1001:1001 /data
+    && mkdir -p /data && chown -R 1001:1001 /data
 
 COPY --from=build --chown=1001:1001 /app/.next/standalone ./
 COPY --from=build --chown=1001:1001 /app/.next/static ./.next/static

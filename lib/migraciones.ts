@@ -1,15 +1,48 @@
-// Migraciones versionadas con PRAGMA user_version. Solo se agregan entradas al final.
+// Migraciones versionadas con PRAGMA user_version. Solo se agregan entradas al final de cada lista.
+//
+// Dos tipos de base:
+//  - control.db        → administradores (jefatura intermedia, email de cualquier dominio) y supervisión
+//  - empresas/<clave>  → una base por empresa: equipo, gerencia, proyectos, bitácoras, compras, ausencias
 
 const ISO_AHORA = "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))";
 
-export const MIGRACIONES: string[] = [
-  // v1 — esquema corregido (ver docs/REVISION.md §3)
+export const MIGRACIONES_CONTROL: string[] = [
+  `
+  CREATE TABLE usuarios (                            -- administradores; mismas columnas de acceso que en las empresas
+    id TEXT PRIMARY KEY,
+    nombre TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    rol TEXT NOT NULL DEFAULT 'admin' CHECK (rol = 'admin'),
+    activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1)),
+    pin_hash TEXT,
+    debe_cambiar_pin INTEGER NOT NULL DEFAULT 1 CHECK (debe_cambiar_pin IN (0, 1)),
+    version_sesion INTEGER NOT NULL DEFAULT 0,
+    intentos_fallidos INTEGER NOT NULL DEFAULT 0,
+    bloqueado_hasta TEXT,
+    ultimo_acceso TEXT,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+
+  -- Qué administrador supervisa a qué integrante (muchos a muchos; el integrante vive en la base de su empresa)
+  CREATE TABLE supervision (
+    admin_id TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    empresa TEXT NOT NULL,
+    usuario_id TEXT NOT NULL,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    PRIMARY KEY (admin_id, empresa, usuario_id)
+  );
+  CREATE INDEX idx_supervision_usuario ON supervision (empresa, usuario_id);
+  `,
+];
+
+export const MIGRACIONES_EMPRESA: string[] = [
+  // v1 — esquema corregido (ver docs/REVISION.md §3) + separación por empresa
   `
   CREATE TABLE usuarios (
     id TEXT PRIMARY KEY,
     nombre TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    rol TEXT NOT NULL CHECK (rol IN ('team', 'admin', 'executive')),
+    rol TEXT NOT NULL CHECK (rol IN ('team', 'executive')),
     avatar_url TEXT,
     activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1)),
     pin_hash TEXT,                                   -- NULL => código inicial (PIN_INICIAL)
@@ -42,7 +75,8 @@ export const MIGRACIONES: string[] = [
     checkout_tarde TEXT,                             -- ISO UTC
     bloqueos TEXT,
     bloqueo_resuelto_en TEXT,
-    bloqueo_resuelto_por TEXT REFERENCES usuarios(id),
+    bloqueo_resuelto_por TEXT,                       -- id del administrador (control.db)
+    bloqueo_resuelto_por_nombre TEXT,
     UNIQUE (usuario_id, fecha)
   );
 
@@ -76,7 +110,8 @@ export const MIGRACIONES: string[] = [
     comprobante_archivo TEXT NOT NULL,               -- nombre generado por el servidor
     comprobante_mime TEXT NOT NULL,
     estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'aprobado', 'rechazado')),
-    validado_por TEXT REFERENCES usuarios(id),
+    validado_por TEXT,                               -- id del administrador (control.db)
+    validado_por_nombre TEXT,
     validado_en TEXT,
     observacion TEXT,
     creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},

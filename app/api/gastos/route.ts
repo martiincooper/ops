@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { MAX_COMPROBANTE_BYTES, borrarComprobante, detectarTipo, guardarComprobante } from "@/lib/archivos";
-import { requireUsuario } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { contexto } from "@/lib/auth";
 import { bitacoraDe, gastosRecientes, ivaRecuperable, proyectosActivos } from "@/lib/dominio";
 import { esquemaGasto } from "@/lib/esquemas";
 import { HttpError, manejar } from "@/lib/http";
@@ -12,12 +11,12 @@ import { hoyLocal } from "@/lib/tiempo";
 export const dynamic = "force-dynamic";
 
 export const GET = manejar(async (req: NextRequest) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
-  return NextResponse.json({ gastos: gastosRecientes(getDb(), u.id) });
+  const { u, db, empresa } = await contexto(req, ["team"]);
+  return NextResponse.json({ gastos: gastosRecientes(db, u.id) });
 });
 
 export const POST = manejar(async (req: NextRequest) => {
-  const u = await requireUsuario(req, ["team", "admin"]);
+  const { u, db, empresa } = await contexto(req, ["team"]);
 
   const largo = Number(req.headers.get("content-length") ?? 0);
   if (largo > MAX_COMPROBANTE_BYTES + 256 * 1024) throw new HttpError(413, "El comprobante supera 10 MB");
@@ -60,8 +59,6 @@ export const POST = manejar(async (req: NextRequest) => {
   const datos = Buffer.from(await archivo.arrayBuffer());
   const tipo = detectarTipo(datos);
   if (!tipo) throw new HttpError(415, "Formato no admitido: usa JPG, PNG, WEBP, HEIC o PDF");
-
-  const db = getDb();
   if (!proyectosActivos(db).some((p) => p.id === g.proyecto_id)) {
     throw new HttpError(400, "Proyecto inexistente o no activo");
   }
@@ -75,7 +72,7 @@ export const POST = manejar(async (req: NextRequest) => {
   }
 
   const id = randomUUID();
-  const rel = await guardarComprobante(id, datos, tipo);
+  const rel = await guardarComprobante(empresa.clave, id, datos, tipo);
   try {
     db.prepare(
       `INSERT INTO gastos (id, usuario_id, proyecto_id, bitacora_id, fecha_documento, item,
@@ -99,7 +96,7 @@ export const POST = manejar(async (req: NextRequest) => {
       tipo.mime,
     );
   } catch (e) {
-    await borrarComprobante(rel);
+    await borrarComprobante(empresa.clave, rel);
     if ((e as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE") {
       throw new HttpError(409, "Ese documento ya fue rendido");
     }
