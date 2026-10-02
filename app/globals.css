@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/* Tokens del sistema de diseño (Tailwind v4: CSS-first). Uso: bg-aether-bg, text-aether-success, etc. */
+@theme {
+  --color-aether-bg: #090a0f;
+  --color-aether-card: #12141c;
+  --color-aether-border: #1f2433;
+  --color-aether-accent: #4f46e5;
+  --color-aether-accent-soft: #818cf8;
+  --color-aether-success: #10b981;
+  --color-aether-warning: #f59e0b;
+  --color-aether-danger: #ef4444;
+  --color-aether-muted: #64748b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --animate-subir: subir 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-temblor: temblor 380ms ease-in-out;
+  --animate-aparecer: aparecer 180ms ease-out;
+
+  @keyframes subir {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @keyframes temblor {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-10px); }
+    40% { transform: translateX(9px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(4px); }
+  }
+  @keyframes aparecer {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--color-aether-bg);
+    color: #e2e8f0;
+  }
+  /* iOS Safari hace zoom al enfocar campos < 16px */
+  input, select, textarea {
+    font-size: 16px;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.7);
+  }
+}
+
+@layer components {
+  .campo {
+    @apply w-full rounded-lg border border-aether-border bg-aether-bg px-3 py-2.5 text-white placeholder-slate-600 outline-none transition-colors focus:border-aether-accent-soft;
+  }
+  .etiqueta {
+    @apply mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-400;
+  }
+  .tarjeta {
+    @apply rounded-2xl border border-aether-border bg-aether-card;
+  }
+  .boton-primario {
+    @apply flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-aether-accent to-[#4338ca] py-3.5 text-sm font-bold text-white shadow-lg transition-all active:scale-[0.99] disabled:opacity-50;
+  }
+  .segmento {
+    @apply flex-1 rounded-lg border py-2 text-xs font-semibold transition-colors;
+  }
+  .segmento-activo {
+    @apply border-aether-accent bg-aether-accent text-white;
+  }
+  .segmento-inactivo {
+    @apply border-aether-border text-slate-400;
+  }
+}

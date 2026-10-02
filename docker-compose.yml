@@ -1,0 +1,25 @@
+# docker compose up -d --build      (variables en .env — ver .env.example)
+services:
+  aether-ops:
+    build: .
+    # O usar la imagen publicada por GitHub Actions:
+    # image: ghcr.io/<tu-usuario>/aether-ops:latest
+    image: aether-ops:latest
+    container_name: aether-ops
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"   # solo loopback: el acceso público pasa por el proxy TLS
+    volumes:
+      # Por defecto un volumen de Docker (funciona igual en Mac, Windows y Linux).
+      # En el servidor: AETHER_DATA=/var/lib/aether-ops en .env (antes: chown -R 1001:1001 /var/lib/aether-ops)
+      - ${AETHER_DATA:-aether-data}:/data
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env (openssl rand -hex 32)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Define ADMIN_EMAIL en .env}
+      ADMIN_NOMBRE: ${ADMIN_NOMBRE:-Administrador}
+      PIN_INICIAL: ${PIN_INICIAL:-000000}
+      TZ_NEGOCIO: ${TZ_NEGOCIO:-America/Santiago}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+
+volumes:
+  aether-data:
