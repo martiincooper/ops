@@ -1,9 +1,15 @@
 "use client";
 
-import { AlertTriangle, LoaderCircle, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { api, clp, miles } from "@/lib/cliente";
+import { AlertTriangle, History, LoaderCircle, Trash2 } from "lucide-react";
+import { Fragment, useState } from "react";
+import { api, clp, cx, miles } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, useAccion, useDatos, type EmpresaPublica } from "./comun";
+
+interface Etapa {
+  id: number;
+  estado: Proyecto["estado"];
+  desde: string;
+}
 
 interface Proyecto {
   id: string;
@@ -13,14 +19,86 @@ interface Proyecto {
   fecha_inicio: string;
   fecha_entrega_objetivo: string;
   estado: "concepto" | "prototipado" | "pruebas" | "entregado" | "pausado";
+  etapas: Etapa[];
 }
 
 const ESTADOS: Proyecto["estado"][] = ["concepto", "prototipado", "pruebas", "entregado", "pausado"];
+const NOMBRE: Record<Proyecto["estado"], string> = {
+  concepto: "Concepto",
+  prototipado: "Prototipado",
+  pruebas: "Pruebas",
+  entregado: "Entregado",
+  pausado: "En pausa",
+};
+
+/** Historial de etapas: corrige la fecha en que el proyecto entró a cada etapa (p. ej. la entrega real). */
+function EditorEtapas({ p, empresa, hoy, onGuardado, onCerrar }: { p: Proyecto; empresa: string; hoy: string; onGuardado: (texto: string) => void; onCerrar: () => void }) {
+  const [fechas, setFechas] = useState(p.etapas.map((e) => e.desde));
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function guardar() {
+    setError(null);
+    setOcupado(true);
+    try {
+      await api(conEmpresa(`/api/admin/proyectos/${p.id}/etapas`, empresa), {
+        method: "PUT",
+        json: { etapas: p.etapas.map((e, i) => ({ id: e.id, desde: fechas[i] })) },
+      });
+      onGuardado(`${p.codigo}: fechas de etapas actualizadas.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-suave p-4">
+      <p className="text-sm font-semibold text-tinta">Etapas de {p.codigo}</p>
+      <p className="mt-0.5 text-xs text-tinta-3">
+        Se registran solas al cambiar el estado. Corrige aquí la fecha en que empezó cada etapa (por ejemplo, la fecha real de entrega de un
+        proyecto antiguo). La primera fecha es el inicio del proyecto.
+      </p>
+      {p.etapas.length === 0 ? (
+        <p className="mt-3 text-sm text-tinta-3">Sin historial.</p>
+      ) : (
+        <ol className="mt-3 flex flex-wrap gap-3">
+          {p.etapas.map((e, i) => (
+            <li key={e.id} className="rounded-2xl bg-superficie p-3">
+              <label htmlFor={`et-${e.id}`} className="mb-1 block text-xs font-semibold text-tinta-2">
+                {i + 1}. {NOMBRE[e.estado]} desde
+              </label>
+              <input
+                id={`et-${e.id}`}
+                type="date"
+                max={i === 0 ? undefined : hoy}
+                value={fechas[i]}
+                onChange={(ev) => setFechas((f) => f.map((x, j) => (j === i ? ev.target.value : x)))}
+                className="campo py-2 text-sm"
+              />
+            </li>
+          ))}
+        </ol>
+      )}
+      {error && <p className="mt-3 rounded-2xl bg-error-fondo px-4 py-2 text-sm text-error-tinta">{error}</p>}
+      <div className="mt-3 flex items-center gap-2">
+        {p.etapas.length > 0 && (
+          <button type="button" onClick={guardar} disabled={ocupado} className="boton">
+            {ocupado && <LoaderCircle size={14} className="animate-spin" />} Guardar fechas
+          </button>
+        )}
+        <button type="button" onClick={onCerrar} className="boton-texto">Cerrar</button>
+      </div>
+    </div>
+  );
+}
 
 export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; hoy: string }) {
   const { datos, error, cargando, recargar } = useDatos<{ proyectos: Proyecto[] }>(conEmpresa("/api/admin/proyectos", empresa.clave));
   const { ocupado, aviso, ejecutar } = useAccion();
   const [confirmar, setConfirmar] = useState<string | null>(null);
+  const [etapas, setEtapas] = useState<string | null>(null);
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
   const [presupuesto, setPresupuesto] = useState("");
@@ -71,7 +149,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
           <input id="p-inicio" type="date" required value={inicio} onChange={(e) => setInicio(e.target.value)} className="campo text-sm" />
         </div>
         <div>
-          <label htmlFor="p-entrega" className="etiqueta">Entrega objetivo</label>
+          <label htmlFor="p-entrega" className="etiqueta">Entrega estimada</label>
           <input id="p-entrega" type="date" required min={inicio} value={entrega} onChange={(e) => setEntrega(e.target.value)} className="campo text-sm" />
         </div>
         <button type="submit" disabled={ocupado !== null} className="boton h-[50px] px-5">
@@ -90,7 +168,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                 <th>Nombre</th>
                 <th className="text-right">Costo estimado BOM</th>
                 <th>Inicio</th>
-                <th>Entrega objetivo</th>
+                <th>Entrega estimada</th>
                 <th>Estado</th>
                 <th />
               </tr>
@@ -104,7 +182,8 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                 </tr>
               )}
               {proyectos.map((p) => (
-                <tr key={p.id}>
+                <Fragment key={p.id}>
+                <tr>
                   <td className="font-mono font-semibold text-indigo-tinta">{p.codigo}</td>
                   <td className="font-medium text-tinta">{p.nombre}</td>
                   <td className="text-right text-tinta-2">{clp(p.presupuesto_clp)}</td>
@@ -136,8 +215,24 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                     >
                       {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
+                    {p.etapas.length > 0 && (
+                      <span className="mt-1 block pl-3 text-xs text-tinta-3">desde {p.etapas[p.etapas.length - 1].desde}</span>
+                    )}
                   </td>
-                  <td className="text-right">
+                  <td className="whitespace-nowrap text-right">
+                    <button
+                      type="button"
+                      aria-expanded={etapas === p.id}
+                      aria-label={`Etapas de ${p.codigo}`}
+                      title="Historial de etapas"
+                      onClick={() => setEtapas(etapas === p.id ? null : p.id)}
+                      className={cx(
+                        "mr-1 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                        etapas === p.id ? "bg-indigo-suave text-indigo-tinta" : "text-tinta-2 hover:bg-suave",
+                      )}
+                    >
+                      <History size={13} /> Etapas
+                    </button>
                     {confirmar === p.id ? (
                       <button
                         type="button"
@@ -171,6 +266,26 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                     )}
                   </td>
                 </tr>
+                {etapas === p.id && (
+                  <tr>
+                    <td colSpan={7}>
+                      <EditorEtapas
+                        key={p.etapas.map((e) => e.id + e.desde).join()}
+                        p={p}
+                        empresa={empresa.clave}
+                        hoy={hoy}
+                        onCerrar={() => setEtapas(null)}
+                        onGuardado={async (texto) => {
+                          await ejecutar(p.id, async () => {
+                            await recargar();
+                            return texto;
+                          });
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

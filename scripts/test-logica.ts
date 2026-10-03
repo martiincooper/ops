@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
 import { esquemaGasto } from "../lib/esquemas";
+import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { repartirMonto } from "../lib/reparto";
 import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
@@ -191,55 +192,92 @@ async function main() {
     const filas = gastosEmpresa(d, { estado: "todos" });
     assert.deepEqual(filas.find((f) => f.id === "g2")!.proyectos.map((p) => [p.codigo, p.monto_clp]), [["AETH-01", 45001], ["AETH-02", 45000]]);
   });
-  await prueba("gerencia · plazo: atrasado fuera de meta; pausados y entregados no cuentan", () => {
+  await prueba("gerencia · concepto → cliente: vs fecha estimada; pausados y entregados no cuentan", () => {
     const d = dbNueva(); // p1 vence 31-dic: en plazo
     d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p2','A2','x',1,'2026-08-01','2026-09-25','pruebas')").run();
     d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p3','A3','x',1,'2026-08-01','2026-10-10','prototipado')").run();
     d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p4','A4','x',1,'2026-07-01','2026-09-01','pausado')").run();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p5','A5','x',1,'2026-06-01','2026-08-01','entregado')").run();
     const m = metricasExec(d, hoy);
-    assert.deepEqual([m.plazo.activos, m.plazo.en_plazo, m.plazo.atrasados, m.plazo.por_vencer, m.plazo.estado], [3, 2, 1, 1, "fuera"]);
-    assert.deepEqual(m.plazo.proyectos.map((p) => p.situacion), ["atrasado", "por_vencer", "en_plazo", "pausado"]);
-    const p1 = m.plazo.proyectos.find((p) => p.id === "p1")!;
-    assert.equal(p1.dias_comprometidos, 121); // 1-sep → 31-dic
-    assert.equal(p1.dias_transcurridos, 30);
+    assert.deepEqual([m.tiempo.en_desarrollo, m.tiempo.en_plazo, m.tiempo.atrasados, m.tiempo.por_vencer, m.tiempo.estado], [3, 2, 1, 1, "fuera"]);
+    assert.deepEqual(m.tiempo.proyectos.map((p) => [p.id, p.situacion]), [["p2", "atrasado"], ["p3", "por_vencer"], ["p1", "en_plazo"]]);
+    const p1 = m.tiempo.proyectos.find((p) => p.id === "p1")!;
+    assert.deepEqual([p1.dias_estimados, p1.dias_transcurridos, p1.dias_restantes], [121, 30, 91]); // 1-sep → 31-dic
+    assert.ok(!m.costo.proyectos.some((p) => p.id === "p5"), "entregado fuera del costo");
+    assert.deepEqual(m.pipeline.pausados.map((p) => p.id), ["p4"]);
+    assert.deepEqual(m.entregados.map((p) => p.id), ["p5"]);
     d.prepare("UPDATE proyectos SET estado = 'entregado' WHERE id = 'p2'").run();
-    assert.equal(metricasExec(d, hoy).plazo.estado, "en_meta");
+    assert.equal(metricasExec(d, hoy).tiempo.estado, "en_meta");
   });
-  await prueba("gerencia · objetivos diarios: 14 días vs 14 anteriores, meta y estado", () => {
-    const d = dbNueva();
-    bitacora(d, "2026-09-10", "cp", "2026-09-10T20:00:00Z"); //   anterior: 1/2 = 50 %
-    bitacora(d, "2026-09-22", "cccp", "2026-09-22T20:00:00Z"); // actual
-    bitacora(d, "2026-09-29", "ccc", "2026-09-29T20:00:00Z"); //  actual: 6/7 = 86 %
-    bitacora(d, hoy, "pp", null); //                             en curso: no cuenta
-    let m = metricasExec(d, hoy);
-    assert.deepEqual([m.equipo.completadas, m.equipo.comprometidas, m.equipo.pct, m.equipo.pct_anterior], [6, 7, 86, 50]);
-    assert.deepEqual([m.equipo.jornadas, m.equipo.personas_con_jornadas, m.equipo.personas, m.equipo.estado], [2, 1, 1, "en_meta"]);
-    m = metricasExec(d, hoy, { ...m.metas, objetivos_diarios_pct: 90 });
-    assert.equal(m.equipo.estado, "en_riesgo"); // 86 ≥ 90 − 10
-    m = metricasExec(d, hoy, { ...m.metas, objetivos_diarios_pct: 100 });
-    assert.equal(m.equipo.estado, "fuera");
+  await prueba("historial de etapas: días por etapa, días en la etapa actual, corrección el mismo día", () => {
+    const d = dbNueva(); // p1: inicio 1-sep, sin historial → concepto desde el inicio
+    let p1 = metricasExec(d, hoy).tiempo.proyectos[0];
+    assert.deepEqual([p1.estado, p1.etapa_desde, p1.dias_en_etapa], ["concepto", "2026-09-01", 30]);
+    const proyecto = () => d.prepare("SELECT id, estado, fecha_inicio FROM proyectos WHERE id = 'p1'").get() as { id: string; estado: string; fecha_inicio: string };
+    const cambiar = (estado: EstadoProyecto, fecha: string) =>
+      d.transaction(() => {
+        registrarCambioEtapa(d, proyecto(), estado, fecha);
+        d.prepare("UPDATE proyectos SET estado = ? WHERE id = 'p1'").run(estado);
+      })();
+    cambiar("prototipado", "2026-09-11");
+    cambiar("pausado", "2026-09-21");
+    cambiar("prototipado", "2026-09-26");
+    p1 = metricasExec(d, hoy).tiempo.proyectos[0];
+    assert.deepEqual(p1.dias_por_etapa, { concepto: 10, prototipado: 15, pruebas: 0, pausado: 5 });
+    assert.deepEqual([p1.estado, p1.etapa_desde, p1.dias_en_etapa], ["prototipado", "2026-09-26", 5]);
+    // mismo día: se corrige el tramo en vez de agregar uno de 0 días; volver al estado previo lo fusiona
+    cambiar("pruebas", "2026-10-01");
+    cambiar("entregado", "2026-10-01");
+    let h = (leerEtapas(d, "p1").get("p1") ?? []).map((f) => [f.estado, f.desde]);
+    assert.deepEqual(h.slice(-1), [["entregado", "2026-10-01"]]);
+    assert.equal(h.length, 5);
+    cambiar("prototipado", "2026-10-01");
+    h = (leerEtapas(d, "p1").get("p1") ?? []).map((f) => [f.estado, f.desde]);
+    assert.deepEqual(h, [["concepto", "2026-09-01"], ["prototipado", "2026-09-11"], ["pausado", "2026-09-21"], ["prototipado", "2026-09-26"]]);
   });
-  await prueba("gerencia · bloqueos: abiertos, vencidos según la meta de días, resueltos fuera", () => {
-    const d = dbNueva();
-    bitacora(d, "2026-09-25", "c", "2026-09-25T20:00:00Z");
-    bitacora(d, "2026-09-30", "c", "2026-09-30T20:00:00Z");
-    d.prepare("UPDATE bitacoras SET bloqueos = 'Falta stock' WHERE fecha = '2026-09-25'").run();
-    d.prepare("UPDATE bitacoras SET bloqueos = 'Aduana' WHERE fecha = '2026-09-30'").run();
-    let m = metricasExec(d, hoy);
-    assert.deepEqual([m.bloqueos.abiertos, m.bloqueos.vencidos, m.bloqueos.estado], [2, 1, "fuera"]); // 6 días > 3
-    assert.deepEqual(m.bloqueos.lista.map((b) => [b.texto, b.dias, b.proyectos]), [["Falta stock", 6, ["AETH-01"]], ["Aduana", 1, ["AETH-01"]]]);
-    assert.equal(m.bloqueos.nuevos_periodo, 2);
-    d.prepare("UPDATE bitacoras SET bloqueo_resuelto_en = 'x' WHERE fecha = '2026-09-25'").run();
-    m = metricasExec(d, hoy);
-    assert.deepEqual([m.bloqueos.abiertos, m.bloqueos.vencidos, m.bloqueos.estado], [1, 0, "en_riesgo"]);
+  await prueba("pipeline: por etapa, aviso cuando una etapa supera el umbral; entregados y pausados fuera", () => {
+    const d = dbNueva(); // p1 en concepto
+    const ins = d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES (?, ?, 'x', 1, '2026-09-01', '2026-12-31', ?)");
+    for (let i = 0; i <= AVISO_PROYECTOS_POR_ETAPA; i++) ins.run(`q${i}`, `PROTO-${i}`, "prototipado");
+    ins.run("e1", "ENT-1", "entregado");
+    ins.run("z1", "PAUSA-1", "pausado");
+    const m = metricasExec(d, hoy);
+    assert.deepEqual(m.pipeline.etapas.map((e) => [e.estado, e.proyectos.length, e.saturada]), [
+      ["concepto", 1, false],
+      ["prototipado", AVISO_PROYECTOS_POR_ETAPA + 1, true],
+      ["pruebas", 0, false],
+    ]);
+    assert.deepEqual(m.pipeline.saturadas, ["prototipado"]);
+    assert.equal(m.pipeline.en_desarrollo, AVISO_PROYECTOS_POR_ETAPA + 2);
+    d.prepare("UPDATE proyectos SET estado = 'pruebas' WHERE id = 'q0'").run();
+    assert.deepEqual(metricasExec(d, hoy).pipeline.saturadas, []); // exactamente el umbral: sin aviso
   });
-  await prueba("metas: por defecto, guardadas por empresa, validadas", () => {
+  await prueba("entregados: concepto → cliente real, entrega vs estimada y costo final vs BOM", () => {
+    const d = dbNueva(); // p1: inicio 1-sep, estimada 31-dic, BOM 1.000.000
+    const et = d.prepare("INSERT INTO proyecto_etapas (proyecto_id, estado, desde) VALUES ('p1', ?, ?)");
+    et.run("concepto", "2026-09-01"); et.run("prototipado", "2026-09-05"); et.run("pruebas", "2026-09-20"); et.run("entregado", "2026-09-28");
+    d.prepare("UPDATE proyectos SET estado = 'entregado' WHERE id = 'p1'").run();
+    d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, estado) VALUES ('g1','u1','x',1080000,'aprobado')").run();
+    d.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES ('g1','p1',1080000)").run();
+    let e = metricasExec(d, hoy).entregados[0];
+    assert.deepEqual([e.fecha_entregado, e.dias_concepto_cliente, e.dias_estimados, e.desvio_dias, e.plazo], ["2026-09-28", 27, 121, -94, "en_meta"]);
+    assert.deepEqual(e.dias_por_etapa, { concepto: 4, prototipado: 15, pruebas: 8, pausado: 0 });
+    assert.deepEqual([e.costo_clp, e.pct_costo, e.situacion_costo, e.costo, e.compras], [1080000, 108, "en_riesgo", "en_riesgo", 1]);
+    d.prepare("UPDATE proyectos SET fecha_entrega_objetivo = '2026-09-20' WHERE id = 'p1'").run();
+    e = metricasExec(d, hoy).entregados[0];
+    assert.deepEqual([e.desvio_dias, e.plazo], [8, "fuera"]);
+    const m = metricasExec(d, hoy);
+    assert.equal(m.tiempo.en_desarrollo, 0);
+    assert.equal(m.costo.proyectos.length, 0);
+  });
+  await prueba("metas: solo la tolerancia de costo, guardada por empresa; claves antiguas se ignoran", () => {
     const d = dbNueva();
     assert.deepEqual(leerMetas(d), METAS_DEFECTO);
-    guardarMetas(d, { tolerancia_costo_pct: 15, objetivos_diarios_pct: 85, bloqueo_max_dias: 2 }, "Martin");
-    assert.deepEqual(leerMetas(d), { tolerancia_costo_pct: 15, objetivos_diarios_pct: 85, bloqueo_max_dias: 2 });
-    assert.equal(metricasExec(d, hoy).metas.objetivos_diarios_pct, 85);
-    assert.equal(esquemaMetas.safeParse({ tolerancia_costo_pct: 10, objetivos_diarios_pct: 40, bloqueo_max_dias: 3 }).success, false);
+    d.prepare("INSERT INTO metas (clave, valor) VALUES ('objetivos_diarios_pct', 85)").run();
+    guardarMetas(d, { tolerancia_costo_pct: 15 }, "Martin");
+    assert.deepEqual(leerMetas(d), { tolerancia_costo_pct: 15 });
+    assert.equal(metricasExec(d, hoy).metas.tolerancia_costo_pct, 15);
+    assert.equal(esquemaMetas.safeParse({ tolerancia_costo_pct: 120 }).success, false);
   });
   await prueba("standup: bloqueo sin resolver va primero; resuelto deja de contar", () => {
     const d = dbNueva();
@@ -311,6 +349,26 @@ async function main() {
     assert.equal(esquemaGasto.safeParse({ ...base, envio_clp: -1 }).success, false);
     assert.equal(esquemaGasto.safeParse({ ...base, envio_clp: 2.5 }).success, false);
     assert.equal(esquemaGasto.safeParse({ ...base, monto_clp: 1_000_000_000, envio_clp: 1 }).success, false);
+  });
+
+  console.log("Migración v4 → v5 (historial de etapas)");
+  await prueba("proyectos existentes: concepto desde su inicio y su estado actual desde hoy", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_EMPRESA.slice(0, 4).forEach((m) => d.exec(m));
+    const ins = d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES (?, ?, 'x', 1, ?, '2027-12-31', ?)");
+    ins.run("a", "A", "2026-08-01", "concepto");
+    ins.run("b", "B", "2026-07-01", "pruebas");
+    ins.run("c", "C", "2027-01-15", "prototipado"); // inicio futuro: no antes del inicio
+    d.exec(MIGRACIONES_EMPRESA[4]);
+    const h = leerEtapas(d);
+    assert.deepEqual(h.get("a")!.map((f) => [f.estado, f.desde]), [["concepto", "2026-08-01"]]);
+    const b = h.get("b")!.map((f) => f.estado);
+    assert.deepEqual(b, ["concepto", "pruebas"]);
+    assert.ok(h.get("b")![1].desde >= "2026-07-01");
+    assert.deepEqual(h.get("c")!.map((f) => [f.estado, f.desde]), [["concepto", "2027-01-15"], ["prototipado", "2027-01-15"]]);
+    d.prepare("DELETE FROM proyectos WHERE id = 'a'").run(); // en cascada
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM proyecto_etapas WHERE proyecto_id = 'a'").get() as { n: number }).n, 0);
   });
 
   console.log("Códigos");

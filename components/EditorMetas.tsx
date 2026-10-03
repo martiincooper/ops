@@ -8,11 +8,12 @@ import { ErrorApi, api } from "@/lib/cliente";
 
 const CAMPOS: { clave: keyof Metas; etiqueta: string; sufijo: string; min: number; max: number }[] = [
   { clave: "tolerancia_costo_pct", etiqueta: "Tolerancia de costo sobre la estimación BOM", sufijo: "%", min: 0, max: 100 },
-  { clave: "objetivos_diarios_pct", etiqueta: "Meta de objetivos diarios logrados (14 días)", sufijo: "%", min: 50, max: 100 },
-  { clave: "bloqueo_max_dias", etiqueta: "Días máximos de un bloqueo sin resolver", sufijo: "días", min: 1, max: 30 },
 ];
 
-/** Metas de los indicadores de gerencia (solo administradores, por empresa). */
+/**
+ * Meta editable de gerencia (solo administradores, por empresa): la tolerancia de costo. El plazo se mide contra la
+ * fecha estimada de cada proyecto y el costo contra su estimación BOM, ambos registrados al crear el proyecto.
+ */
 export default function EditorMetas({ empresa, metas, defecto }: { empresa: string; metas: Metas; defecto: Metas }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
@@ -30,7 +31,7 @@ export default function EditorMetas({ empresa, metas, defecto }: { empresa: stri
         method: "PUT",
         json: Object.fromEntries(CAMPOS.map((c) => [c.clave, Number(valores[c.clave])])),
       });
-      setAviso({ ok: true, texto: "Metas guardadas." });
+      setAviso({ ok: true, texto: "Tolerancia guardada." });
       router.refresh();
     } catch (e) {
       setAviso({ ok: false, texto: e instanceof ErrorApi ? e.message : "No se pudo guardar." });
@@ -46,13 +47,15 @@ export default function EditorMetas({ empresa, metas, defecto }: { empresa: stri
           <Target size={20} />
         </span>
         <span className="flex-1">
-          <span className="block text-base font-semibold text-tinta">Metas de los indicadores</span>
-          <span className="block text-sm text-tinta-3">Las define la jefatura para esta empresa; gerencia las ve en cada indicador.</span>
+          <span className="block text-base font-semibold text-tinta">Tolerancia de costo</span>
+          <span className="block text-sm text-tinta-3">
+            Cuánto puede pasarse un proyecto de su estimación BOM antes de quedar «fuera de meta». La define la jefatura para esta empresa.
+          </span>
         </span>
         <span className="boton-suave">{abierto ? "Cerrar" : "Editar"}</span>
       </button>
       {abierto && (
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,28rem)_1fr] md:items-end">
           {CAMPOS.map((c) => (
             <div key={c.clave} className="rounded-2xl bg-suave p-4">
               <label htmlFor={`meta-${c.clave}`} className="etiqueta">
@@ -75,9 +78,9 @@ export default function EditorMetas({ empresa, metas, defecto }: { empresa: stri
               </div>
             </div>
           ))}
-          <div className="flex flex-wrap items-center gap-3 md:col-span-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button type="button" onClick={guardar} disabled={ocupado} className="boton px-6 py-2.5">
-              {ocupado && <LoaderCircle size={16} className="animate-spin" />} Guardar metas
+              {ocupado && <LoaderCircle size={16} className="animate-spin" />} Guardar
             </button>
             {aviso && (
               <p className={`rounded-full px-4 py-2 text-sm ${aviso.ok ? "bg-ok-fondo text-ok-tinta" : "bg-error-fondo text-error-tinta"}`}>{aviso.texto}</p>

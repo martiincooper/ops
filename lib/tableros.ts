@@ -1,6 +1,18 @@
 // Cálculos de los tableros de jefatura (/admin) y gerencia (/exec). Reciben la base de UNA empresa.
 // Sin "server-only" para poder probarlos con tsx.
 import type Database from "better-sqlite3";
+import {
+  AVISO_PROYECTOS_POR_ETAPA,
+  type DiasPorEtapa,
+  ETAPAS_DESARROLLO,
+  type EstadoProyecto,
+  type EtapaDesarrollo,
+  NOMBRE_ESTADO,
+  diasEntre,
+  diasPorEtapa,
+  leerEtapas,
+  tramos,
+} from "./etapas";
 import { calcularProgreso, porcentaje } from "./metricas";
 import { type Metas, leerMetas } from "./metas";
 import { esFinDeSemana, fechaLocal, sumarDias } from "./tiempo";
@@ -223,24 +235,13 @@ export function gastosEmpresa(
 
 // ───────────────────────── Gerencia ─────────────────────────
 //
-// Cuatro indicadores SMART, en el orden en que le importan a la gerencia: plazo, costo, ejecución del
-// equipo y bloqueos. Cada uno con meta (definida por la jefatura, ver lib/metas.ts), periodo y estado.
+// Tres focos: costo (vs la estimación BOM), tiempo de concepto a cliente (vs la fecha estimada de entrega que
+// registra la jefatura al crear el proyecto) y el pipeline de desarrollo por etapa, con un aviso cuando una etapa
+// acumula demasiados proyectos. Los proyectos entregados no entran en los indicadores: se listan aparte, cada uno
+// con sus propios indicadores (tiempo real de concepto a cliente, entrega vs fecha estimada, costo final vs BOM).
 
 export type EstadoKpi = "en_meta" | "en_riesgo" | "fuera" | "sin_datos";
-
-export interface ProyectoPlazo {
-  id: string;
-  codigo: string;
-  nombre: string;
-  estado: string;
-  fecha_inicio: string;
-  fecha_entrega_objetivo: string;
-  dias_transcurridos: number;
-  dias_comprometidos: number;
-  dias_restantes: number;
-  pct_plazo: number;
-  situacion: "atrasado" | "por_vencer" | "en_plazo" | "pausado" | "entregado";
-}
+export type SituacionCosto = "dentro" | "en_riesgo" | "fuera" | "sin_estimacion";
 
 export interface ProyectoCosto {
   id: string;
@@ -252,14 +253,64 @@ export interface ProyectoCosto {
   por_validar_clp: number;
   compras: number;
   pct: number | null; // costo acumulado / estimación
-  situacion: "dentro" | "en_riesgo" | "fuera" | "sin_estimacion";
+  situacion: SituacionCosto;
+}
+
+/** Proyecto no entregado (en desarrollo o en pausa). */
+export interface ProyectoEnCurso {
+  id: string;
+  codigo: string;
+  nombre: string;
+  estado: EtapaDesarrollo | "pausado";
+  fecha_inicio: string;
+  fecha_entrega_estimada: string;
+  dias_transcurridos: number; // inicio → hoy
+  dias_estimados: number; // inicio → entrega estimada
+  dias_restantes: number; // hoy → entrega estimada (negativo = atraso)
+  pct_plazo: number;
+  situacion: "atrasado" | "por_vencer" | "en_plazo" | "pausado";
+  etapa_desde: string;
+  dias_en_etapa: number;
+  dias_por_etapa: DiasPorEtapa;
+  estimado_clp: number;
+  costo_clp: number;
+  pct_costo: number | null;
+  situacion_costo: SituacionCosto;
+}
+
+export interface ProyectoEntregado {
+  id: string;
+  codigo: string;
+  nombre: string;
+  fecha_inicio: string;
+  fecha_entrega_estimada: string;
+  /** null = no hay fecha de entrega en el historial (datos anteriores al historial de etapas). */
+  fecha_entregado: string | null;
+  dias_concepto_cliente: number | null; // inicio → entrega real
+  dias_estimados: number; // inicio → entrega estimada
+  desvio_dias: number | null; // entrega real − estimada: > 0 atraso, ≤ 0 a tiempo
+  plazo: EstadoKpi;
+  dias_por_etapa: DiasPorEtapa;
+  estimado_clp: number;
+  costo_clp: number;
+  compras: number;
+  pct_costo: number | null;
+  situacion_costo: SituacionCosto;
+  costo: EstadoKpi;
+}
+
+export interface EtapaPipeline {
+  estado: EtapaDesarrollo;
+  nombre: string;
+  proyectos: ProyectoEnCurso[];
+  /** Más proyectos que AVISO_PROYECTOS_POR_ETAPA: gerencia ve un aviso (no es un tope). */
+  saturada: boolean;
 }
 
 export interface MetricasExec {
   corte: string;
   periodo: { desde: string; hasta: string; anterior_desde: string; anterior_hasta: string };
   metas: Metas;
-  plazo: { estado: EstadoKpi; activos: number; en_plazo: number; atrasados: number; por_vencer: number; proyectos: ProyectoPlazo[] };
   costo: {
     estado: EstadoKpi;
     con_estimacion: number;
@@ -273,40 +324,38 @@ export interface MetricasExec {
     periodo_anterior_clp: number;
     proyectos: ProyectoCosto[];
   };
-  equipo: {
+  tiempo: {
     estado: EstadoKpi;
-    pct: number | null;
-    pct_anterior: number | null;
-    completadas: number;
-    comprometidas: number;
-    jornadas: number;
-    personas_con_jornadas: number;
-    personas: number;
+    en_desarrollo: number;
+    en_plazo: number;
+    atrasados: number;
+    por_vencer: number;
+    proyectos: ProyectoEnCurso[];
   };
-  bloqueos: {
-    estado: EstadoKpi;
-    abiertos: number;
-    vencidos: number;
-    nuevos_periodo: number;
-    nuevos_periodo_anterior: number;
-    lista: { bitacora_id: string; persona: string; fecha: string; dias: number; texto: string; proyectos: string[] }[];
+  pipeline: {
+    en_desarrollo: number;
+    aviso_por_etapa: number;
+    etapas: EtapaPipeline[];
+    saturadas: EtapaDesarrollo[];
+    pausados: ProyectoEnCurso[];
   };
+  entregados: ProyectoEntregado[];
   personas_activas: number;
 }
 
-function diasEntre(a: string, b: string): number {
-  return Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000);
+export const DIAS_POR_VENCER = 14;
+
+function situacionCosto(pct: number | null, tolerancia: number): SituacionCosto {
+  return pct === null ? "sin_estimacion" : pct <= 100 ? "dentro" : pct <= 100 + tolerancia ? "en_riesgo" : "fuera";
 }
 
-const ACTIVOS = new Set(["concepto", "prototipado", "pruebas"]);
-export const DIAS_POR_VENCER = 14;
+const KPI_COSTO: Record<SituacionCosto, EstadoKpi> = { dentro: "en_meta", en_riesgo: "en_riesgo", fuera: "fuera", sin_estimacion: "sin_datos" };
 
 export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)): MetricasExec {
   const desde = sumarDias(hoy, -13);
   const antDesde = sumarDias(hoy, -27);
   const antHasta = sumarDias(hoy, -14);
 
-  // ── Plazo y costo por proyecto
   const filas = db
     .prepare(
       `SELECT p.id, p.codigo, p.nombre, p.estado, p.presupuesto_clp AS estimado_clp, p.fecha_inicio, p.fecha_entrega_objetivo,
@@ -316,13 +365,14 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
          FROM proyectos p
          LEFT JOIN gasto_proyectos gp ON gp.proyecto_id = p.id
          LEFT JOIN gastos g ON g.id = gp.gasto_id
-        GROUP BY p.id`,
+        GROUP BY p.id
+        ORDER BY p.codigo`,
     )
     .all() as {
     id: string;
     codigo: string;
     nombre: string;
-    estado: string;
+    estado: EstadoProyecto;
     estimado_clp: number;
     fecha_inicio: string;
     fecha_entrega_objetivo: string;
@@ -330,48 +380,59 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
     por_validar_clp: number;
     compras: number;
   }[];
+  const historial = leerEtapas(db);
+  const pctCosto = (p: { estimado_clp: number; total_clp: number }) =>
+    p.estimado_clp > 0 ? Math.round((p.total_clp / p.estimado_clp) * 100) : null;
 
-  const ordenPlazo = { atrasado: 0, por_vencer: 1, en_plazo: 2, pausado: 3, entregado: 4 } as const;
-  const plazoProyectos: ProyectoPlazo[] = filas
+  // ── Proyectos no entregados: tiempo, etapa y costo
+  const ordenPlazo = { atrasado: 0, por_vencer: 1, en_plazo: 2, pausado: 3 } as const;
+  const enCurso: ProyectoEnCurso[] = filas
+    .filter((p) => p.estado !== "entregado")
     .map((p) => {
-      const comprometidos = Math.max(1, diasEntre(p.fecha_inicio, p.fecha_entrega_objetivo));
+      const t = tramos(historial.get(p.id), p, hoy);
+      const actual = t[t.length - 1];
+      const estimados = Math.max(1, diasEntre(p.fecha_inicio, p.fecha_entrega_objetivo));
       const transcurridos = Math.max(0, diasEntre(p.fecha_inicio, hoy));
       const restantes = diasEntre(hoy, p.fecha_entrega_objetivo);
-      const situacion: ProyectoPlazo["situacion"] =
-        p.estado === "entregado"
-          ? "entregado"
-          : p.estado === "pausado"
-            ? "pausado"
-            : restantes < 0
-              ? "atrasado"
-              : restantes <= DIAS_POR_VENCER
-                ? "por_vencer"
-                : "en_plazo";
+      const pct = pctCosto(p);
       return {
         id: p.id,
         codigo: p.codigo,
         nombre: p.nombre,
-        estado: p.estado,
+        estado: p.estado as ProyectoEnCurso["estado"],
         fecha_inicio: p.fecha_inicio,
-        fecha_entrega_objetivo: p.fecha_entrega_objetivo,
+        fecha_entrega_estimada: p.fecha_entrega_objetivo,
         dias_transcurridos: transcurridos,
-        dias_comprometidos: comprometidos,
+        dias_estimados: estimados,
         dias_restantes: restantes,
-        pct_plazo: Math.round((transcurridos / comprometidos) * 100),
-        situacion,
-      };
-    })
+        pct_plazo: Math.round((transcurridos / estimados) * 100),
+        situacion: p.estado === "pausado" ? "pausado" : restantes < 0 ? "atrasado" : restantes <= DIAS_POR_VENCER ? "por_vencer" : "en_plazo",
+        etapa_desde: actual.desde,
+        dias_en_etapa: actual.dias,
+        dias_por_etapa: diasPorEtapa(t),
+        estimado_clp: p.estimado_clp,
+        costo_clp: p.total_clp,
+        pct_costo: pct,
+        situacion_costo: situacionCosto(pct, metas.tolerancia_costo_pct),
+      } satisfies ProyectoEnCurso;
+    });
+  const desarrollo = enCurso
+    .filter((p) => p.estado !== "pausado")
     .sort((a, b) => ordenPlazo[a.situacion] - ordenPlazo[b.situacion] || a.dias_restantes - b.dias_restantes);
-  const activos = plazoProyectos.filter((p) => ACTIVOS.has(p.estado));
-  const atrasados = activos.filter((p) => p.situacion === "atrasado").length;
+  const atrasados = desarrollo.filter((p) => p.situacion === "atrasado").length;
 
+  // ── Pipeline por etapa (sin entregados ni pausados)
+  const etapas: EtapaPipeline[] = ETAPAS_DESARROLLO.map((e) => {
+    const proyectos = desarrollo.filter((p) => p.estado === e).sort((a, b) => b.dias_en_etapa - a.dias_en_etapa);
+    return { estado: e, nombre: NOMBRE_ESTADO[e], proyectos, saturada: proyectos.length > AVISO_PROYECTOS_POR_ETAPA };
+  });
+
+  // ── Costo: proyectos no entregados (los pausados, si ya gastaron)
   const ordenCosto = { fuera: 0, en_riesgo: 1, dentro: 2, sin_estimacion: 3 } as const;
   const costoProyectos: ProyectoCosto[] = filas
-    .filter((p) => p.estado !== "pausado" || p.total_clp > 0)
+    .filter((p) => p.estado !== "entregado" && (p.estado !== "pausado" || p.total_clp > 0))
     .map((p) => {
-      const pct = p.estimado_clp > 0 ? Math.round((p.total_clp / p.estimado_clp) * 100) : null;
-      const situacion: ProyectoCosto["situacion"] =
-        pct === null ? "sin_estimacion" : pct <= 100 ? "dentro" : pct <= 100 + metas.tolerancia_costo_pct ? "en_riesgo" : "fuera";
+      const pct = pctCosto(p);
       return {
         id: p.id,
         codigo: p.codigo,
@@ -382,99 +443,66 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
         por_validar_clp: p.por_validar_clp,
         compras: p.compras,
         pct,
-        situacion,
+        situacion: situacionCosto(pct, metas.tolerancia_costo_pct),
       };
     })
     .sort((a, b) => ordenCosto[a.situacion] - ordenCosto[b.situacion] || (b.pct ?? -1) - (a.pct ?? -1));
-  const cuenta = (s: ProyectoCosto["situacion"]) => costoProyectos.filter((p) => p.situacion === s).length;
+  const cuenta = (s: SituacionCosto) => costoProyectos.filter((p) => p.situacion === s).length;
   const conEstimacion = costoProyectos.filter((p) => p.situacion !== "sin_estimacion").length;
+  const idsCosto = new Set(costoProyectos.map((p) => p.id));
 
-  // Costo agregado en el periodo y en el anterior (fecha local de registro de la compra)
-  const costoEntre = (a: string, b: string) => {
-    let total = 0;
-    const qs = db
-      .prepare("SELECT monto_clp, creado_en FROM gastos WHERE estado <> 'rechazado' AND creado_en >= ?")
-      .all(`${sumarDias(a, -1)}T00:00:00.000Z`) as { monto_clp: number; creado_en: string }[];
-    for (const g of qs) {
-      const f = fechaLocal(g.creado_en);
-      if (f >= a && f <= b) total += g.monto_clp;
-    }
-    return total;
-  };
+  // Costo agregado en el periodo y en el anterior a esos proyectos (fecha local de registro de la compra)
+  const partes = db
+    .prepare(
+      `SELECT gp.proyecto_id, gp.monto_clp, g.creado_en FROM gasto_proyectos gp JOIN gastos g ON g.id = gp.gasto_id
+        WHERE g.estado <> 'rechazado' AND g.creado_en >= ?`,
+    )
+    .all(`${sumarDias(antDesde, -1)}T00:00:00.000Z`) as { proyecto_id: string; monto_clp: number; creado_en: string }[];
+  const costoEntre = (a: string, b: string) =>
+    partes
+      .filter((x) => idsCosto.has(x.proyecto_id))
+      .reduce((s, x) => {
+        const f = fechaLocal(x.creado_en);
+        return f >= a && f <= b ? s + x.monto_clp : s;
+      }, 0);
 
-  // ── Objetivos diarios del equipo (últimos 14 días vs 14 anteriores, sin jornadas en curso)
-  const equipo = equipoActivo(db);
-  let completadas = 0;
-  let comprometidas = 0;
-  let jornadasN = 0;
-  let conJornadas = 0;
-  let completadasAnt = 0;
-  let comprometidasAnt = 0;
-  for (const p of equipo) {
-    const inicio = fechaLocal(p.creado_en);
-    const prog = calcularProgreso(db, p.id, hoy, inicio);
-    completadas += prog.completadas_14d;
-    comprometidas += prog.comprometidas_14d;
-    jornadasN += prog.jornadas_14d;
-    if (prog.jornadas_14d > 0) conJornadas++;
-    if (inicio <= antHasta) {
-      const ant = calcularProgreso(db, p.id, antHasta, inicio);
-      completadasAnt += ant.completadas_14d;
-      comprometidasAnt += ant.comprometidas_14d;
-    }
-  }
-  const pctEquipo = porcentaje(completadas, comprometidas);
-  const metaEq = metas.objetivos_diarios_pct;
-
-  // ── Bloqueos sin resolver
-  const abiertos = (
-    db
-      .prepare(
-        `SELECT b.id AS bitacora_id, u.nombre AS persona, b.fecha, b.checkout_tarde, b.bloqueos AS texto,
-                (SELECT group_concat(codigo, ',') FROM (
-                   SELECT DISTINCT p.codigo FROM tareas_diarias t
-                     JOIN tarea_proyectos tp ON tp.tarea_id = t.id JOIN proyectos p ON p.id = tp.proyecto_id
-                    WHERE t.bitacora_id = b.id ORDER BY p.codigo)) AS codigos
-           FROM bitacoras b JOIN usuarios u ON u.id = b.usuario_id
-          WHERE b.bloqueos IS NOT NULL AND b.bloqueo_resuelto_en IS NULL`,
-      )
-      .all() as { bitacora_id: string; persona: string; fecha: string; checkout_tarde: string | null; texto: string; codigos: string | null }[]
-  )
-    .map((b) => {
-      const reportado = b.checkout_tarde ? fechaLocal(b.checkout_tarde) : b.fecha;
+  // ── Entregados: indicadores propios de cada proyecto
+  const entregados: ProyectoEntregado[] = filas
+    .filter((p) => p.estado === "entregado")
+    .map((p) => {
+      const h = historial.get(p.id);
+      const t = tramos(h, p, hoy);
+      const entrega = h ? [...h].reverse().find((f) => f.estado === "entregado")?.desde ?? null : null;
+      const estimados = Math.max(1, diasEntre(p.fecha_inicio, p.fecha_entrega_objetivo));
+      const desvio = entrega ? diasEntre(p.fecha_entrega_objetivo, entrega) : null;
+      const pct = pctCosto(p);
+      const sc = situacionCosto(pct, metas.tolerancia_costo_pct);
       return {
-        bitacora_id: b.bitacora_id,
-        persona: b.persona,
-        fecha: reportado,
-        dias: Math.max(0, diasEntre(reportado, hoy)),
-        texto: b.texto,
-        proyectos: b.codigos ? b.codigos.split(",") : [],
-      };
+        id: p.id,
+        codigo: p.codigo,
+        nombre: p.nombre,
+        fecha_inicio: p.fecha_inicio,
+        fecha_entrega_estimada: p.fecha_entrega_objetivo,
+        fecha_entregado: entrega,
+        dias_concepto_cliente: entrega ? Math.max(0, diasEntre(p.fecha_inicio, entrega)) : null,
+        dias_estimados: estimados,
+        desvio_dias: desvio,
+        plazo: desvio === null ? "sin_datos" : desvio <= 0 ? "en_meta" : "fuera",
+        dias_por_etapa: diasPorEtapa(t),
+        estimado_clp: p.estimado_clp,
+        costo_clp: p.total_clp,
+        compras: p.compras,
+        pct_costo: pct,
+        situacion_costo: sc,
+        costo: KPI_COSTO[sc],
+      } satisfies ProyectoEntregado;
     })
-    .sort((a, b) => b.dias - a.dias);
-  const vencidos = abiertos.filter((b) => b.dias > metas.bloqueo_max_dias).length;
-  const reportadosEntre = (a: string, b: string) =>
-    (
-      db
-        .prepare("SELECT checkout_tarde, fecha FROM bitacoras WHERE bloqueos IS NOT NULL AND fecha >= ?")
-        .all(sumarDias(a, -1)) as { checkout_tarde: string | null; fecha: string }[]
-    ).filter((x) => {
-      const f = x.checkout_tarde ? fechaLocal(x.checkout_tarde) : x.fecha;
-      return f >= a && f <= b;
-    }).length;
+    .sort((a, b) => (b.fecha_entregado ?? "").localeCompare(a.fecha_entregado ?? "") || a.codigo.localeCompare(b.codigo));
 
   return {
     corte: hoy,
     periodo: { desde, hasta: hoy, anterior_desde: antDesde, anterior_hasta: antHasta },
     metas,
-    plazo: {
-      estado: activos.length === 0 ? "sin_datos" : atrasados === 0 ? "en_meta" : "fuera",
-      activos: activos.length,
-      en_plazo: activos.length - atrasados,
-      atrasados,
-      por_vencer: activos.filter((p) => p.situacion === "por_vencer").length,
-      proyectos: plazoProyectos,
-    },
     costo: {
       estado: conEstimacion === 0 ? "sin_datos" : cuenta("fuera") ? "fuera" : cuenta("en_riesgo") ? "en_riesgo" : "en_meta",
       con_estimacion: conEstimacion,
@@ -488,24 +516,22 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
       periodo_anterior_clp: costoEntre(antDesde, antHasta),
       proyectos: costoProyectos,
     },
-    equipo: {
-      estado: pctEquipo === null ? "sin_datos" : pctEquipo >= metaEq ? "en_meta" : pctEquipo >= metaEq - 10 ? "en_riesgo" : "fuera",
-      pct: pctEquipo,
-      pct_anterior: porcentaje(completadasAnt, comprometidasAnt),
-      completadas,
-      comprometidas,
-      jornadas: jornadasN,
-      personas_con_jornadas: conJornadas,
-      personas: equipo.length,
+    tiempo: {
+      estado: desarrollo.length === 0 ? "sin_datos" : atrasados === 0 ? "en_meta" : "fuera",
+      en_desarrollo: desarrollo.length,
+      en_plazo: desarrollo.length - atrasados,
+      atrasados,
+      por_vencer: desarrollo.filter((p) => p.situacion === "por_vencer").length,
+      proyectos: desarrollo,
     },
-    bloqueos: {
-      estado: abiertos.length === 0 ? "en_meta" : vencidos ? "fuera" : "en_riesgo",
-      abiertos: abiertos.length,
-      vencidos,
-      nuevos_periodo: reportadosEntre(desde, hoy),
-      nuevos_periodo_anterior: reportadosEntre(antDesde, antHasta),
-      lista: abiertos.slice(0, 5),
+    pipeline: {
+      en_desarrollo: desarrollo.length,
+      aviso_por_etapa: AVISO_PROYECTOS_POR_ETAPA,
+      etapas,
+      saturadas: etapas.filter((e) => e.saturada).map((e) => e.estado),
+      pausados: enCurso.filter((p) => p.estado === "pausado"),
     },
-    personas_activas: equipo.length,
+    entregados,
+    personas_activas: equipoActivo(db).length,
   };
 }

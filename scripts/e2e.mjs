@@ -197,8 +197,9 @@ async function main() {
     assert.equal(r.status, 200);
     assert.equal(r.datos.empresa.clave, D);
     assert.ok(r.datos.costo.proyectos.every((p) => p.id !== pA));
-    assert.ok(r.datos.plazo.proyectos.every((p) => p.id !== pA));
-    assert.deepEqual(Object.keys(r.datos.metas).sort(), ["bloqueo_max_dias", "objetivos_diarios_pct", "tolerancia_costo_pct"]);
+    assert.ok(r.datos.tiempo.proyectos.every((p) => p.id !== pA));
+    assert.ok(!("equipo" in r.datos) && !("bloqueos" in r.datos) && !("plazo" in r.datos));
+    assert.deepEqual(Object.keys(r.datos.metas), ["tolerancia_costo_pct"]);
   });
   await prueba("administrador elige la empresa del tablero de gerencia", async () => {
     assert.equal((await admin.pedir(q("/api/exec", A))).datos.empresa.clave, A);
@@ -421,14 +422,82 @@ async function main() {
     assert.equal(fin.costo.total_clp - fin.costo.por_validar_clp, 43435); // aprobado
     assert.equal((await ggD.cliente.pedir("/api/exec")).datos.costo.total_clp, 43435); // la compra de Dora, separada
   });
-  await prueba("metas de gerencia: solo administradores las cambian; gerencia las ve", async () => {
-    const metas = { tolerancia_costo_pct: 15, objetivos_diarios_pct: 85, bloqueo_max_dias: 2 };
+  await prueba("tolerancia de costo: solo administradores la cambian; gerencia la ve", async () => {
+    const metas = { tolerancia_costo_pct: 15 };
     assert.equal((await ggA.cliente.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: metas })).status, 403);
-    assert.equal((await admin.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: { ...metas, objetivos_diarios_pct: 120 } })).status, 400);
+    assert.equal((await admin.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: { tolerancia_costo_pct: 120 } })).status, 400);
     const r = await admin.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: metas });
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.deepEqual((await ggA.cliente.pedir("/api/exec")).datos.metas, metas);
-    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.metas.objetivos_diarios_pct, 80); // otra empresa: por defecto
+    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.metas.tolerancia_costo_pct, 10); // otra empresa: por defecto
+  });
+
+  console.log("Etapas y pipeline");
+  const proyectoD = async (codigo) => {
+    const r = await admin.pedir(q("/api/admin/proyectos", D), {
+      metodo: "POST",
+      json: { codigo, nombre: `Proyecto ${codigo}`, presupuesto_clp: 1000000, fecha_inicio: "2026-09-01", fecha_entrega_objetivo: "2027-03-31" },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    return r.datos.id;
+  };
+  const etapasDe = async (id) => (await admin.pedir(q("/api/admin/proyectos", D))).datos.proyectos.find((p) => p.id === id).etapas;
+  const estadoD = (id, estado) => admin.pedir(q(`/api/admin/proyectos/${id}`, D), { metodo: "PATCH", json: { estado } });
+  let pEt;
+  await prueba("historial de etapas: se registra al crear y en cada cambio de estado; el mismo día se corrige", async () => {
+    pEt = await proyectoD("DSQ-ETP-01");
+    assert.deepEqual((await etapasDe(pEt)).map((e) => [e.estado, e.desde]), [["concepto", "2026-09-01"]]);
+    assert.equal((await estadoD(pEt, "prototipado")).status, 200);
+    let et = await etapasDe(pEt);
+    assert.deepEqual(et.map((e) => [e.estado, e.desde]), [["concepto", "2026-09-01"], ["prototipado", hoy]]);
+    await estadoD(pEt, "pruebas"); // mismo día: corrige, no agrega un tramo de 0 días
+    et = await etapasDe(pEt);
+    assert.deepEqual(et.map((e) => e.estado), ["concepto", "pruebas"]);
+    await estadoD(pEt, "concepto"); // vuelve al estado previo: se fusiona
+    assert.deepEqual((await etapasDe(pEt)).map((e) => e.estado), ["concepto"]);
+    await estadoD(pEt, "prototipado");
+  });
+  await prueba("corregir fechas de etapas: en orden, no después de hoy, la primera es el inicio; gerencia no puede", async () => {
+    const et = await etapasDe(pEt);
+    const put = (cl, etapas) => cl.pedir(q(`/api/admin/proyectos/${pEt}/etapas`, D), { metodo: "PUT", json: { etapas } });
+    assert.equal((await put(ggD.cliente, et.map((e) => ({ id: e.id, desde: e.desde })))).status, 403);
+    assert.equal((await put(admin, [{ id: et[0].id, desde: "2026-09-20" }, { id: et[1].id, desde: "2026-09-10" }])).status, 400);
+    assert.equal((await put(admin, [{ id: et[0].id, desde: "2026-09-01" }, { id: et[1].id, desde: "2099-01-01" }])).status, 400);
+    assert.equal((await put(admin, [{ id: et[0].id, desde: "2026-09-01" }])).status, 409);
+    const r = await put(admin, [{ id: et[0].id, desde: "2026-08-20" }, { id: et[1].id, desde: "2026-09-15" }]);
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    const p = (await admin.pedir(q("/api/admin/proyectos", D))).datos.proyectos.find((x) => x.id === pEt);
+    assert.equal(p.fecha_inicio, "2026-08-20");
+    assert.deepEqual(p.etapas.map((e) => e.desde), ["2026-08-20", "2026-09-15"]);
+  });
+  await prueba("gerencia: pipeline por etapa con aviso al pasar el umbral; entregados aparte con sus indicadores", async () => {
+    let m = (await ggD.cliente.pedir("/api/exec")).datos;
+    const umbral = m.pipeline.aviso_por_etapa;
+    const proto = () => m.pipeline.etapas.find((e) => e.estado === "prototipado");
+    const enProto = proto().proyectos.length; // DSQ-ETP-01
+    const nuevos = [];
+    for (let i = enProto; i <= umbral; i++) {
+      const id = await proyectoD(`DSQ-PIP-0${i}`);
+      await estadoD(id, "prototipado");
+      nuevos.push(id);
+    }
+    m = (await ggD.cliente.pedir("/api/exec")).datos;
+    assert.equal(proto().proyectos.length, umbral + 1);
+    assert.deepEqual(m.pipeline.saturadas, ["prototipado"]);
+    const etp = proto().proyectos.find((p) => p.id === pEt);
+    assert.equal(etp.etapa_desde, "2026-09-15");
+    assert.equal(etp.dias_por_etapa.concepto, 26); // 20-ago → 15-sep
+    // entregar uno: sale del pipeline, del plazo y del costo; aparece en entregados
+    await estadoD(nuevos[0], "entregado");
+    m = (await ggD.cliente.pedir("/api/exec")).datos;
+    assert.deepEqual(m.pipeline.saturadas, []);
+    assert.ok(!m.tiempo.proyectos.some((p) => p.id === nuevos[0]));
+    assert.ok(!m.costo.proyectos.some((p) => p.id === nuevos[0]));
+    const e = m.entregados.find((p) => p.id === nuevos[0]);
+    assert.equal(e.fecha_entregado, hoy);
+    assert.equal(e.plazo, "en_meta"); // antes de la fecha estimada (31-mar-2027)
+    assert.ok(e.dias_concepto_cliente >= 0 && e.desvio_dias < 0);
+    assert.equal(m.costo.total_clp, 43435); // la compra de Dora no cambia
   });
   await prueba("gerencia no puede validar compras", async () => {
     assert.equal((await ggA.cliente.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "aprobado" } })).status, 403);

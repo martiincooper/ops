@@ -260,4 +260,23 @@ export const MIGRACIONES_EMPRESA: string[] = [
   `
   ALTER TABLE gastos ADD COLUMN envio_clp INTEGER NOT NULL DEFAULT 0 CHECK (envio_clp >= 0 AND envio_clp < monto_clp);
   `,
+
+  // v5 — historial de etapas de cada proyecto (concepto → prototipado → pruebas → entregado, y pausas), para medir
+  //      el tiempo de concepto a cliente y cuánto lleva cada proyecto en su etapa. `desde` es la fecha local en que
+  //      el proyecto entró a esa etapa. Se registra al crear el proyecto y en cada cambio de estado.
+  //      Proyectos existentes: concepto desde su fecha de inicio y, si ya avanzaron, su estado actual desde hoy
+  //      (la jefatura puede corregir esas fechas en Proyectos → Etapas).
+  `
+  CREATE TABLE proyecto_etapas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proyecto_id TEXT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+    estado TEXT NOT NULL CHECK (estado IN ('concepto', 'prototipado', 'pruebas', 'entregado', 'pausado')),
+    desde TEXT NOT NULL,
+    registrado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  CREATE INDEX idx_proyecto_etapas ON proyecto_etapas (proyecto_id, desde, id);
+  INSERT INTO proyecto_etapas (proyecto_id, estado, desde) SELECT id, 'concepto', fecha_inicio FROM proyectos ORDER BY creado_en;
+  INSERT INTO proyecto_etapas (proyecto_id, estado, desde)
+    SELECT id, estado, MAX(fecha_inicio, date('now', '-4 hours')) FROM proyectos WHERE estado <> 'concepto' ORDER BY creado_en;
+  `,
 ];

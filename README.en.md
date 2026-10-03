@@ -61,11 +61,17 @@ Repo: [github.com/martiincooper/ops](https://github.com/martiincooper/ops). Rail
 
 ## Executive view (`/exec`)
 
-Four SMART KPIs, in this order, each with definition, value, target, period, status (icon + label) and
-comparison with the previous period: 1) projects on schedule (target 100 %), 2) accumulated cost vs the BOM
-estimate made before the project starts (≤ 100 %, up to +10 % = at risk), 3) team daily-objective completion,
-last 14 days vs previous 14 (≥ 80 %) — daily execution, **not** project milestones, which live in the Gantt
-chart, 4) unresolved blockers (0 older than 3 days). Targets are per company and editable by admins on `/exec`.
+Three focus areas; **delivered projects are excluded** from them and listed at the bottom.
+1) **Accumulated cost vs BOM estimate** (target ≤ 100 %, up to +10 % = at risk; the tolerance is the only editable
+target), projects not yet delivered. 2) **Concept-to-customer time**: days from project start to delivery and per
+stage, measured against the **estimated delivery date** entered when the project is created (no other target).
+3) **Development pipeline** by stage (Concepto, Prototipado, Pruebas) with days in the current stage; when a stage
+holds **more than 2 projects** a Spanish warning tells management that adding projects now delays the ones in
+progress (a deterrent, not a cap; threshold `AVISO_PROYECTOS_POR_ETAPA` in `lib/etapas.ts`). Each delivered
+project expands to its own KPIs: real concept-to-customer days by stage, delivery vs its estimated date, final cost
+vs its BOM estimate. Stage changes are recorded with the day's date (`proyecto_etapas`, schema v5) and can be
+corrected in `/admin` → Proyectos → Etapas. Daily objectives and blockers left the executive view (still in the
+admin standup).
 
 ## Run
 
@@ -78,6 +84,9 @@ docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
 ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
+Upgrading from 0.7: adds `proyecto_etapas` (automatic migration): existing projects get "concepto" from their start
+date and, if further along, their current stage from the upgrade date — correct those dates in Proyectos → Etapas
+(especially real delivery dates).
 Upgrading from 0.6: adds `gastos.envio_clp` (automatic migration; existing purchases get 0). Totals unchanged.
 Upgrading from 0.5: no schema change. New UI; streak, XP, levels, achievements and confetti removed; same
 features and rules otherwise. New dependency `@fontsource-variable/inter` (`npm ci`; nothing to do with Docker).
@@ -91,8 +100,8 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, goal-based Say-Do, schema + migrations, shipping, availability, split, exec (26)
-# end-to-end against a server with an EMPTY data dir (42)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, exec (28)
+# end-to-end against a server with an EMPTY data dir (45)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 

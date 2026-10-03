@@ -223,3 +223,30 @@ called the gamification irrelevant to the work. Changes:
   (total) and `envio_clp`. Total capped at 1,000,000,000 CLP.
 - Team list, "Mis compras" and the admin validation table show "incl. envío $X" under the total.
 - Tests: logic 26 (v3→v4 migration, schema), e2e 42 (shipping total and split, invalid shipping values).
+
+## 13. Pass 8 — executive view: cost, concept-to-customer time, pipeline
+
+The owner fixed the executive focus to three things: cost, concept-to-customer time, and visibility of the
+development pipeline so upper management does not keep adding projects while many are still in progress.
+
+- **Stage history** (schema v5, `proyecto_etapas`): one row per stage entered (`estado`, `desde` local date).
+  Written when a project is created (first stage at its start date) and on every status change in the same
+  transaction as `proyectos.estado`; a second change on the same day corrects the last row (and merges if it
+  returns to the previous stage) so mis-clicks do not leave 0-day stints. `PUT /api/admin/proyectos/:id/etapas`
+  corrects dates only (same ids/order; non-decreasing; none after today except the first; first ≤ estimated
+  delivery) and keeps `proyectos.fecha_inicio` = first date. Migration: "concepto" from the start date, plus the
+  current status from the upgrade date when not "concepto". Projects without history (raw inserts) fall back to
+  "current status since start date".
+- **KPIs** (`metricasExec`): (1) cost vs BOM over non-delivered projects (paused ones only if they have spend);
+  (2) concept-to-customer: in-development projects vs their estimated delivery date — the date the admin enters
+  at creation is the target, no separate goal — with days per stage and days in the current stage; (3) pipeline
+  per stage excluding delivered and paused, `saturada` when a stage has more than `AVISO_PROYECTOS_POR_ETAPA` (2)
+  projects, shown as a Spanish warning (not a cap). Daily-objectives and blockers KPIs removed from `/exec`
+  (still in the admin standup); their targets are no longer read (`Metas` = cost tolerance only).
+- **Delivered projects** are not in the KPIs; each has its own: real concept-to-customer days and per-stage
+  breakdown, delivery vs estimated date (on time / days late), final cost vs BOM (same tolerance).
+- **Visuals**: stage bars use a validated one-hue ordinal ramp (concepto light → pruebas dark, pause as gray
+  hatch), 2px gaps, legend with day counts (text view of the same data), estimated-date marker when overdue.
+  Status always icon + text. No horizontal overflow at 390 px.
+- Tests: logic 28 (stage history, same-day correction, pipeline threshold, delivered KPIs, v4→v5 migration),
+  e2e 45 (history recorded via API, date-correction rules and permissions, pipeline warning, delivered exclusion).

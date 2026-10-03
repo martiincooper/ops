@@ -145,9 +145,17 @@ export const esquemaProyectoNuevo = z
     estado: estadoProyecto.default("concepto"),
   })
   .refine((v) => v.fecha_entrega_objetivo >= v.fecha_inicio, {
-    message: "La entrega objetivo no puede ser anterior al inicio",
+    message: "La entrega estimada no puede ser anterior al inicio",
     path: ["fecha_entrega_objetivo"],
   });
+
+/** Corrección de las fechas del historial de etapas: todas las filas del proyecto, en su orden actual. */
+export const esquemaEtapas = z.object({
+  etapas: z
+    .array(z.object({ id: z.number().int().positive(), desde: fecha }))
+    .min(1, "Sin etapas")
+    .max(100),
+});
 
 export const esquemaProyectoCambio = z.object({
   nombre: texto(120).optional(),

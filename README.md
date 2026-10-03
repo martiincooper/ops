@@ -68,21 +68,26 @@ rechazadas no cuentan).
 
 ## Vista de gerencia (`/exec`)
 
-Cuatro indicadores SMART, en este orden. Cada uno muestra definición, valor, meta, periodo, estado
-(en meta / en riesgo / fuera de meta, con ícono y texto) y la comparación con el periodo anterior.
+Tres focos, en este orden. Los proyectos **entregados no entran** en los indicadores: se listan al final.
 
-| # | Indicador | Meta por defecto | Periodo |
+| # | Indicador | Meta | Alcance |
 |---|---|---|---|
-| 1 | **Proyectos en plazo**: proyectos activos que no han pasado su fecha de entrega | 100 % | al día de hoy |
-| 2 | **Costo acumulado vs estimación BOM**: compras aprobadas y por validar de cada proyecto frente al costo estimado antes de comenzarlo | ≤ 100 %; hasta +10 % «en riesgo» | acumulado; muestra lo agregado en 14 días vs los 14 anteriores |
-| 3 | **Cumplimiento de objetivos diarios del equipo**: de los objetivos que cada persona se propone al comenzar su jornada, cuántos logra | ≥ 80 % (bajo 70 % «fuera de meta») | últimos 14 días vs los 14 anteriores |
-| 4 | **Bloqueos sin resolver** | 0 con más de 3 días | al día de hoy; reportados en 14 días vs los 14 anteriores |
+| 1 | **Costo acumulado vs estimación BOM**: compras aprobadas y por validar (envío incluido) de cada proyecto frente al costo estimado antes de comenzarlo | ≤ 100 %; hasta +10 % «en riesgo» (tolerancia editable) | proyectos no entregados; muestra lo agregado en 14 días vs los 14 anteriores |
+| 2 | **Tiempo de concepto a cliente**: días desde el inicio del proyecto hasta la entrega, y cuántos en cada etapa | la **fecha estimada de entrega** que la jefatura registra al crear el proyecto (sin otra meta) | proyectos en desarrollo |
+| 3 | **Pipeline de desarrollo**: proyectos por etapa (Concepto, Prototipado, Pruebas), cuántos días lleva cada uno en su etapa | aviso cuando una etapa tiene **más de 2 proyectos** | sin entregados ni pausados (los pausados se listan aparte) |
 
-- El indicador 3 mide la ejecución del día a día, **no** el avance de los hitos del proyecto (esos se gestionan
-  en la carta Gantt).
-- Las metas (tolerancia de costo, % de objetivos diarios, días de un bloqueo) las define la jefatura por empresa
-  en `/exec` → **Metas de los indicadores** (solo administradores). Gerencia las ve en cada indicador.
-- Para el indicador 2, registra el **costo estimado BOM** de cada proyecto en `/admin` → **Proyectos**.
+- El aviso del pipeline no es un tope ni bloquea nada: es un mensaje para gerencia («Pipeline cargado…
+  sumar proyectos nuevos ahora retrasa la entrega de los que ya están en curso»). El umbral es fijo
+  (`AVISO_PROYECTOS_POR_ETAPA` en `lib/etapas.ts`).
+- **Proyectos entregados** (al final): cada uno se abre con sus propios indicadores — días reales de concepto a
+  cliente con el desglose por etapa, entrega frente a su fecha estimada (a tiempo o días de atraso) y costo final
+  frente a su estimación BOM.
+- **Historial de etapas**: cada cambio de estado en `/admin` → **Proyectos** queda registrado con la fecha del día
+  (dos cambios el mismo día se corrigen entre sí). El botón **Etapas** de cada proyecto permite corregir esas fechas,
+  por ejemplo la fecha real de entrega de un proyecto antiguo; la primera fecha es el inicio del proyecto.
+- La única meta editable es la **tolerancia de costo** (`/exec`, solo administradores). Objetivos diarios y
+  bloqueos ya no están en la vista de gerencia: siguen en el standup de la jefatura. La planificación detallada de
+  hitos se gestiona en la carta Gantt.
 
 **Eliminar un proyecto** (`/admin` → **Proyectos**, papelera y confirmar) borra también los objetivos y
 compras registrados solo para él; los compartidos con otros proyectos solo lo pierden y el monto se reparte de
@@ -99,7 +104,8 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | Días no disponibles (días completos) para la planificación | |
 | `/mi-progreso`: objetivos logrados en 14 días, historial, mis compras, cambio de código | |
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
-| `/exec`: 4 indicadores SMART (plazo, costo vs estimación BOM, objetivos diarios del equipo, bloqueos) con metas editables | |
+| `/exec`: costo vs estimación BOM, tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
+| Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) | |
 
 ---
 
@@ -212,7 +218,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 42 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 45 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -251,8 +257,9 @@ Datos en `./data` (bórrala para empezar de cero). Detener con `Ctrl+C`.
 
 1. Ingresa con tu email y `000000`, crea tu código.
 2. Con el selector en **Aether Tech** y luego en **Datasheq**:
-   - **Proyectos**: crea los proyectos activos con su fecha de entrega y su costo estimado BOM (sin al menos
-     un proyecto activo, el equipo no puede registrar objetivos).
+   - **Proyectos**: crea los proyectos activos con su fecha estimada de entrega y su costo estimado BOM (sin al
+     menos un proyecto activo, el equipo no puede registrar objetivos). Para los que ya van avanzados, cambia el
+     estado y corrige las fechas en **Etapas**; registra también los ya entregados para verlos en gerencia.
    - **Equipo**: agrega a cada persona (rol Equipo o Gerencia) y elige quién la supervisa.
 3. **Administradores**: agrega a otros jefes si corresponde.
 4. **Pide a cada persona que ingrese ese mismo día**: hasta que cambie el código inicial, cualquiera que conozca
@@ -312,6 +319,13 @@ Estructura de datos:
 /data/empresas/datasheq/app.db           datos de Datasheq
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
+
+### Actualizar desde la versión 0.7
+
+Se agrega la tabla `proyecto_etapas` (migración automática). Cada proyecto existente queda en «concepto» desde su
+fecha de inicio y, si ya avanzó, en su estado actual desde el día de la actualización: revisa esas fechas en
+`/admin` → **Proyectos** → **Etapas** (sobre todo la fecha real de los ya entregados). Las metas de objetivos
+diarios y de bloqueos se dejan de usar (quedan guardadas, sin efecto).
 
 ### Actualizar desde la versión 0.6
 
@@ -375,10 +389,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do por objetivos, esquema y migraciones, envío, disponibilidad, reparto, gerencia (26 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, gerencia (28 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, eliminar proyectos, tableros (42 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, etapas, pipeline, eliminar proyectos, tableros (45 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
@@ -401,7 +415,8 @@ lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA 
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
 lib/metricas.ts     Say-Do e historial (por objetivos, sin horario)
 lib/tableros.ts     cálculos de standup, disponibilidad, compras e indicadores de gerencia
-lib/metas.ts        metas de los indicadores de gerencia (por empresa)
+lib/metas.ts        tolerancia de costo de gerencia (por empresa)
+lib/etapas.ts       historial de etapas de cada proyecto y umbral del aviso del pipeline
 lib/supervision.ts  administradores ↔ integrantes supervisados
 lib/tiempo.ts       fechas de negocio en America/Santiago
 lib/reparto.ts      reparto del monto de una compra entre proyectos
