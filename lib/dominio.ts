@@ -3,11 +3,17 @@ import type { DB } from "./db";
 import type { Usuario } from "./auth";
 import type { Empresa } from "./empresas";
 import { calcularJuego, type Juego } from "./juego";
-import { momentoDe, vistaPara, type Fase, type Ventanas, type Vista } from "./jornada";
 import { calcularProgreso, type DiaResumen } from "./metricas";
-import { TZ_NEGOCIO, VENTANAS, esFinDeSemana, fechaLarga, fechaLocal, horaLocal, hoyLocal } from "./tiempo";
+import { TZ_NEGOCIO, fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
 
-export type { Fase, Vista } from "./jornada";
+/**
+ * Estado de la jornada del integrante (sin horario: se comienza y se termina cuando la persona quiere).
+ *  - en_curso:       hay una jornada comenzada y sin terminar (puede ser de un día anterior).
+ *  - terminada:      la jornada de hoy ya se terminó (una por día).
+ *  - no_disponible:  hoy está marcado como no disponible.
+ *  - sin_iniciar:    puede comenzar la jornada de hoy.
+ */
+export type Fase = "sin_iniciar" | "en_curso" | "terminada" | "no_disponible";
 
 export interface ProyectoActivo {
   id: string;
@@ -29,13 +35,20 @@ export interface TareaDia {
   proyectos: ProyectoRef[]; // uno o más
 }
 
+/** Día completo marcado como no disponible. */
 export interface Ausencia {
   id: string;
   fecha: string;
-  dia_completo: number;
-  hora_inicio: string | null;
-  hora_fin: string | null;
   motivo: string | null;
+}
+
+export interface Jornada {
+  id: string;
+  fecha: string;
+  fecha_texto: string;
+  checkin_manana: string; // comienzo (ISO)
+  checkout_tarde: string | null; // término (ISO)
+  bloqueos: string | null;
 }
 
 export interface GastoResumen {
@@ -52,19 +65,14 @@ export interface EstadoDia {
   empresa: { clave: string; nombre: string };
   hoy: string;
   hoy_texto: string;
-  /** Zona horaria y ventanas: el cliente recalcula la vista cada minuto con la hora de Chile. */
   tz: string;
-  ventanas: Ventanas;
-  /** Hora local del servidor al generar el estado (HH:MM) y la vista que corresponde a esa hora. */
-  hora: string;
-  vista: Vista;
-  laborable: boolean;
-  feriado: string | null;
   fase: Fase;
-  bitacora: { id: string; checkin_manana: string; checkout_tarde: string | null; bloqueos: string | null } | null;
+  /** Jornada en curso (de cualquier fecha) o, si no hay, la de hoy ya terminada. */
+  jornada: Jornada | null;
   tareas: TareaDia[];
-  ooo_hoy: Ausencia[];
-  ooo_proximas: Ausencia[];
+  no_disponible_hoy: Ausencia | null;
+  /** Días no disponibles desde hoy. */
+  no_disponible: Ausencia[];
   proyectos: ProyectoActivo[];
   /** Proyecto activo usado más recientemente: preselección en los formularios. */
   ultimo_proyecto_id: string | null;
@@ -86,12 +94,25 @@ export function proyectosActivos(db: DB): ProyectoActivo[] {
     .all() as ProyectoActivo[];
 }
 
-export function bitacoraDe(db: DB, usuarioId: string, fecha: string) {
-  return db
-    .prepare(
-      "SELECT id, checkin_manana, checkout_tarde, bloqueos FROM bitacoras WHERE usuario_id = ? AND fecha = ?",
-    )
-    .get(usuarioId, fecha) as EstadoDia["bitacora"] | undefined;
+type FilaJornada = Omit<Jornada, "fecha_texto">;
+const COLUMNAS = "id, fecha, checkin_manana, checkout_tarde, bloqueos";
+const conTexto = (j: FilaJornada | undefined): Jornada | null => (j ? { ...j, fecha_texto: fechaLarga(j.fecha) } : null);
+
+/** Jornada de una fecha (terminada o no). */
+export function jornadaDelDia(db: DB, usuarioId: string, fecha: string): Jornada | null {
+  return conTexto(
+    db.prepare(`SELECT ${COLUMNAS} FROM bitacoras WHERE usuario_id = ? AND fecha = ?`).get(usuarioId, fecha) as
+      | FilaJornada
+      | undefined,
+  );
+}
+
+/** Jornada en curso: la más reciente de la persona, si no está terminada (puede ser de un día anterior). */
+export function jornadaEnCurso(db: DB, usuarioId: string): Jornada | null {
+  const j = db
+    .prepare(`SELECT ${COLUMNAS} FROM bitacoras WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 1`)
+    .get(usuarioId) as FilaJornada | undefined;
+  return j && !j.checkout_tarde ? conTexto(j) : null;
 }
 
 export function tareasDe(db: DB, bitacoraId: string): TareaDia[] {
@@ -115,12 +136,13 @@ export function tareasDe(db: DB, bitacoraId: string): TareaDia[] {
   }));
 }
 
+/** Días no disponibles desde una fecha (las ausencias parciales de versiones anteriores se ignoran). */
 export function ausenciasDesde(db: DB, usuarioId: string, desde: string): Ausencia[] {
   return db
     .prepare(
-      `SELECT id, fecha, dia_completo, hora_inicio, hora_fin, motivo FROM ausencias_ooo
-        WHERE usuario_id = ? AND fecha >= ?
-        ORDER BY fecha, hora_inicio`,
+      `SELECT id, fecha, motivo FROM ausencias_ooo
+        WHERE usuario_id = ? AND fecha >= ? AND dia_completo = 1
+        ORDER BY fecha`,
     )
     .all(usuarioId, desde) as Ausencia[];
 }
@@ -144,22 +166,15 @@ export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoRe
 
 export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
   const hoy = hoyLocal();
-  const bitacora = bitacoraDe(db, u.id, hoy) ?? null;
-  const tareas = bitacora ? tareasDe(db, bitacora.id) : [];
+  const enCurso = jornadaEnCurso(db, u.id);
+  const deHoy = enCurso ? null : jornadaDelDia(db, u.id, hoy);
+  const jornada = enCurso ?? deHoy;
   const ausencias = ausenciasDesde(db, u.id, hoy);
-  const ooo_hoy = ausencias.filter((a) => a.fecha === hoy);
+  const no_disponible_hoy = ausencias.find((a) => a.fecha === hoy) ?? null;
   const inicio = fechaLocal(u.creado_en);
   const progreso = calcularProgreso(db, u.id, hoy, inicio);
-  const feriado =
-    (db.prepare("SELECT nombre FROM feriados WHERE fecha = ?").get(hoy) as { nombre: string } | undefined)?.nombre ?? null;
-  const laborable = !esFinDeSemana(hoy) && !feriado;
-  const hora = horaLocal(new Date());
 
-  let fase: Fase;
-  if (bitacora?.checkout_tarde) fase = "cerrado";
-  else if (ooo_hoy.some((a) => a.dia_completo === 1)) fase = "ooo_completo";
-  else if (bitacora) fase = "pendiente_tarde";
-  else fase = "pendiente_manana";
+  const fase: Fase = enCurso ? "en_curso" : deHoy ? "terminada" : no_disponible_hoy ? "no_disponible" : "sin_iniciar";
 
   const proyectos = proyectosActivos(db);
   const activos = new Set(proyectos.map((p) => p.id));
@@ -176,16 +191,11 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
     hoy,
     hoy_texto: fechaLarga(hoy),
     tz: TZ_NEGOCIO,
-    ventanas: VENTANAS,
-    hora,
-    vista: vistaPara(fase, momentoDe(hora, VENTANAS), laborable),
-    laborable,
-    feriado,
     fase,
-    bitacora,
-    tareas,
-    ooo_hoy,
-    ooo_proximas: ausencias,
+    jornada,
+    tareas: jornada ? tareasDe(db, jornada.id) : [],
+    no_disponible_hoy,
+    no_disponible: ausencias,
     proyectos,
     ultimo_proyecto_id: recientes.find((r) => activos.has(r.proyecto_id))?.proyecto_id ?? null,
     gastos_hoy: gastosRecientes(db, u.id, 20).filter((g) => fechaLocal(g.creado_en) === hoy),

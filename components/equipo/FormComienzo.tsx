@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, LoaderCircle, Plane, Plus, Sunrise, Trash2 } from "lucide-react";
+import { LoaderCircle, Play, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import SelectorProyectos from "@/components/SelectorProyectos";
 import type { EstadoDia } from "@/lib/dominio";
@@ -8,21 +8,18 @@ import { ErrorApi, api } from "@/lib/cliente";
 
 interface Props {
   estado: EstadoDia;
-  obligatoria: boolean;
   onListo: (e: EstadoDia) => void;
   onCancelar: () => void;
-  onOoo: () => void;
 }
 
-/** Bitácora de la mañana: 2 a 4 objetivos concretos. Obligatoria dentro de su ventana si aún no se hizo. */
-export default function EncuestaManana({ estado, obligatoria, onListo, onCancelar, onOoo }: Props) {
+/** Comenzar jornada: 2 a 4 objetivos concretos, cada uno con uno o más proyectos. A cualquier hora. */
+export default function FormComienzo({ estado, onListo, onCancelar }: Props) {
   const defecto = estado.ultimo_proyecto_id ?? estado.proyectos[0]?.id ?? "";
   const [filas, setFilas] = useState(() =>
     Array.from({ length: 2 }, () => ({ proyecto_ids: defecto ? [defecto] : [], descripcion: "" })),
   );
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const v = estado.ventanas.manana;
 
   async function enviar() {
     setError(null);
@@ -31,7 +28,7 @@ export default function EncuestaManana({ estado, obligatoria, onListo, onCancela
     if (limpias.some((f) => f.proyecto_ids.length === 0)) return setError("Cada objetivo necesita al menos un proyecto");
     setOcupado(true);
     try {
-      onListo(await api<EstadoDia>("/api/bitacora/manana", { method: "POST", json: { tareas: limpias } }));
+      onListo(await api<EstadoDia>("/api/jornada/comenzar", { method: "POST", json: { tareas: limpias } }));
     } catch (e) {
       setError((e as ErrorApi).message);
       setOcupado(false);
@@ -42,15 +39,11 @@ export default function EncuestaManana({ estado, obligatoria, onListo, onCancela
     <section className="animate-aparecer">
       <div className="mb-5 rounded-2xl border border-aether-accent/25 bg-gradient-to-br from-aether-accent/15 to-transparent p-4">
         <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-aether-accent-soft">
-          <Sunrise size={14} /> Bitácora de la mañana
-          <span className="ml-auto flex items-center gap-1 normal-case tracking-normal text-slate-400">
-            <Clock size={11} /> {v.inicio}–{v.fin}
-          </span>
+          <Play size={14} /> Comenzar jornada
         </p>
-        <h1 className="mt-2 text-lg font-bold text-white">¿Qué vas a lograr hoy?</h1>
+        <h1 className="mt-2 text-lg font-bold text-white">¿Qué vas a lograr en esta jornada?</h1>
         <p className="mt-1 text-xs text-slate-400">
-          {estado.hoy_texto}. Define de 2 a 4 objetivos concretos y verificables
-          {obligatoria ? "; después verás tu tablero." : "."}
+          Define de 2 a 4 objetivos concretos y verificables. Trabaja a tu ritmo y termina la jornada cuando cierres por hoy.
         </p>
       </div>
 
@@ -107,19 +100,11 @@ export default function EncuestaManana({ estado, obligatoria, onListo, onCancela
       {error && <p role="alert" className="mt-4 rounded-xl border border-aether-danger/30 bg-aether-danger/10 px-3 py-2.5 text-xs text-aether-danger">{error}</p>}
 
       <button type="button" onClick={enviar} disabled={ocupado || estado.proyectos.length === 0} className="boton-primario mt-5">
-        {ocupado && <LoaderCircle size={16} className="animate-spin" />} Registrar objetivos del día
+        {ocupado && <LoaderCircle size={16} className="animate-spin" />} Comenzar jornada
       </button>
-
-      <div className="mt-4 flex items-center justify-center gap-4 text-xs">
-        <button type="button" onClick={onOoo} className="flex items-center gap-1 text-slate-400 hover:text-white">
-          <Plane size={13} /> Hoy estoy fuera de oficina
-        </button>
-        {!obligatoria && (
-          <button type="button" onClick={onCancelar} className="text-slate-400 hover:text-white">
-            Volver al tablero
-          </button>
-        )}
-      </div>
+      <button type="button" onClick={onCancelar} className="mx-auto mt-4 block text-xs text-slate-400 hover:text-white">
+        Volver
+      </button>
     </section>
   );
 }

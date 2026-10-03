@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Aether Ops",
-  description: "Bitácora diaria, ausencias y rendición de compras",
+  description: "Jornadas por objetivos, disponibilidad y compras por proyecto",
   robots: { index: false, follow: false },
   appleWebApp: { capable: true, title: "Aether Ops", statusBarStyle: "black-translucent" },
 };

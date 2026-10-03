@@ -1,7 +1,7 @@
 // Cálculos de los tableros de jefatura (/admin) y gerencia (/exec). Reciben la base de UNA empresa.
 // Sin "server-only" para poder probarlos con tsx.
 import type Database from "better-sqlite3";
-import { calcularProgreso, type DiaResumen } from "./metricas";
+import { calcularProgreso, porcentaje } from "./metricas";
 import { esFinDeSemana, fechaLocal, sumarDias } from "./tiempo";
 
 type DB = Database.Database;
@@ -25,39 +25,49 @@ export function equipoActivo(db: DB, ids?: Set<string> | null): Persona[] {
 
 // ───────────────────────────── Standup ─────────────────────────────
 
+/** Última jornada de la persona (en curso o terminada), de cualquier fecha. Sin horas: se trabaja por objetivos. */
+export interface UltimaJornada {
+  fecha: string;
+  estado: "en_curso" | "terminada";
+  comprometidas: number;
+  completadas: number;
+  saydo: number | null;
+  tareas: { descripcion: string; estado: string; motivo_pendiente: string | null; proyectos: string[] }[];
+}
+
 export interface FilaStandup {
   id: string;
   nombre: string;
   email: string;
   prioridad: 1 | 2 | 3 | 4;
   motivo: string;
-  hoy: DiaResumen;
-  tareas_hoy: { descripcion: string; estado: string; motivo_pendiente: string | null; proyectos: string[] }[];
-  ooo_hoy: { dia_completo: number; hora_inicio: string | null; hora_fin: string | null; motivo: string | null }[];
+  ultima: UltimaJornada | null;
+  no_disponible_hoy: { motivo: string | null } | null;
   bloqueos: { bitacora_id: string; fecha: string; texto: string }[];
   saydo_14d: number | null;
   racha: number;
-  dias_sin_registro_14d: number;
 }
 
 export const UMBRAL_SAYDO_ALERTA = 70;
 
 /**
  * Prioridad de intervención: 1) bloqueos sin resolver (últimos 14 días), 2) Say-Do 14 días < 70 %,
- * 3) ausente hoy, 4) resto.
+ * 3) no disponible hoy, 4) resto. No se alerta por días sin jornada: el equipo no tiene horario.
  */
 export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[] {
   const desde = sumarDias(hoy, -14);
+  const qUltima = db.prepare(
+    `SELECT id, fecha, checkout_tarde FROM bitacoras WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 1`,
+  );
   const qTareas = db.prepare(
     `SELECT t.descripcion, t.estado, t.motivo_pendiente,
             (SELECT group_concat(codigo, ',') FROM (
                SELECT p.codigo FROM tarea_proyectos tp JOIN proyectos p ON p.id = tp.proyecto_id
                 WHERE tp.tarea_id = t.id ORDER BY p.codigo)) AS codigos
-       FROM tareas_diarias t JOIN bitacoras b ON b.id = t.bitacora_id
-      WHERE b.usuario_id = ? AND b.fecha = ? ORDER BY t.orden`,
+       FROM tareas_diarias t WHERE t.bitacora_id = ? ORDER BY t.orden`,
   );
-  const qOoo = db.prepare(
-    "SELECT dia_completo, hora_inicio, hora_fin, motivo FROM ausencias_ooo WHERE usuario_id = ? AND fecha = ? ORDER BY hora_inicio",
+  const qNoDisponible = db.prepare(
+    "SELECT motivo FROM ausencias_ooo WHERE usuario_id = ? AND fecha = ? AND dia_completo = 1",
   );
   const qBloqueos = db.prepare(
     `SELECT id AS bitacora_id, fecha, bloqueos AS texto FROM bitacoras
@@ -68,7 +78,26 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
   const filas = personas.map((p): FilaStandup => {
     const prog = calcularProgreso(db, p.id, hoy, fechaLocal(p.creado_en));
     const bloqueos = qBloqueos.all(p.id, desde) as FilaStandup["bloqueos"];
-    const ooo_hoy = qOoo.all(p.id, hoy) as FilaStandup["ooo_hoy"];
+    const no_disponible_hoy = (qNoDisponible.get(p.id, hoy) as { motivo: string | null } | undefined) ?? null;
+
+    const b = qUltima.get(p.id) as { id: string; fecha: string; checkout_tarde: string | null } | undefined;
+    let ultima: UltimaJornada | null = null;
+    if (b) {
+      const tareas = (qTareas.all(b.id) as (Omit<UltimaJornada["tareas"][number], "proyectos"> & { codigos: string | null })[]).map(
+        ({ codigos, ...t }) => ({ ...t, proyectos: codigos ? codigos.split(",") : [] }),
+      );
+      const comprometidas = tareas.filter((t) => t.estado !== "postergado_ooo").length;
+      const completadas = tareas.filter((t) => t.estado === "completado").length;
+      ultima = {
+        fecha: b.fecha,
+        estado: b.checkout_tarde ? "terminada" : "en_curso",
+        comprometidas,
+        completadas,
+        saydo: porcentaje(completadas, comprometidas),
+        tareas,
+      };
+    }
+
     let prioridad: FilaStandup["prioridad"] = 4;
     let motivo = "Sin alertas";
     if (bloqueos.length) {
@@ -77,9 +106,9 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
     } else if (prog.saydo_14d !== null && prog.saydo_14d < UMBRAL_SAYDO_ALERTA) {
       prioridad = 2;
       motivo = `Say-Do 14 días ${prog.saydo_14d}%`;
-    } else if (ooo_hoy.length) {
+    } else if (no_disponible_hoy) {
       prioridad = 3;
-      motivo = ooo_hoy.some((a) => a.dia_completo) ? "Fuera de oficina hoy" : "Ausencia parcial hoy";
+      motivo = "No disponible hoy";
     }
     return {
       id: p.id,
@@ -87,49 +116,32 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
       email: p.email,
       prioridad,
       motivo,
-      hoy: prog.hoy,
-      tareas_hoy: (qTareas.all(p.id, hoy) as (Omit<FilaStandup["tareas_hoy"][number], "proyectos"> & { codigos: string | null })[]).map(
-        ({ codigos, ...t }) => ({ ...t, proyectos: codigos ? codigos.split(",") : [] }),
-      ),
-      ooo_hoy,
+      ultima,
+      no_disponible_hoy,
       bloqueos,
       saydo_14d: prog.saydo_14d,
       racha: prog.racha,
-      dias_sin_registro_14d: prog.dias_sin_registro_14d,
     };
   });
   return filas.sort((a, b) => a.prioridad - b.prioridad || a.nombre.localeCompare(b.nombre, "es"));
 }
 
-// ──────────────────────── Capacidad 14 días ────────────────────────
+// ──────────────────────── Disponibilidad 14 días ────────────────────────
 
-/** Jornada base para descontar ausencias parciales. Configurable con JORNADA="08:30-18:00". */
-export function jornada(): { inicio: string; fin: string; minutos: number } {
-  const m = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(process.env.JORNADA ?? "");
-  const [inicio, fin] = m ? [m[1], m[2]] : ["08:30", "18:00"];
-  return { inicio, fin, minutos: aMin(fin) - aMin(inicio) };
-}
-
-function aMin(h: string): number {
-  const [hh, mm] = h.split(":").map(Number);
-  return hh * 60 + mm;
-}
-
-export type EstadoCelda = "disponible" | "parcial" | "ooo" | "fin_de_semana" | "feriado";
+export type EstadoCelda = "disponible" | "no_disponible" | "fin_de_semana" | "feriado";
 
 export interface Capacidad {
-  jornada: { inicio: string; fin: string };
   dias: { fecha: string; laboral: boolean; disponibles: number; personas: number }[];
   filas: {
     id: string;
     nombre: string;
-    celdas: { fecha: string; estado: EstadoCelda; fraccion: number; detalle: string | null }[];
-    dias_disponibles: number;
+    celdas: { fecha: string; estado: EstadoCelda; detalle: string | null }[];
+    dias_disponibles: number; // días hábiles sin marca de no disponible
   }[];
 }
 
+/** Quién está disponible cada día de las próximas dos semanas (días completos; sin horario). */
 export function capacidad(db: DB, hoy: string, personas: Persona[], dias = 14): Capacidad {
-  const j = jornada();
   const hasta = sumarDias(hoy, dias - 1);
   const feriados = new Map(
     (db.prepare("SELECT fecha, nombre FROM feriados WHERE fecha BETWEEN ? AND ?").all(hoy, hasta) as {
@@ -137,53 +149,30 @@ export function capacidad(db: DB, hoy: string, personas: Persona[], dias = 14): 
       nombre: string;
     }[]).map((f) => [f.fecha, f.nombre]),
   );
-  const qOoo = db.prepare(
-    `SELECT fecha, dia_completo, hora_inicio, hora_fin, motivo FROM ausencias_ooo
-      WHERE usuario_id = ? AND fecha BETWEEN ? AND ?`,
+  const qNoDisponible = db.prepare(
+    `SELECT fecha, motivo FROM ausencias_ooo WHERE usuario_id = ? AND dia_completo = 1 AND fecha BETWEEN ? AND ?`,
   );
   const fechas = Array.from({ length: dias }, (_, i) => sumarDias(hoy, i));
+  const habil = (f: string) => !esFinDeSemana(f) && !feriados.has(f);
 
   const filas = personas.map((p) => {
-    const ausencias = qOoo.all(p.id, hoy, hasta) as {
-      fecha: string;
-      dia_completo: number;
-      hora_inicio: string | null;
-      hora_fin: string | null;
-      motivo: string | null;
-    }[];
+    const marcas = new Map(
+      (qNoDisponible.all(p.id, hoy, hasta) as { fecha: string; motivo: string | null }[]).map((a) => [a.fecha, a.motivo]),
+    );
     const celdas = fechas.map((fecha) => {
-      if (esFinDeSemana(fecha)) return { fecha, estado: "fin_de_semana" as const, fraccion: 0, detalle: null };
-      if (feriados.has(fecha)) return { fecha, estado: "feriado" as const, fraccion: 0, detalle: feriados.get(fecha)! };
-      const delDia = ausencias.filter((a) => a.fecha === fecha);
-      if (delDia.some((a) => a.dia_completo)) {
-        return { fecha, estado: "ooo" as const, fraccion: 0, detalle: delDia.find((a) => a.dia_completo)?.motivo ?? null };
-      }
-      if (delDia.length) {
-        const fuera = delDia.reduce((s, a) => {
-          const ini = Math.max(aMin(a.hora_inicio!), aMin(j.inicio));
-          const fin = Math.min(aMin(a.hora_fin!), aMin(j.fin));
-          return s + Math.max(0, fin - ini);
-        }, 0);
-        const fraccion = Math.max(0, Math.round((1 - fuera / j.minutos) * 100) / 100);
-        const detalle = delDia.map((a) => `${a.hora_inicio}–${a.hora_fin}`).join(", ");
-        return { fecha, estado: (fraccion < 1 ? "parcial" : "disponible") as EstadoCelda, fraccion, detalle };
-      }
-      return { fecha, estado: "disponible" as const, fraccion: 1, detalle: null };
+      if (marcas.has(fecha)) return { fecha, estado: "no_disponible" as const, detalle: marcas.get(fecha) ?? null };
+      if (esFinDeSemana(fecha)) return { fecha, estado: "fin_de_semana" as const, detalle: null };
+      if (feriados.has(fecha)) return { fecha, estado: "feriado" as const, detalle: feriados.get(fecha)! };
+      return { fecha, estado: "disponible" as const, detalle: null };
     });
-    return {
-      id: p.id,
-      nombre: p.nombre,
-      celdas,
-      dias_disponibles: Math.round(celdas.reduce((s, c) => s + c.fraccion, 0) * 10) / 10,
-    };
+    return { id: p.id, nombre: p.nombre, celdas, dias_disponibles: celdas.filter((c) => c.estado === "disponible").length };
   });
 
   return {
-    jornada: { inicio: j.inicio, fin: j.fin },
     dias: fechas.map((fecha, i) => ({
       fecha,
-      laboral: !esFinDeSemana(fecha) && !feriados.has(fecha),
-      disponibles: Math.round(filas.reduce((s, f) => s + f.celdas[i].fraccion, 0) * 10) / 10,
+      laboral: habil(fecha),
+      disponibles: filas.filter((f) => f.celdas[i].estado === "disponible").length,
       personas: filas.length,
     })),
     filas,

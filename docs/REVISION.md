@@ -50,12 +50,15 @@ Each finding lists the failure and what this codebase does instead. Severity:
 | M10 | No login fields on `usuarios` | `pin_hash`, `debe_cambiar_pin`, `version_sesion`, `intentos_fallidos`, `bloqueado_hasta`. |
 | M11 | Holidays not modelled | `feriados` table, seeded with the 2026 national holidays. Add 2027 before January. |
 
-## 4. Rules the spec left open (decided here — change in `lib/metricas.ts`)
+## 4. Rules the spec left open (current rules — see §9; change in `lib/metricas.ts`)
 
-- **Working day**: Mon–Fri, not in `feriados`, not a full-day OOO for that user.
-- **Say-Do** (day and 14-day): completed ÷ (committed − `postergado_ooo`). Tasks of past logs that were never closed count as not completed. Days with no log at all don't change Say-Do but break the streak and are reported as "días sin registro".
-- **Streak**: consecutive working days (walking back from yesterday) with the log closed **before 19:30 local** and Say-Do ≥ 75 %. Non-working days are skipped, not broken. Today adds +1 once it qualifies; an open today never breaks it.
-- **Time windows** (08:30–10:30 / 17:00–19:30, env `VENTANA_MANANA` / `VENTANA_TARDE`): see §8. The API still accepts a late check-in or close — a late log is better than none. The end of the afternoon window only affects the streak.
+- **Jornada**: started and finished by the person with buttons, any time, any day; one per calendar day
+  (America/Santiago). An unfinished jornada stays open until finished, even past midnight.
+- **Say-Do** (per jornada and 14 days): achieved ÷ (committed − postponed), over jornadas dated in the last 14
+  days, excluding the one in progress. Old unfinished jornadas (pre-0.4 data) count their pending items as not done.
+- **Streak**: consecutive finished jornadas with Say-Do ≥ 75 %. Days without a jornada are ignored; a finished
+  jornada below 75 % (or an old unfinished one) resets it; the jornada in progress doesn't count yet.
+- No rule uses the time of day.
 
 ## 5. Login (email + 6-digit code, as requested)
 
@@ -95,6 +98,7 @@ capacity and expense views filter by "my supervised" or "whole team".
   create a separate team account with your company email.
 - Any admin can validate any expense of either company; validations store the admin's id and name.
 - Capacity baseline: workday 08:30–18:00 (env `JORNADA`); a partial absence subtracts its overlap with it.
+  *(Replaced in pass 4 by whole-day availability.)*
 - Executive "cost per solution" excludes rejected expenses and includes pending ones (shown separately).
 - The IVA share uses net factura amounts vs gross boleta amounts (what each document shows).
 
@@ -121,7 +125,7 @@ RUT and shipping are written into the description; the old project becomes its o
 objectives keep their project. Tables are rebuilt through temporary copies so `DROP TABLE` doesn't cascade.
 Covered by a test that migrates a v1 database with data and checks `foreign_key_check`.
 
-**Time-aware home (`lib/jornada.ts`, shared by server and browser).** A survey is mandatory only inside its
+**Time-aware home** *(replaced in pass 4 — no time windows)*. A survey is mandatory only inside its
 window and only if still pending; any other time the member gets a dashboard (objectives with tap-to-complete,
 level/XP, streaks, week strip, achievements, purchases). Submitting the morning survey returns to the
 dashboard — the afternoon close is not opened right away. The browser recomputes the view every 30 s from the
@@ -139,3 +143,28 @@ Admin only; covered by an e2e test.
 afternoon window +5, perfect day +15; level n needs 50·n·(n−1) XP. Achievements are computed from history (no
 extra tables). Confetti on logging objectives, completing one, and closing the day; disabled under
 `prefers-reduced-motion`.
+
+## 9. Pass 4 — goal-based work, no schedule
+
+The team works on boleta de honorarios, so the app no longer ties anything to the clock. In Chile, a fixed
+schedule, attendance control or punctuality metrics are indicators of subordination that can be used to
+reclassify a freelance relationship as employment (Código del Trabajo arts. 7–8); this design avoids
+building those signals into the tool. Not legal advice.
+
+- **Start / finish instead of morning / afternoon surveys.** `POST /api/jornada/comenzar` (objectives) and
+  `POST /api/jornada/terminar` (results), any time. Time windows, the "late" banners, and the env vars
+  `VENTANA_MANANA`, `VENTANA_TARDE` and `JORNADA` are gone (`lib/jornada.ts` removed).
+- **One jornada per day; a forgotten one stays open.** "In progress" = the person's most recent jornada if
+  unfinished, whatever its date. Starting is refused (409) while one is open, after today's was finished, or
+  on a day marked unavailable. Finishing and ticking objectives act on the jornada in progress, derived from
+  the session — never from a client-sent id. No schema change: same `bitacoras` table (`checkin_manana` =
+  start, `checkout_tarde` = finish).
+- **Metrics without time** (§4). XP: objective +10, finished jornada +5, perfect jornada +15. Achievements
+  "Madrugador" and "Puntual" replaced by "Constante" (10 finished jornadas) and "Todoterreno" (objectives
+  achieved in 3 projects).
+- **Admins see results, not hours.** Standup shows each person's latest jornada (in progress or finished)
+  with objectives and outcome; no start/finish times, no "no log today" / "days without log" alerts. Priority:
+  blockers → Say-Do < 70 % → unavailable today → rest. Start/finish times are shown only to the person.
+- **Unavailable days** replace OOO: whole days only (`/api/no-disponible`), for planning; they never affect the
+  streak. Partial absences from earlier versions are ignored; postponing objectives "por ausencia" is no
+  longer offered (old postponed items keep their state). The 14-day view counts available working days.

@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, Plane, TrendingUp } from "lucide-react";
+import { CalendarOff, Flame, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import type { EstadoDia } from "@/lib/dominio";
 import { cx } from "@/lib/cliente";
@@ -8,12 +8,12 @@ import { cx } from "@/lib/cliente";
 export default function Cabecera({
   estado,
   nombre,
-  onOoo,
+  onNoDisponible,
   compacta,
 }: {
   estado: EstadoDia;
   nombre: string;
-  onOoo: () => void;
+  onNoDisponible: () => void;
   compacta?: boolean;
 }) {
   return (
@@ -24,7 +24,8 @@ export default function Cabecera({
       </div>
       <div className="flex items-center gap-2">
         <span
-          aria-label={`Racha activa: ${estado.racha} días`}
+          aria-label={`Racha: ${estado.racha} jornadas`}
+          title="Jornadas seguidas con al menos 75 % logrado"
           className={cx(
             "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold",
             estado.racha > 0 ? "border-aether-success/30 bg-aether-success/10 text-aether-success" : "border-aether-border text-slate-400",
@@ -35,10 +36,12 @@ export default function Cabecera({
         </span>
         <button
           type="button"
-          onClick={onOoo}
-          className="flex items-center gap-1 rounded-full border border-aether-accent/30 bg-aether-accent/10 px-2.5 py-1 text-xs font-semibold text-aether-accent-soft active:scale-95"
+          onClick={onNoDisponible}
+          aria-label="Días no disponibles"
+          title="Días no disponibles"
+          className="rounded-full p-1.5 text-slate-400 hover:bg-white/5 active:scale-95"
         >
-          <Plane size={14} /> OOO
+          <CalendarOff size={18} />
         </button>
         <Link href="/mi-progreso" aria-label="Historial completo" className="rounded-full p-1.5 text-slate-400 hover:bg-white/5">
           <TrendingUp size={18} />

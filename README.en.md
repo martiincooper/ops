@@ -1,7 +1,8 @@
 # Aether Ops (`ops.aether.cl`) — English
 
-Daily log (morning objectives → afternoon close), out-of-office, purchases per project, streak, Say-Do and
-achievements, for two companies on one site. Single container: Next.js 15 standalone + SQLite (WAL). UI in Spanish.
+Goal-based work sessions ("jornadas": start with objectives → finish with results), unavailable days, purchases
+per project, streak, Say-Do and achievements, for two companies on one site. Built for a team that works by
+goals with no fixed hours (freelancers on boleta de honorarios). Single container: Next.js 15 standalone + SQLite (WAL). UI in Spanish.
 
 The Spanish [`README.md`](README.md) is the maintained one; this file is a summary.
 Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
@@ -16,20 +17,19 @@ Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
 - Supervision is many-to-many (admin ↔ team member, per company), set when creating an account and editable later.
 - Data: `/data/control.db` and `/data/empresas/<clave>/app.db`.
 
-## Team member's day (Chile time)
+## Team member's jornada (no schedule)
 
-| Time | Not done yet | Done |
-|---|---|---|
-| before 08:30 | dashboard, invitation to log objectives | dashboard |
-| **08:30–10:30** | **morning survey (mandatory)** | dashboard |
-| 10:30–17:00 | dashboard, button to log late objectives | dashboard; tick objectives as they are achieved |
-| **17:00–19:30** | **afternoon close (mandatory)** | dashboard |
-| after 19:30 | dashboard, prompt to close anyway (counts for Say-Do, not for the streak) | dashboard |
-
-Surveys are only forced inside their window; finishing one returns to the dashboard. Weekends and holidays:
-always the dashboard. Windows: `VENTANA_MANANA`, `VENTANA_TARDE`. The dashboard shows today's objectives
-(tap to complete, with confetti), completion ring, level and XP, current and best streak, 14-day Say-Do,
-the week, achievements and today's purchases.
+- **Comenzar jornada** (button, any time, any day): 2–4 objectives, each with one or more projects.
+- Tick objectives as they're achieved (confetti, +10 XP). **Terminar jornada**: results, reasons for pending
+  items, optional blocker.
+- One jornada per day. A forgotten one stays open (also past midnight) and must be finished before starting
+  the next. Nothing is opened or required by the clock.
+- Streak = consecutive finished jornadas with ≥75 % achieved; days without a jornada don't break it.
+  XP: objective +10, finished jornada +5, perfect jornada +15. No time-based metrics or achievements.
+- Unavailable days (whole days) for planning; they don't affect the streak.
+- Admins see each person's latest jornada (objectives and results), blockers and Say-Do — never start/finish
+  times, and no alerts for days without work. Rationale: with boleta de honorarios, fixed hours, attendance
+  control or punctuality metrics are indicators of an employment relationship (not legal advice).
 
 Objectives and purchases can belong to **one or more projects**. A purchase is name, optional description,
 amount (CLP) and projects; with several projects the amount is split equally (leftover pesos go to the first ones).
@@ -48,6 +48,7 @@ docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
 ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
+Upgrading from 0.3: no schema change; `VENTANA_MANANA`, `VENTANA_TARDE` and `JORNADA` are no longer used.
 Upgrading from 0.2: back up, then restart with the new code. Each company DB migrates on start (purchase amount
 becomes the total paid; document type, folio, RUT and shipping are kept in the description; existing
 objectives and purchases keep their single project). The `comprobantes/` folders are no longer used.
@@ -56,8 +57,8 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, windows, streak, Say-Do, XP, schema + migration, companies, split, exec metrics (25)
-# end-to-end against a server with an EMPTY data dir (40)
+npm run test:logica   # timezone, goal-based streak, Say-Do, XP, schema + migration, availability, split, exec (23)
+# end-to-end against a server with an EMPTY data dir (41)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 
@@ -70,10 +71,7 @@ BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 | `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | `key\|Name\|domains`, `;`-separated |
 | `PIN_INICIAL` | `000000` | Initial code for new and reset accounts |
 | `DATA_DIR` | `/data` (Docker), `./data` (local) | SQLite databases |
-| `TZ_NEGOCIO` | `America/Santiago` | Defines "today", survey windows and streaks |
-| `VENTANA_MANANA` | `08:30-10:30` | Morning survey window |
-| `VENTANA_TARDE` | `17:00-19:30` | Afternoon close window; its end is the streak cut-off |
-| `JORNADA` | `08:30-18:00` | Workday used to subtract partial absences in capacity |
+| `TZ_NEGOCIO` | `America/Santiago` | Defines which date is "today" (one jornada per day) |
 | `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
 
 Production (reverse proxy, backups, first-day checklist): see the Spanish README, sections 3–4.

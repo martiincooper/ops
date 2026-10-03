@@ -1,9 +1,9 @@
 "use client";
 
-import { LoaderCircle, Plane, Trash2, X } from "lucide-react";
+import { CalendarOff, LoaderCircle, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Ausencia, EstadoDia } from "@/lib/dominio";
-import { ErrorApi, api, cx } from "@/lib/cliente";
+import { ErrorApi, api } from "@/lib/cliente";
 
 const DIAS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -12,22 +12,16 @@ function fechaCorta(f: string) {
   return `${DIAS[new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay()]} ${d} ${MESES[m - 1]}`;
 }
 
-export function textoAusencia(a: Ausencia) {
-  return a.dia_completo ? "Día completo" : `${a.hora_inicio} – ${a.hora_fin}`;
-}
-
 interface Props {
   hoy: string;
-  ausencias: Ausencia[];
+  dias: Ausencia[];
   onCambio: (e: EstadoDia) => void;
   onCerrar: () => void;
 }
 
-export default function ModalOoo({ hoy, ausencias, onCambio, onCerrar }: Props) {
+/** Días completos en que la persona no estará disponible (para la planificación de la jefatura). */
+export default function ModalNoDisponible({ hoy, dias, onCambio, onCerrar }: Props) {
   const [fecha, setFecha] = useState(hoy);
-  const [diaCompleto, setDiaCompleto] = useState(true);
-  const [inicio, setInicio] = useState("14:00");
-  const [fin, setFin] = useState("17:00");
   const [motivo, setMotivo] = useState("");
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,24 +37,14 @@ export default function ModalOoo({ hoy, ausencias, onCambio, onCerrar }: Props) 
     };
   }, [onCerrar]);
 
-  async function registrar() {
+  async function marcar() {
     setOcupado("nuevo");
     setError(null);
     setOk(null);
     try {
-      const e = await api<EstadoDia>("/api/ooo", {
-        method: "POST",
-        json: {
-          fecha,
-          dia_completo: diaCompleto,
-          hora_inicio: diaCompleto ? null : inicio,
-          hora_fin: diaCompleto ? null : fin,
-          motivo: motivo.trim() || null,
-        },
-      });
-      onCambio(e);
+      onCambio(await api<EstadoDia>("/api/no-disponible", { method: "POST", json: { fecha, motivo: motivo.trim() || null } }));
       setMotivo("");
-      setOk(`Ausencia registrada: ${fechaCorta(fecha)}, ${diaCompleto ? "día completo" : `${inicio} – ${fin}`}`);
+      setOk(`Marcado: ${fecha === hoy ? "hoy" : fechaCorta(fecha)}`);
     } catch (err) {
       setError((err as ErrorApi).message);
     } finally {
@@ -68,12 +52,12 @@ export default function ModalOoo({ hoy, ausencias, onCambio, onCerrar }: Props) 
     }
   }
 
-  async function cancelar(id: string) {
+  async function quitar(id: string) {
     setOcupado(id);
     setError(null);
     setOk(null);
     try {
-      onCambio(await api<EstadoDia>(`/api/ooo/${id}`, { method: "DELETE" }));
+      onCambio(await api<EstadoDia>(`/api/no-disponible/${id}`, { method: "DELETE" }));
     } catch (err) {
       setError((err as ErrorApi).message);
     } finally {
@@ -87,7 +71,7 @@ export default function ModalOoo({ hoy, ausencias, onCambio, onCerrar }: Props) 
       onClick={onCerrar}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="titulo-ooo"
+      aria-labelledby="titulo-nd"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -95,55 +79,30 @@ export default function ModalOoo({ hoy, ausencias, onCambio, onCerrar }: Props) 
       >
         <div className="mx-auto -mt-1 mb-1 h-1 w-10 rounded-full bg-slate-700" />
         <div className="flex items-center justify-between">
-          <h3 id="titulo-ooo" className="flex items-center gap-2 text-sm font-bold text-white">
-            <Plane size={16} className="text-aether-accent-soft" /> Fuera de Oficina
+          <h3 id="titulo-nd" className="flex items-center gap-2 text-sm font-bold text-white">
+            <CalendarOff size={16} className="text-aether-accent-soft" /> Días no disponibles
           </h3>
           <button onClick={onCerrar} aria-label="Cerrar" className="rounded-full p-1.5 text-slate-400 hover:bg-white/5">
             <X size={18} />
           </button>
         </div>
-
-        <div>
-          <label htmlFor="ooo-fecha" className="etiqueta">Fecha</label>
-          <input id="ooo-fecha" type="date" value={fecha} min={hoy} onChange={(e) => setFecha(e.target.value)} className="campo" />
-        </div>
-
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setDiaCompleto(true)} className={cx("segmento", diaCompleto ? "segmento-activo" : "segmento-inactivo")}>
-            Todo el día
-          </button>
-          <button type="button" onClick={() => setDiaCompleto(false)} className={cx("segmento", !diaCompleto ? "segmento-activo" : "segmento-inactivo")}>
-            Parcial
-          </button>
-        </div>
         <p className="-mt-2 text-[11px] text-slate-500">
-          {diaCompleto
-            ? "Ese día no se exige bitácora y no afecta tu racha."
-            : "Podrás marcar objetivos como postergados por ausencia al cerrar la jornada."}
+          Avisa qué días no vas a trabajar para que tu jefatura pueda planificar. No afecta tu racha.
         </p>
 
-        {!diaCompleto && (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label htmlFor="ooo-inicio" className="etiqueta">Hora inicio</label>
-              <input id="ooo-inicio" type="time" value={inicio} onChange={(e) => setInicio(e.target.value)} className="campo" />
-            </div>
-            <div>
-              <label htmlFor="ooo-fin" className="etiqueta">Hora término</label>
-              <input id="ooo-fin" type="time" value={fin} onChange={(e) => setFin(e.target.value)} className="campo" />
-            </div>
-          </div>
-        )}
-
         <div>
-          <label htmlFor="ooo-motivo" className="etiqueta">Motivo (opcional)</label>
+          <label htmlFor="nd-fecha" className="etiqueta">Día</label>
+          <input id="nd-fecha" type="date" value={fecha} min={hoy} onChange={(e) => setFecha(e.target.value)} className="campo" />
+        </div>
+        <div>
+          <label htmlFor="nd-motivo" className="etiqueta">Motivo (opcional)</label>
           <input
-            id="ooo-motivo"
+            id="nd-motivo"
             type="text"
             maxLength={200}
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Ej: Trámite personal, médico"
+            placeholder="Ej: Viaje, trámite, otro proyecto"
             className="campo"
           />
         </div>
@@ -153,30 +112,29 @@ export default function ModalOoo({ hoy, ausencias, onCambio, onCerrar }: Props) 
 
         <button
           type="button"
-          onClick={registrar}
+          onClick={marcar}
           disabled={ocupado !== null}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-aether-success py-3 text-sm font-bold text-black transition-all active:scale-[0.99] disabled:opacity-50"
         >
           {ocupado === "nuevo" && <LoaderCircle size={16} className="animate-spin" />}
-          Confirmar ausencia
+          Marcar no disponible
         </button>
 
-        {ausencias.length > 0 && (
+        {dias.length > 0 && (
           <div className="border-t border-aether-border pt-3">
-            <p className="etiqueta">Próximas ausencias</p>
+            <p className="etiqueta">Próximos días no disponibles</p>
             <ul className="divide-y divide-aether-border">
-              {ausencias.map((a) => (
+              {dias.map((a) => (
                 <li key={a.id} className="flex items-center justify-between py-2 text-xs">
                   <div>
                     <span className="font-semibold text-white">{a.fecha === hoy ? "Hoy" : fechaCorta(a.fecha)}</span>
-                    <span className="text-slate-400"> · {textoAusencia(a)}</span>
                     {a.motivo && <p className="text-[11px] text-slate-500">{a.motivo}</p>}
                   </div>
                   <button
                     type="button"
-                    onClick={() => cancelar(a.id)}
+                    onClick={() => quitar(a.id)}
                     disabled={ocupado !== null}
-                    aria-label="Cancelar ausencia"
+                    aria-label={`Quitar ${a.fecha === hoy ? "hoy" : fechaCorta(a.fecha)}`}
                     className="rounded-lg p-2 text-slate-500 hover:bg-aether-danger/10 hover:text-aether-danger disabled:opacity-40"
                   >
                     {ocupado === a.id ? <LoaderCircle size={15} className="animate-spin" /> : <Trash2 size={15} />}

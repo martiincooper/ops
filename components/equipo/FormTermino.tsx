@@ -1,33 +1,30 @@
 "use client";
 
-import { AlertTriangle, CircleCheck, Circle, Clock, LifeBuoy, LoaderCircle, Plane, Sunset } from "lucide-react";
+import { CircleCheck, Circle, Flag, LifeBuoy, LoaderCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import Anillo from "@/components/Anillo";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
 import type { EstadoDia } from "@/lib/dominio";
-import { ErrorApi, api, cx } from "@/lib/cliente";
+import { ErrorApi, api, cx, horaDe } from "@/lib/cliente";
 
 type EstadoTarea = "completado" | "pendiente" | "postergado_ooo";
 
 interface Props {
   estado: EstadoDia;
-  obligatoria: boolean;
-  fueraDeHora: boolean;
   onListo: (e: EstadoDia) => void;
   onCancelar: () => void;
-  onOoo: () => void;
 }
 
-/** Cierre de la tarde. Parte de lo que el integrante ya marcó durante el día. */
-export default function EncuestaTarde({ estado, obligatoria, fueraDeHora, onListo, onCancelar, onOoo }: Props) {
+/** Terminar jornada: balance de cada objetivo. Parte de lo que la persona ya marcó mientras trabajaba. */
+export default function FormTermino({ estado, onListo, onCancelar }: Props) {
   const [marcas, setMarcas] = useState<Record<string, { estado: EstadoTarea; motivo: string }>>(() =>
     Object.fromEntries(estado.tareas.map((t) => [t.id, { estado: t.estado, motivo: t.motivo_pendiente ?? "" }])),
   );
   const [bloqueo, setBloqueo] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const v = estado.ventanas.tarde;
-  const tieneOooHoy = estado.ooo_hoy.length > 0;
+  const j = estado.jornada;
+  const deOtroDia = j !== null && j.fecha !== estado.hoy;
 
   const cuenta = useMemo(() => {
     const lista = estado.tareas.map((t) => marcas[t.id]?.estado ?? t.estado);
@@ -46,7 +43,7 @@ export default function EncuestaTarde({ estado, obligatoria, fueraDeHora, onList
     setOcupado(true);
     try {
       onListo(
-        await api<EstadoDia>("/api/bitacora/tarde", {
+        await api<EstadoDia>("/api/jornada/terminar", {
           method: "POST",
           json: {
             tareas: estado.tareas.map((t) => ({
@@ -68,18 +65,16 @@ export default function EncuestaTarde({ estado, obligatoria, fueraDeHora, onList
     <section className="animate-aparecer">
       <div className="mb-5 flex items-center gap-4 rounded-2xl border border-aether-warning/25 bg-gradient-to-br from-aether-warning/10 to-transparent p-4">
         <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold uppercase tracking-wider text-aether-warning">
-            <span className="flex items-center gap-1.5 whitespace-nowrap">
-              <Sunset size={14} /> Cierre de la tarde
-            </span>
-            <span className="flex items-center gap-1 whitespace-nowrap normal-case tracking-normal text-slate-400">
-              <Clock size={11} /> {v.inicio}–{v.fin}
-            </span>
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-aether-warning">
+            <Flag size={14} /> Terminar jornada
           </p>
-          <h1 className="mt-2 text-lg font-bold text-white">¿Cómo te fue hoy?</h1>
-          <p className="mt-1 text-xs text-slate-400">Confirma lo logrado y cuéntanos qué quedó pendiente.</p>
+          <h1 className="mt-2 text-lg font-bold text-white">¿Cómo te fue?</h1>
+          <p className="mt-1 text-xs text-slate-400">
+            {deOtroDia ? `Jornada del ${j!.fecha_texto.toLowerCase()}. ` : j ? `Comenzaste a las ${horaDe(j.checkin_manana)}. ` : ""}
+            Confirma lo logrado y cuéntanos qué quedó pendiente.
+          </p>
         </div>
-        <Anillo valor={cuenta.pct} tamano={68} etiqueta="hoy" />
+        <Anillo valor={cuenta.pct} tamano={68} etiqueta="logrado" />
       </div>
 
       <div className="space-y-3">
@@ -104,20 +99,9 @@ export default function EncuestaTarde({ estado, obligatoria, fueraDeHora, onList
                     value={m.motivo}
                     maxLength={280}
                     onChange={(e) => setMarcas((ms) => ({ ...ms, [t.id]: { ...m, motivo: e.target.value } }))}
-                    placeholder={m.estado === "postergado_ooo" ? "Detalle (opcional)" : "¿Por qué quedó pendiente?"}
+                    placeholder="¿Por qué quedó pendiente?"
                     className="campo border-aether-warning/25 py-2 text-sm focus:border-aether-warning"
                   />
-                  {tieneOooHoy && (
-                    <label className="flex items-center gap-2 text-[11px] text-slate-400">
-                      <input
-                        type="checkbox"
-                        checked={m.estado === "postergado_ooo"}
-                        onChange={(e) => marcar(t.id, e.target.checked ? "postergado_ooo" : "pendiente")}
-                        className="h-4 w-4 accent-aether-accent"
-                      />
-                      Postergado por mi ausencia de hoy (no cuenta en Say-Do)
-                    </label>
-                  )}
                 </div>
               )}
             </div>
@@ -133,26 +117,14 @@ export default function EncuestaTarde({ estado, obligatoria, fueraDeHora, onList
         </div>
       </div>
 
-      {fueraDeHora && (
-        <p className="mt-4 flex items-center gap-1.5 text-[11px] text-aether-warning">
-          <AlertTriangle size={12} /> Pasadas las {v.fin} el cierre de hoy no suma a la racha, pero igual cuenta para tu Say-Do.
-        </p>
-      )}
       {error && <p role="alert" className="mt-4 rounded-xl border border-aether-danger/30 bg-aether-danger/10 px-3 py-2.5 text-xs text-aether-danger">{error}</p>}
 
       <button type="button" onClick={enviar} disabled={ocupado} className="boton-primario mt-5">
-        {ocupado && <LoaderCircle size={16} className="animate-spin" />} Cerrar jornada
+        {ocupado && <LoaderCircle size={16} className="animate-spin" />} Terminar jornada
       </button>
-      <div className="mt-4 flex items-center justify-center gap-4 text-xs">
-        <button type="button" onClick={onOoo} className="flex items-center gap-1 text-slate-400 hover:text-white">
-          <Plane size={13} /> Registrar ausencia
-        </button>
-        {!obligatoria && (
-          <button type="button" onClick={onCancelar} className="text-slate-400 hover:text-white">
-            Volver al tablero
-          </button>
-        )}
-      </div>
+      <button type="button" onClick={onCancelar} className="mx-auto mt-4 block text-xs text-slate-400 hover:text-white">
+        Volver al tablero
+      </button>
     </section>
   );
 }

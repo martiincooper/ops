@@ -83,7 +83,7 @@ async function main() {
   console.log("Autenticación");
   await prueba("health 200 (abre control + bases de ambas empresas)", async () => assert.equal((await anon.pedir("/api/health")).status, 200));
   await prueba("API sin sesión → 401; página → /login", async () => {
-    assert.equal((await anon.pedir("/api/bitacora")).status, 401);
+    assert.equal((await anon.pedir("/api/jornada")).status, 401);
     const r = await anon.pedir("/checkin");
     assert.equal(r.status, 307);
     assert.match(r.headers.get("location"), /\/login$/);
@@ -176,7 +176,7 @@ async function main() {
   await prueba("roles: equipo y gerencia no entran a /admin ni a su API", async () => {
     assert.equal((await ana.cliente.pedir(q("/api/admin/usuarios", A))).status, 403);
     assert.equal((await ggD.cliente.pedir(q("/api/admin/standup", D))).status, 403);
-    assert.equal((await ggA.cliente.pedir("/api/bitacora")).status, 403);
+    assert.equal((await ggA.cliente.pedir("/api/jornada")).status, 403);
     let r = await ana.cliente.pedir("/admin");
     assert.match(r.headers.get("location"), /\/checkin$/);
     r = await ggD.cliente.pedir("/checkin");
@@ -185,10 +185,10 @@ async function main() {
 
   console.log("Aislamiento entre empresas");
   await prueba("cada integrante ve solo los proyectos de su empresa (y ?empresa= se ignora)", async () => {
-    const a = (await ana.cliente.pedir(q("/api/bitacora", D))).datos;
+    const a = (await ana.cliente.pedir(q("/api/jornada", D))).datos;
     assert.equal(a.empresa.clave, A);
     assert.deepEqual(a.proyectos.map((p) => p.codigo), ["AETH-GW-03", "AETH-SEN-01"]);
-    const d = (await dora.cliente.pedir(q("/api/bitacora", A))).datos;
+    const d = (await dora.cliente.pedir(q("/api/jornada", A))).datos;
     assert.equal(d.empresa.clave, D);
     assert.ok(d.proyectos.every((p) => p.id !== pA));
   });
@@ -203,57 +203,60 @@ async function main() {
     assert.equal((await admin.pedir(q("/api/exec", D))).datos.empresa.clave, D);
   });
   await prueba("cabecera x-user-id ignorada", async () => {
-    assert.equal((await anon.pedir("/api/bitacora", { headers: { "x-user-id": ana.id } })).status, 401);
+    assert.equal((await anon.pedir("/api/jornada", { headers: { "x-user-id": ana.id } })).status, 401);
   });
 
-  console.log("Bitácora");
-  await prueba("mañana: 1 objetivo → 400; sin proyecto → 400; proyecto de la otra empresa → 400", async () => {
-    const enviar = (tareas) => ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } });
+  console.log("Jornada: comenzar y terminar cuando la persona quiera (sin horario)");
+  await prueba("comenzar: 1 objetivo → 400; sin proyecto → 400; proyecto de la otra empresa → 400", async () => {
+    const enviar = (tareas) => ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } });
     const t = { proyecto_ids: [pA], descripcion: "x" };
     assert.equal((await enviar([t])).status, 400);
     assert.equal((await enviar([t, { proyecto_ids: [], descripcion: "x" }])).status, 400);
     assert.equal((await enviar([t, { proyecto_ids: [pA, pD], descripcion: "x" }])).status, 400);
   });
-  await prueba("mañana: 3 objetivos (uno de 2 proyectos) → 201; reenvío idempotente", async () => {
+  await prueba("comenzar: 3 objetivos (uno de 2 proyectos) → 201 a cualquier hora; reenvío idempotente", async () => {
     const tareas = [
       { proyecto_ids: [pA, pA2, pA], descripcion: "Ruteo de líneas SPI compartidas" }, // duplicado se ignora
       { proyecto_ids: [pA], descripcion: "Pruebas deep-sleep" },
       { proyecto_id: pA2, descripcion: "Compilar firmware FreeRTOS" }, // formato de un solo proyecto, aún aceptado
     ];
-    const r1 = await ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } });
+    const r1 = await ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } });
     assert.equal(r1.status, 201, JSON.stringify(r1.datos));
     assert.deepEqual(r1.datos.tareas.map((t) => t.proyectos.map((p) => p.codigo)), [["AETH-GW-03", "AETH-SEN-01"], ["AETH-SEN-01"], ["AETH-GW-03"]]);
-    const r2 = await ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } });
+    assert.equal(r1.datos.fase, "en_curso");
+    assert.ok(r1.datos.jornada.checkin_manana);
+    assert.equal(r1.datos.jornada.fecha, r1.datos.hoy);
+    assert.ok(!("ventanas" in r1.datos) && !("vista" in r1.datos));
+    const r2 = await ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } });
     assert.equal(r2.status, 200);
     assert.equal(r2.datos.ya_existia, true);
     assert.equal(r2.datos.tareas.length, 3);
     manana = r1.datos;
     hoy = r1.datos.hoy;
   });
-  await prueba("doble envío simultáneo → una sola bitácora", async () => {
+  await prueba("doble envío simultáneo → una sola jornada", async () => {
     const tareas = [{ proyecto_ids: [pA], descripcion: "A" }, { proyecto_ids: [pA], descripcion: "B" }];
-    const rs = await Promise.all([1, 2, 3].map(() => beto.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } })));
+    const rs = await Promise.all([1, 2, 3].map(() => beto.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } })));
     assert.deepEqual(rs.map((r) => r.status).sort(), [200, 200, 201]);
   });
-  await prueba("otro usuario no puede cerrar tareas ajenas", async () => {
-    const r = await beto.cliente.pedir("/api/bitacora/tarde", { metodo: "POST", json: { tareas: manana.tareas.map((t) => ({ id: t.id, estado: "completado" })) } });
+  await prueba("otro usuario no puede terminar con objetivos ajenos", async () => {
+    const r = await beto.cliente.pedir("/api/jornada/terminar", { metodo: "POST", json: { tareas: manana.tareas.map((t) => ({ id: t.id, estado: "completado" })) } });
     assert.equal(r.status, 400);
   });
-  await prueba("durante el día: marcar objetivos logrados (solo los propios) y ver XP/nivel", async () => {
+  await prueba("jornada en curso: marcar objetivos logrados (solo los propios) y ver XP/nivel", async () => {
     const [a] = manana.tareas;
-    const r = await ana.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: true } });
+    const r = await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: true } });
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.equal(r.datos.tareas.find((t) => t.id === a.id).estado, "completado");
     assert.equal(r.datos.juego.objetivos_completados, 1);
-    assert.equal(r.datos.ventanas.manana.inicio, "08:30");
-    assert.ok(["encuesta_manana", "encuesta_tarde", "tablero"].includes(r.datos.vista));
-    assert.equal((await beto.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: true } })).status, 404);
-    const d = await ana.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: false } });
+    assert.equal(r.datos.fase, "en_curso");
+    assert.equal((await beto.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: true } })).status, 404);
+    const d = await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: false } });
     assert.equal(d.datos.tareas.find((t) => t.id === a.id).estado, "pendiente");
   });
-  await prueba("tarde: validaciones y cierre con bloqueo; segundo cierre → 409", async () => {
+  await prueba("terminar: validaciones y balance con bloqueo; segundo término → 404; no se comienza otra hoy", async () => {
     const [a, b, c] = manana.tareas;
-    const enviar = (json) => ana.cliente.pedir("/api/bitacora/tarde", { metodo: "POST", json });
+    const enviar = (json) => ana.cliente.pedir("/api/jornada/terminar", { metodo: "POST", json });
     assert.equal((await enviar({ tareas: [{ id: a.id, estado: "completado" }, { id: b.id, estado: "completado" }, { id: c.id, estado: "pendiente" }] })).status, 400);
     assert.equal((await enviar({ tareas: [{ id: a.id, estado: "completado" }, { id: b.id, estado: "completado" }] })).status, 400);
     const json = {
@@ -262,9 +265,14 @@ async function main() {
     };
     const r = await enviar(json);
     assert.equal(r.status, 200, JSON.stringify(r.datos));
-    assert.equal(r.datos.fase, "cerrado");
-    assert.equal((await enviar(json)).status, 409);
-    assert.equal((await ana.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: false } })).status, 409);
+    assert.equal(r.datos.fase, "terminada");
+    assert.ok(r.datos.jornada.checkout_tarde);
+    assert.equal(r.datos.racha, 0); // 2/3 = 67 % < 75 %
+    assert.equal((await enviar(json)).status, 404); // ya no hay jornada en curso
+    assert.equal((await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: false } })).status, 409);
+    const otra = await ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas: [{ proyecto_ids: [pA], descripcion: "x" }, { proyecto_ids: [pA], descripcion: "y" }] } });
+    assert.equal(otra.status, 409);
+    assert.match(otra.datos.error, /Ya terminaste tu jornada de hoy/);
   });
 
   console.log("Tablero de jefatura");
@@ -298,24 +306,42 @@ async function main() {
     assert.equal(r.status, 400);
   });
 
-  console.log("Fuera de oficina y capacidad");
-  await prueba("OOO día completo futuro aparece en la capacidad de 14 días", async () => {
+  console.log("Días no disponibles y disponibilidad");
+  await prueba("día futuro no disponible aparece en la disponibilidad de 14 días; duplicado → 409", async () => {
     let f = sumar(hoy, 1);
     while ([0, 6].includes(new Date(`${f}T12:00:00Z`).getUTCDay())) f = sumar(f, 1);
-    assert.equal((await ana.cliente.pedir("/api/ooo", { metodo: "POST", json: { fecha: f, dia_completo: true, motivo: "Médico" } })).status, 201);
-    assert.equal((await ana.cliente.pedir("/api/ooo", { metodo: "POST", json: { fecha: f, dia_completo: true } })).status, 409);
+    assert.equal((await ana.cliente.pedir("/api/no-disponible", { metodo: "POST", json: { fecha: f, motivo: "Viaje" } })).status, 201);
+    assert.equal((await ana.cliente.pedir("/api/no-disponible", { metodo: "POST", json: { fecha: f, dia_completo: true } })).status, 409);
+    assert.equal((await ana.cliente.pedir("/api/no-disponible", { metodo: "POST", json: { fecha: sumar(hoy, -1) } })).status, 400);
     const c = (await admin.pedir(q("/api/admin/capacidad", A, "&alcance=todos"))).datos;
     const fila = c.filas.find((x) => x.nombre === "Ana Rojas");
-    assert.equal(fila.celdas.find((x) => x.fecha === f).estado, "ooo");
+    assert.equal(fila.celdas.find((x) => x.fecha === f).estado, "no_disponible");
+    assert.equal(fila.celdas.find((x) => x.fecha === f).detalle, "Viaje");
     assert.equal(c.dias.length, 14);
+    assert.ok(!("jornada" in c));
   });
-  await prueba("OOO día completo hoy posterga objetivos abiertos; cancelarlo los restituye", async () => {
-    const r = await beto.cliente.pedir("/api/ooo", { metodo: "POST", json: { fecha: hoy, dia_completo: true } });
+  await prueba("no se marca no disponible un día con jornada; hoy no disponible bloquea comenzar hasta quitarlo", async () => {
+    assert.equal((await beto.cliente.pedir("/api/no-disponible", { metodo: "POST", json: { fecha: hoy } })).status, 409);
+    const r = await dora.cliente.pedir("/api/no-disponible", { metodo: "POST", json: { fecha: hoy, motivo: "Otro cliente" } });
     assert.equal(r.status, 201);
-    assert.equal(r.datos.fase, "ooo_completo");
-    const d = await beto.cliente.pedir(`/api/ooo/${r.datos.id}`, { metodo: "DELETE" });
-    assert.equal(d.datos.fase, "pendiente_tarde");
-    assert.ok(d.datos.tareas.every((t) => t.estado === "pendiente"));
+    assert.equal(r.datos.fase, "no_disponible");
+    assert.equal(r.datos.no_disponible_hoy.motivo, "Otro cliente");
+    const tareas = [{ proyecto_ids: [pD], descripcion: "a" }, { proyecto_ids: [pD], descripcion: "b" }];
+    assert.equal((await dora.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } })).status, 409);
+    const st = (await admin.pedir(q("/api/admin/standup", D, "&alcance=todos"))).datos.filas.find((x) => x.email === "dora@datasheq.cl");
+    assert.equal(st.prioridad, 3);
+    assert.equal(st.motivo, "No disponible hoy");
+    const d = await dora.cliente.pedir(`/api/no-disponible/${r.datos.id}`, { metodo: "DELETE" });
+    assert.equal(d.datos.fase, "sin_iniciar");
+    assert.equal((await beto.cliente.pedir(`/api/no-disponible/${r.datos.id}`, { metodo: "DELETE" })).status, 404); // ajeno
+  });
+  await prueba("standup: última jornada sin horas y sin alerta por días sin jornada", async () => {
+    const filas = (await admin.pedir(q("/api/admin/standup", A, "&alcance=todos"))).datos.filas;
+    const b = filas.find((x) => x.email === "beto@aether-tech.dev");
+    assert.equal(b.ultima.estado, "en_curso");
+    assert.equal(b.ultima.tareas.length, 2);
+    assert.ok(!("dias_sin_registro_14d" in b) && !("hoy" in b));
+    assert.ok(!JSON.stringify(b.ultima).includes("checkin"));
   });
 
   console.log("Compras");
@@ -390,7 +416,7 @@ async function main() {
 
   console.log("Seguridad y administración");
   await prueba("Origin ajeno en POST → 403", async () => {
-    const r = await ana.cliente.pedir("/api/ooo", { metodo: "POST", json: { fecha: hoy, dia_completo: true }, headers: { origin: "https://evil.example" } });
+    const r = await ana.cliente.pedir("/api/no-disponible", { metodo: "POST", json: { fecha: hoy }, headers: { origin: "https://evil.example" } });
     assert.equal(r.status, 403);
   });
   await prueba("bloqueo tras 5 fallos (cuenta de Datasheq); reseteo por admin desbloquea", async () => {
@@ -399,7 +425,7 @@ async function main() {
     assert.equal((await c.login("dora@datasheq.cl", "111112")).status, 429);
     assert.equal((await c.login("dora@datasheq.cl", "905162")).status, 429);
     assert.equal((await admin.pedir(q(`/api/admin/usuarios/${dora.id}`, D), { metodo: "PATCH", json: { resetear_pin: true } })).status, 200);
-    assert.equal((await dora.cliente.pedir("/api/bitacora")).status, 401);
+    assert.equal((await dora.cliente.pedir("/api/jornada")).status, 401);
     assert.equal((await c.login("dora@datasheq.cl", "000000")).datos.redirigir, "/cambiar-pin");
   });
   await prueba("administradores: no a sí mismo; quitar a otro borra sus supervisiones", async () => {
@@ -412,7 +438,7 @@ async function main() {
   });
   await prueba("quitar cuenta con historial → desactivada y sin sesión", async () => {
     assert.equal((await admin.pedir(q(`/api/admin/usuarios/${beto.id}`, A), { metodo: "DELETE" })).datos.accion, "desactivado");
-    assert.equal((await beto.cliente.pedir("/api/bitacora")).status, 401);
+    assert.equal((await beto.cliente.pedir("/api/jornada")).status, 401);
   });
 
   await prueba("eliminar proyecto: borra lo exclusivo, reparte lo compartido y libera la bitácora vacía", async () => {
@@ -420,7 +446,7 @@ async function main() {
     const x = (await admin.pedir(q("/api/admin/proyectos", A), { metodo: "POST", json: { ...p, codigo: "DEL-01", nombre: "Borrar 1" } })).datos.id;
     const y = (await admin.pedir(q("/api/admin/proyectos", A), { metodo: "POST", json: { ...p, codigo: "DEL-02", nombre: "Borrar 2" } })).datos.id;
     const eli = await cuenta(admin, A, "eli@aether-tech.dev", "Eli Paz", "team", "583014");
-    let r = await eli.cliente.pedir("/api/bitacora/manana", {
+    let r = await eli.cliente.pedir("/api/jornada/comenzar", {
       metodo: "POST",
       json: { tareas: [{ proyecto_ids: [x], descripcion: "Solo del 1" }, { proyecto_ids: [x, y], descripcion: "Compartido" }] },
     });
@@ -434,8 +460,8 @@ async function main() {
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.deepEqual([r.datos.objetivos, r.datos.compras, r.datos.compras_reasignadas], [1, 1, 1]);
 
-    let e = (await eli.cliente.pedir("/api/bitacora")).datos;
-    assert.equal(e.fase, "pendiente_tarde");
+    let e = (await eli.cliente.pedir("/api/jornada")).datos;
+    assert.equal(e.fase, "en_curso");
     assert.deepEqual(e.tareas.map((t) => [t.descripcion, t.proyectos.map((p) => p.codigo)]), [["Compartido", ["DEL-02"]]]);
     const fila = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((g) => g.id === comp);
     assert.ok(fila, "la compra compartida sigue");
@@ -444,8 +470,8 @@ async function main() {
 
     r = await admin.pedir(q(`/api/admin/proyectos/${y}`, A), { metodo: "DELETE" });
     assert.deepEqual([r.datos.objetivos, r.datos.compras], [1, 1]);
-    e = (await eli.cliente.pedir("/api/bitacora")).datos;
-    assert.equal(e.fase, "pendiente_manana", "la bitácora abierta sin objetivos se libera");
+    e = (await eli.cliente.pedir("/api/jornada")).datos;
+    assert.equal(e.fase, "sin_iniciar", "la jornada abierta sin objetivos se libera");
     assert.equal((await eli.cliente.pedir("/api/gastos")).datos.gastos.length, 0);
     const codigos = (await admin.pedir(q("/api/admin/proyectos", A))).datos.proyectos.map((p) => p.codigo);
     assert.ok(!codigos.includes("DEL-01") && !codigos.includes("DEL-02"));

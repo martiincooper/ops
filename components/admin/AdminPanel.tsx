@@ -27,7 +27,7 @@ export type Vista = "standup" | "capacidad" | "compras" | "equipo" | "proyectos"
 
 const VISTAS: { clave: Vista; titulo: string; icono: typeof Users; conAlcance?: boolean }[] = [
   { clave: "standup", titulo: "Standup", icono: LayoutList, conAlcance: true },
-  { clave: "capacidad", titulo: "Capacidad 14 días", icono: CalendarRange, conAlcance: true },
+  { clave: "capacidad", titulo: "Disponibilidad 14 días", icono: CalendarRange, conAlcance: true },
   { clave: "compras", titulo: "Compras", icono: Receipt, conAlcance: true },
   { clave: "equipo", titulo: "Equipo", icono: Users },
   { clave: "proyectos", titulo: "Proyectos", icono: FolderKanban },

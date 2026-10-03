@@ -1,65 +1,48 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import ModalOoo from "@/components/ModalOoo";
+import ModalNoDisponible from "@/components/ModalNoDisponible";
 import type { EstadoDia } from "@/lib/dominio";
-import { fechaEn, horaEn, momentoDe, vistaPara } from "@/lib/jornada";
 import { api } from "@/lib/cliente";
 import Cabecera from "./Cabecera";
 import Celebracion, { type Mensaje } from "./Celebracion";
 import Confeti, { type Disparo } from "./Confeti";
-import EncuestaManana from "./EncuestaManana";
-import EncuestaTarde from "./EncuestaTarde";
+import FormComienzo from "./FormComienzo";
+import FormTermino from "./FormTermino";
 import Tablero from "./Tablero";
 
 /**
- * Vista del integrante según la hora de Chile:
- *  - ventana de la mañana sin objetivos → bitácora de la mañana (obligatoria)
- *  - ventana de la tarde sin cierre      → cierre de la tarde (obligatorio)
- *  - resto del tiempo, o ya hecho         → tablero personal (objetivos, progreso, nivel, logros)
+ * Inicio del integrante. Sin horario: siempre ve su tablero; la jornada se comienza y se termina con un botón
+ * cuando la persona quiere (una por día). Nada se abre solo por la hora.
  */
 export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombre: string }) {
   const [estado, setEstado] = useState(inicial);
-  const [hora, setHora] = useState(inicial.hora);
-  const [abierta, setAbierta] = useState<"manana" | "tarde" | null>(null);
-  const [modalOoo, setModalOoo] = useState(false);
+  const [abierto, setAbierto] = useState<"comenzar" | "terminar" | null>(null);
+  const [modal, setModal] = useState(false);
   const [disparo, setDisparo] = useState<Disparo | null>(null);
   const [mensaje, setMensaje] = useState<Mensaje | null>(null);
 
   const recargar = useCallback(async () => {
     try {
-      setEstado(await api<EstadoDia>("/api/bitacora"));
+      setEstado(await api<EstadoDia>("/api/jornada"));
     } catch {
-      /* sin conexión: se reintenta en el próximo tic */
+      /* sin conexión: se reintenta al volver a la pestaña */
     }
   }, []);
 
-  // Reloj de Chile: recalcula la vista cada 30 s; si cambió el día, recarga el estado.
+  // Al volver a la app (otro día, u otra pestaña) se actualiza el estado.
   useEffect(() => {
-    const tic = () => {
-      setHora(horaEn(estado.tz));
-      if (fechaEn(estado.tz) !== estado.hoy) recargar();
-    };
-    tic();
-    const t = setInterval(tic, 30_000);
     const alVolver = () => document.visibilityState === "visible" && recargar();
     document.addEventListener("visibilitychange", alVolver);
-    return () => {
-      clearInterval(t);
-      document.removeEventListener("visibilitychange", alVolver);
-    };
-  }, [estado.tz, estado.hoy, recargar]);
+    return () => document.removeEventListener("visibilitychange", alVolver);
+  }, [recargar]);
 
-  const momento = momentoDe(hora, estado.ventanas);
-  const obligatoria = vistaPara(estado.fase, momento, estado.laborable);
   const vista =
-    obligatoria !== "tablero"
-      ? obligatoria
-      : abierta === "manana" && estado.fase === "pendiente_manana"
-        ? "encuesta_manana"
-        : abierta === "tarde" && estado.fase === "pendiente_tarde"
-          ? "encuesta_tarde"
-          : "tablero";
+    abierto === "comenzar" && estado.fase === "sin_iniciar"
+      ? "comenzar"
+      : abierto === "terminar" && estado.fase === "en_curso"
+        ? "terminar"
+        : "tablero";
 
   const celebrar = useCallback((d: Omit<Disparo, "id">, m?: Omit<Mensaje, "id">) => {
     const id = Date.now();
@@ -67,40 +50,37 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
     if (m) setMensaje({ ...m, id });
   }, []);
 
-  const cerrarOoo = useCallback(() => setModalOoo(false), []);
+  const cerrarModal = useCallback(() => setModal(false), []);
+  const volver = () => {
+    setAbierto(null);
+    window.scrollTo({ top: 0 });
+  };
 
   return (
     <div className="mx-auto min-h-dvh max-w-md border-x border-aether-border px-4 pb-24 pt-[env(safe-area-inset-top)]">
       <Confeti disparo={disparo} />
       <Celebracion mensaje={mensaje} />
-      <Cabecera estado={estado} nombre={nombre} onOoo={() => setModalOoo(true)} compacta={vista !== "tablero"} />
+      <Cabecera estado={estado} nombre={nombre} onNoDisponible={() => setModal(true)} compacta={vista !== "tablero"} />
 
-      {vista === "encuesta_manana" && (
-        <EncuestaManana
+      {vista === "comenzar" && (
+        <FormComienzo
           estado={estado}
-          obligatoria={obligatoria === "encuesta_manana"}
-          onOoo={() => setModalOoo(true)}
-          onCancelar={() => setAbierta(null)}
+          onCancelar={volver}
           onListo={(e) => {
             setEstado(e);
-            setAbierta(null);
-            window.scrollTo({ top: 0 });
-            celebrar({ tipo: "grande" }, { titulo: "¡Objetivos registrados!", detalle: `${e.tareas.length} objetivos para hoy. ¡A darle!` });
+            volver();
+            celebrar({ tipo: "grande" }, { titulo: "¡Jornada en marcha!", detalle: `${e.tareas.length} objetivos. ¡A darle!` });
           }}
         />
       )}
 
-      {vista === "encuesta_tarde" && (
-        <EncuestaTarde
+      {vista === "terminar" && (
+        <FormTermino
           estado={estado}
-          obligatoria={obligatoria === "encuesta_tarde"}
-          fueraDeHora={momento === "despues"}
-          onOoo={() => setModalOoo(true)}
-          onCancelar={() => setAbierta(null)}
+          onCancelar={volver}
           onListo={(e) => {
             setEstado(e);
-            setAbierta(null);
-            window.scrollTo({ top: 0 });
+            volver();
             const post = e.tareas.filter((t) => t.estado === "postergado_ooo").length;
             const comp = e.tareas.filter((t) => t.estado === "completado").length;
             const total = e.tareas.length - post;
@@ -108,7 +88,7 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
             celebrar(
               { tipo: pct >= 75 ? "grande" : "chico" },
               {
-                titulo: pct === 100 ? "¡Día perfecto!" : pct >= 75 ? "¡Jornada cerrada!" : "Jornada cerrada",
+                titulo: pct === 100 ? "¡Jornada perfecta!" : pct >= 75 ? "¡Jornada terminada!" : "Jornada terminada",
                 detalle: `${comp} de ${total} objetivos logrados${e.racha ? ` · racha de ${e.racha}` : ""}`,
               },
             );
@@ -119,15 +99,17 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
       {vista === "tablero" && (
         <Tablero
           estado={estado}
-          momento={momento}
           onCambio={setEstado}
-          onAbrir={setAbierta}
-          onOoo={() => setModalOoo(true)}
+          onAbrir={(cual) => {
+            setAbierto(cual);
+            window.scrollTo({ top: 0 });
+          }}
+          onNoDisponible={() => setModal(true)}
           celebrar={celebrar}
         />
       )}
 
-      {modalOoo && <ModalOoo hoy={estado.hoy} ausencias={estado.ooo_proximas} onCambio={setEstado} onCerrar={cerrarOoo} />}
+      {modal && <ModalNoDisponible hoy={estado.hoy} dias={estado.no_disponible} onCambio={setEstado} onCerrar={cerrarModal} />}
     </div>
   );
 }

@@ -2,20 +2,19 @@
 
 import {
   AlertTriangle,
-  CalendarCheck,
+  CalendarOff,
+  CalendarRange,
   CircleCheck,
   Circle,
-  Clock,
   Flag,
   Flame,
+  Layers,
   LoaderCircle,
   Lock,
-  Plane,
+  Play,
   Plus,
   Receipt,
   Star,
-  Sunrise,
-  Sunset,
   Target,
   Trophy,
   Zap,
@@ -25,9 +24,7 @@ import { useState } from "react";
 import Anillo from "@/components/Anillo";
 import FormGasto from "@/components/FormGasto";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
-import { textoAusencia } from "@/components/ModalOoo";
 import type { EstadoDia, TareaDia } from "@/lib/dominio";
-import type { Momento } from "@/lib/jornada";
 import { ErrorApi, api, clp, cx, horaDe } from "@/lib/cliente";
 import type { Disparo } from "./Confeti";
 import type { Mensaje } from "./Celebracion";
@@ -36,8 +33,8 @@ const ICONO_LOGRO: Record<string, typeof Flag> = {
   primera: Flag,
   perfecto: Star,
   racha5: Flame,
-  madrugador: Sunrise,
-  puntual: Clock,
+  constante: CalendarRange,
+  todoterreno: Layers,
   racha10: Zap,
   perfecto5: Trophy,
   centenario: Target,
@@ -47,11 +44,17 @@ const DIA = ["D", "L", "M", "M", "J", "V", "S"];
 
 interface Props {
   estado: EstadoDia;
-  momento: Momento;
   onCambio: (e: EstadoDia) => void;
-  onAbrir: (cual: "manana" | "tarde") => void;
-  onOoo: () => void;
+  onAbrir: (cual: "comenzar" | "terminar") => void;
+  onNoDisponible: () => void;
   celebrar: (d: Omit<Disparo, "id">, m?: Omit<Mensaje, "id">) => void;
+}
+
+/** "2 h 15 min" entre dos instantes ISO. */
+function duracion(desde: string, hasta: string): string {
+  const min = Math.max(0, Math.round((Date.parse(hasta) - Date.parse(desde)) / 60_000));
+  const h = Math.floor(min / 60);
+  return h ? `${h} h ${min % 60} min` : `${min} min`;
 }
 
 function conteo(tareas: TareaDia[]) {
@@ -61,31 +64,30 @@ function conteo(tareas: TareaDia[]) {
   return { comp, total, pct: total > 0 ? Math.round((comp / total) * 100) : null };
 }
 
-export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, celebrar }: Props) {
+export default function Tablero({ estado, onCambio, onAbrir, onNoDisponible, celebrar }: Props) {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formGasto, setFormGasto] = useState(false);
-  const j = estado.juego;
+  const juego = estado.juego;
   const hoyCuenta = conteo(estado.tareas);
-  const vM = estado.ventanas.manana;
-  const vT = estado.ventanas.tarde;
-  const oooCompleto = estado.ooo_hoy.find((a) => a.dia_completo === 1);
-  const pctNivel = Math.round((j.xp_nivel / j.xp_siguiente) * 100);
+  const j = estado.jornada;
+  const deOtroDia = estado.fase === "en_curso" && j !== null && j.fecha !== estado.hoy;
+  const pctNivel = Math.round((juego.xp_nivel / juego.xp_siguiente) * 100);
 
   async function alternar(t: TareaDia, ev: React.MouseEvent) {
-    if (estado.fase !== "pendiente_tarde" || t.estado === "postergado_ooo") return;
+    if (estado.fase !== "en_curso" || t.estado === "postergado_ooo") return;
     const completar = t.estado !== "completado";
     const x = ev.clientX;
     const y = ev.clientY;
     setOcupado(t.id);
     setError(null);
     try {
-      const nuevo = await api<EstadoDia>(`/api/bitacora/tareas/${t.id}`, { method: "PATCH", json: { completada: completar } });
+      const nuevo = await api<EstadoDia>(`/api/jornada/objetivos/${t.id}`, { method: "PATCH", json: { completada: completar } });
       onCambio(nuevo);
       if (completar) {
         const c = conteo(nuevo.tareas);
         if (c.total > 0 && c.comp === c.total) {
-          celebrar({ tipo: "grande" }, { titulo: "¡Todos tus objetivos logrados!", detalle: `+${10} XP · Día perfecto a la vista` });
+          celebrar({ tipo: "grande" }, { titulo: "¡Todos tus objetivos logrados!", detalle: "+10 XP · Termina la jornada para sumar la jornada perfecta" });
         } else {
           celebrar({ tipo: "chico", x, y }, { titulo: "¡Objetivo logrado!", detalle: `+10 XP · ${c.comp} de ${c.total}` });
         }
@@ -104,12 +106,12 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl bg-gradient-to-br from-aether-accent to-[#7c3aed] text-white shadow-lg">
             <span className="text-[9px] font-semibold uppercase leading-none opacity-80">Nivel</span>
-            <span className="text-xl font-black leading-none">{j.nivel}</span>
+            <span className="text-xl font-black leading-none">{juego.nivel}</span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between text-xs">
-              <span className="font-semibold text-white">{j.xp} XP</span>
-              <span className="text-slate-500">{j.xp_siguiente - j.xp_nivel} XP para el nivel {j.nivel + 1}</span>
+              <span className="font-semibold text-white">{juego.xp} XP</span>
+              <span className="text-slate-500">{juego.xp_siguiente - juego.xp_nivel} XP para el nivel {juego.nivel + 1}</span>
             </div>
             <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-aether-border">
               <div className="h-full rounded-full bg-gradient-to-r from-aether-accent to-aether-success transition-all duration-700" style={{ width: `${pctNivel}%` }} />
@@ -122,10 +124,10 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
               <Flame size={16} className={estado.racha ? "fill-aether-success text-aether-success" : "text-slate-600"} />
               {estado.racha}
             </p>
-            <p className="text-[10px] text-slate-500">racha actual</p>
+            <p className="text-[10px] text-slate-500">racha</p>
           </div>
           <div className="rounded-xl bg-aether-bg px-2 py-2.5">
-            <p className="text-lg font-bold tabular-nums text-white">{j.mejor_racha}</p>
+            <p className="text-lg font-bold tabular-nums text-white">{juego.mejor_racha}</p>
             <p className="text-[10px] text-slate-500">mejor racha</p>
           </div>
           <div className="rounded-xl bg-aether-bg px-2 py-2.5">
@@ -137,59 +139,62 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
         </div>
       </section>
 
-      {/* Mi día */}
+      {/* Mi jornada */}
       <section className="tarjeta p-4">
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-bold text-white">Mi día</h2>
-            <p className="text-[11px] text-slate-500">{estado.hoy_texto}</p>
+            <h2 className="text-sm font-bold text-white">Mi jornada</h2>
+            <p className="text-[11px] text-slate-500">
+              {estado.fase === "en_curso" && j
+                ? deOtroDia
+                  ? `Comenzada el ${j.fecha_texto.toLowerCase()}`
+                  : `En curso desde las ${horaDe(j.checkin_manana)}`
+                : estado.hoy_texto}
+            </p>
           </div>
-          {estado.fase === "pendiente_tarde" || estado.fase === "cerrado" ? <Anillo valor={hoyCuenta.pct} tamano={56} grosor={6} /> : null}
+          {estado.fase === "en_curso" || estado.fase === "terminada" ? <Anillo valor={hoyCuenta.pct} tamano={56} grosor={6} /> : null}
         </div>
 
-        {estado.fase === "ooo_completo" && oooCompleto && (
-          <div className="rounded-xl border border-aether-accent/25 bg-aether-accent/5 p-4 text-center">
-            <Plane size={24} className="mx-auto mb-1.5 text-aether-accent-soft" />
-            <p className="text-sm font-semibold text-white">Hoy estás fuera de oficina</p>
-            {oooCompleto.motivo && <p className="text-xs text-slate-400">{oooCompleto.motivo}</p>}
-            <p className="mt-1 text-[11px] text-slate-500">Tu racha no se ve afectada.</p>
-            <button type="button" onClick={onOoo} className="mt-3 text-xs font-semibold text-aether-accent-soft">Gestionar ausencias</button>
+        {estado.fase === "sin_iniciar" && (
+          <div className="rounded-xl border border-dashed border-aether-accent/40 bg-aether-accent/5 p-4 text-center">
+            <p className="text-sm font-semibold text-white">¿Listo para trabajar?</p>
+            <p className="mt-0.5 text-xs text-slate-400">Comienza cuando quieras: define tus objetivos y termina la jornada cuando cierres por hoy.</p>
+            <button
+              type="button"
+              onClick={() => onAbrir("comenzar")}
+              disabled={estado.proyectos.length === 0}
+              className="mx-auto mt-3 flex items-center gap-2 rounded-xl bg-aether-accent px-5 py-3 text-sm font-bold text-white shadow-lg active:scale-[0.98] disabled:opacity-40"
+            >
+              <Play size={16} className="fill-white" /> Comenzar jornada
+            </button>
+            {estado.proyectos.length === 0 && (
+              <p className="mt-2 text-[11px] text-aether-warning">No hay proyectos activos. Pide a tu jefatura que cree uno.</p>
+            )}
           </div>
         )}
 
-        {estado.fase === "pendiente_manana" && (
-          <div className="rounded-xl border border-dashed border-aether-border p-4 text-center">
-            {!estado.laborable ? (
-              <>
-                <CalendarCheck size={24} className="mx-auto mb-1.5 text-aether-success" />
-                <p className="text-sm font-semibold text-white">{estado.feriado ? `Feriado: ${estado.feriado}` : "Fin de semana"}</p>
-                <p className="text-xs text-slate-400">No se exige bitácora. ¡Descansa!</p>
-              </>
-            ) : momento === "antes" ? (
-              <>
-                <Sunrise size={24} className="mx-auto mb-1.5 text-aether-accent-soft" />
-                <p className="text-sm font-semibold text-white">Tu bitácora abre a las {vM.inicio}</p>
-                <p className="text-xs text-slate-400">Si ya tienes claro tu día, puedes adelantarla.</p>
-              </>
-            ) : (
-              <>
-                <AlertTriangle size={24} className="mx-auto mb-1.5 text-aether-warning" />
-                <p className="text-sm font-semibold text-white">Aún no registras tus objetivos de hoy</p>
-                <p className="text-xs text-slate-400">Hazlo ahora para no perder tu racha.</p>
-              </>
-            )}
-            <button type="button" onClick={() => onAbrir("manana")} className="mx-auto mt-3 flex items-center gap-1.5 rounded-lg bg-aether-accent px-3.5 py-2 text-xs font-bold text-white">
-              <Plus size={14} /> Registrar objetivos
+        {estado.fase === "no_disponible" && (
+          <div className="rounded-xl border border-aether-accent/25 bg-aether-accent/5 p-4 text-center">
+            <CalendarOff size={24} className="mx-auto mb-1.5 text-aether-accent-soft" />
+            <p className="text-sm font-semibold text-white">Hoy marcaste no disponible</p>
+            {estado.no_disponible_hoy?.motivo && <p className="text-xs text-slate-400">{estado.no_disponible_hoy.motivo}</p>}
+            <button type="button" onClick={onNoDisponible} className="mt-3 text-xs font-semibold text-aether-accent-soft">
+              ¿Vas a trabajar igual? Quita la marca
             </button>
           </div>
         )}
 
-        {(estado.fase === "pendiente_tarde" || estado.fase === "cerrado") && (
+        {(estado.fase === "en_curso" || estado.fase === "terminada") && (
           <>
+            {deOtroDia && (
+              <p className="mb-3 flex items-start gap-1.5 rounded-lg bg-aether-warning/10 px-3 py-2 text-[11px] text-aether-warning">
+                <AlertTriangle size={13} className="mt-px shrink-0" /> Esta jornada sigue abierta. Termínala para comenzar la de hoy.
+              </p>
+            )}
             <ul className="space-y-2">
               {estado.tareas.map((t) => {
                 const hecho = t.estado === "completado";
-                const editable = estado.fase === "pendiente_tarde" && t.estado !== "postergado_ooo";
+                const editable = estado.fase === "en_curso" && t.estado !== "postergado_ooo";
                 return (
                   <li key={t.id}>
                     <button
@@ -203,13 +208,11 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
                         editable && "active:scale-[0.99]",
                       )}
                     >
-                      <span className={cx("mt-0.5", hecho ? "animate-latido text-aether-success" : t.estado === "postergado_ooo" ? "text-aether-accent-soft" : "text-slate-500")}>
+                      <span className={cx("mt-0.5", hecho ? "animate-latido text-aether-success" : "text-slate-500")}>
                         {ocupado === t.id ? (
                           <LoaderCircle size={20} className="animate-spin" />
                         ) : hecho ? (
                           <CircleCheck size={20} className="fill-aether-success text-aether-bg" />
-                        ) : t.estado === "postergado_ooo" ? (
-                          <Plane size={20} />
                         ) : (
                           <Circle size={20} />
                         )}
@@ -225,40 +228,31 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
               })}
             </ul>
 
-            {estado.fase === "pendiente_tarde" && (
-              <div className="mt-3 text-center text-[11px] text-slate-500">
-                {momento === "despues" ? (
-                  <div className="rounded-lg bg-aether-warning/10 p-3 text-aether-warning">
-                    Ya pasó la hora de cierre ({vT.fin}). Ciérrala igual: cuenta para tu Say-Do, aunque hoy no suma a la racha.
-                    <button type="button" onClick={() => onAbrir("tarde")} className="mx-auto mt-2 flex items-center gap-1.5 rounded-lg bg-aether-warning px-3 py-1.5 font-bold text-black">
-                      <Sunset size={13} /> Cerrar jornada
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    Toca un objetivo cuando lo logres. El cierre de la tarde se abre a las {vT.inicio}.
-                    <button type="button" onClick={() => onAbrir("tarde")} className="mx-auto mt-1.5 block font-semibold text-slate-300 underline-offset-2 hover:underline">
-                      ¿Terminas antes? Cerrar jornada ahora
-                    </button>
-                  </>
-                )}
-              </div>
+            {estado.fase === "en_curso" && (
+              <>
+                <p className="mt-3 text-center text-[11px] text-slate-500">Toca un objetivo cuando lo logres.</p>
+                <button
+                  type="button"
+                  onClick={() => onAbrir("terminar")}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-aether-warning py-3 text-sm font-bold text-black active:scale-[0.99]"
+                >
+                  <Flag size={16} /> Terminar jornada
+                </button>
+              </>
             )}
 
-            {estado.fase === "cerrado" && estado.bitacora?.checkout_tarde && (
-              <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-slate-400">
-                {hoyCuenta.pct === 100 && <Trophy size={14} className="text-aether-warning" />}
-                Jornada cerrada a las {horaDe(estado.bitacora.checkout_tarde)} · {hoyCuenta.comp}/{hoyCuenta.total} logrados
-              </p>
+            {estado.fase === "terminada" && j?.checkout_tarde && (
+              <div className="mt-3 text-center text-xs text-slate-400">
+                <p className="flex items-center justify-center gap-1.5">
+                  {hoyCuenta.pct === 100 && <Trophy size={14} className="text-aether-warning" />}
+                  Jornada terminada · {hoyCuenta.comp}/{hoyCuenta.total} logrados · {duracion(j.checkin_manana, j.checkout_tarde)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">Mañana puedes comenzar otra.</p>
+              </div>
             )}
           </>
         )}
 
-        {estado.ooo_hoy.length > 0 && !oooCompleto && (
-          <p className="mt-3 flex items-center gap-1.5 text-[11px] text-aether-accent-soft">
-            <Plane size={12} /> Ausencia parcial hoy: {estado.ooo_hoy.map(textoAusencia).join(", ")}
-          </p>
-        )}
         {error && <p className="mt-3 rounded-lg bg-aether-danger/10 px-3 py-2 text-xs text-aether-danger">{error}</p>}
       </section>
 
@@ -272,23 +266,17 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
           {estado.semana.map((d) => {
             const dow = new Date(`${d.fecha}T12:00:00Z`).getUTCDay();
             const esHoy = d.fecha === estado.hoy;
-            let clase = "bg-white/[0.04] text-slate-600";
+            let clase = "bg-white/[0.03] text-slate-600";
             let texto = "·";
-            if (d.tipo === "ooo") {
-              clase = "bg-aether-accent/20 text-aether-accent-soft";
-              texto = "OOO";
-            } else if (d.tipo !== "laboral") {
-              clase = "bg-white/[0.03] text-slate-700";
-              texto = "–";
-            } else if (d.registro === "cerrado" && d.saydo !== null) {
+            if (d.registro === "cerrado" && d.saydo !== null) {
               clase = d.saydo >= 75 ? "bg-aether-success/25 text-aether-success" : "bg-aether-warning/20 text-aether-warning";
               texto = `${d.saydo}`;
             } else if (d.registro === "abierto") {
-              clase = esHoy ? "bg-aether-accent/15 text-aether-accent-soft" : "bg-aether-warning/15 text-aether-warning";
-              texto = esHoy ? "hoy" : "!";
-            } else if (!esHoy) {
-              clase = "bg-aether-danger/15 text-aether-danger";
-              texto = "✕";
+              clase = "bg-aether-accent/15 text-aether-accent-soft";
+              texto = "▶";
+            } else if (d.tipo === "ooo") {
+              clase = "bg-aether-accent/10 text-aether-accent-soft";
+              texto = "N/D";
             }
             return (
               <div key={d.fecha} className="text-center">
@@ -301,7 +289,7 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
             );
           })}
         </div>
-        <p className="mt-2 text-[10px] text-slate-500">% de cumplimiento por día · la llama marca los días que sumaron a la racha</p>
+        <p className="mt-2 text-[10px] text-slate-500">% logrado por jornada · ▶ en curso · N/D no disponible · la llama marca las que sumaron a la racha</p>
       </section>
 
       {/* Logros */}
@@ -309,11 +297,11 @@ export default function Tablero({ estado, momento, onCambio, onAbrir, onOoo, cel
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-sm font-bold text-white">Logros</h2>
           <span className="text-[11px] text-slate-500">
-            {j.logros.filter((l) => l.logrado).length}/{j.logros.length} desbloqueados
+            {juego.logros.filter((l) => l.logrado).length}/{juego.logros.length} desbloqueados
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {j.logros.map((l) => {
+          {juego.logros.map((l) => {
             const Icono = ICONO_LOGRO[l.clave] ?? Star;
             return (
               <div

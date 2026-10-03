@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CircleCheck, Circle, Flame, LifeBuoy, LoaderCircle, Plane } from "lucide-react";
+import { AlertTriangle, CalendarOff, CircleCheck, Circle, Flame, LifeBuoy, LoaderCircle } from "lucide-react";
 import type { FilaStandup } from "@/lib/tableros";
 import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, diaCorto, useAccion, useDatos, type Alcance } from "./comun";
@@ -12,21 +12,27 @@ const COLOR_PRIORIDAD: Record<number, string> = {
   4: "bg-slate-700",
 };
 
-function EstadoHoy({ f }: { f: FilaStandup }) {
-  const h = f.hoy;
-  if (h.tipo === "fin_de_semana" || h.tipo === "feriado") return <span className="text-slate-500">Día no hábil</span>;
-  if (h.tipo === "ooo") return <span className="text-aether-accent-soft">Fuera de oficina</span>;
-  if (h.registro === "sin_registro") return <span className="text-aether-danger">Sin objetivos hoy</span>;
-  if (h.registro === "abierto") return <span className="text-slate-300">Objetivos registrados · cierre pendiente</span>;
+function UltimaJornada({ f, hoy }: { f: FilaStandup; hoy: string }) {
+  const u = f.ultima;
+  if (!u) return <span className="text-slate-500">Aún sin jornadas</span>;
+  const d = diaCorto(u.fecha);
+  const cuando = u.fecha === hoy ? "hoy" : `${d.dia} ${d.num} ${d.mes}`;
+  if (u.estado === "en_curso") {
+    return (
+      <span className="text-aether-accent-soft">
+        Jornada en curso ({cuando}) · {u.completadas}/{u.comprometidas} logrados
+      </span>
+    );
+  }
   return (
-    <span className={h.saydo !== null && h.saydo >= 75 ? "text-aether-success" : "text-aether-warning"}>
-      Cerrada {h.cierre_local} · {h.completadas}/{h.comprometidas} ({h.saydo ?? "—"}%)
+    <span className={u.saydo !== null && u.saydo >= 75 ? "text-aether-success" : "text-aether-warning"}>
+      Última jornada {cuando} · {u.completadas}/{u.comprometidas} ({u.saydo ?? "—"}%)
     </span>
   );
 }
 
 export default function Standup({ empresa, alcance }: { empresa: string; alcance: Alcance }) {
-  const { datos, error, cargando, recargar } = useDatos<{ filas: FilaStandup[] }>(
+  const { datos, error, cargando, recargar } = useDatos<{ filas: FilaStandup[]; hoy: string }>(
     conEmpresa("/api/admin/standup", empresa, { alcance }),
   );
   const { ocupado, aviso, ejecutar } = useAccion();
@@ -35,8 +41,8 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
   const resumen = {
     bloqueos: filas.filter((f) => f.bloqueos.length).length,
     bajo: filas.filter((f) => f.saydo_14d !== null && f.saydo_14d < 70).length,
-    ausentes: filas.filter((f) => f.ooo_hoy.length).length,
-    sinRegistro: filas.filter((f) => f.hoy.tipo === "laboral" && f.hoy.registro === "sin_registro").length,
+    noDisponibles: filas.filter((f) => f.no_disponible_hoy).length,
+    enCurso: filas.filter((f) => f.ultima?.estado === "en_curso").length,
   };
 
   return (
@@ -45,8 +51,8 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
         {[
           ["Con bloqueos", resumen.bloqueos, "text-aether-danger"],
           ["Say-Do 14 días < 70%", resumen.bajo, "text-aether-warning"],
-          ["Ausentes hoy", resumen.ausentes, "text-aether-accent-soft"],
-          ["Sin objetivos hoy", resumen.sinRegistro, "text-slate-300"],
+          ["No disponibles hoy", resumen.noDisponibles, "text-aether-accent-soft"],
+          ["Jornadas en curso", resumen.enCurso, "text-slate-300"],
         ].map(([t, n, c]) => (
           <div key={t as string} className="tarjeta px-4 py-3">
             <p className={cx("text-2xl font-bold tabular-nums", n ? (c as string) : "text-slate-600")}>{n as number}</p>
@@ -94,23 +100,20 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
                   <span className="flex items-center gap-1">
                     <Flame size={12} className={f.racha ? "fill-aether-success text-aether-success" : "text-slate-600"} /> {f.racha}
                   </span>
-                  {f.dias_sin_registro_14d > 0 && <span className="text-aether-warning">{f.dias_sin_registro_14d} día(s) sin registro</span>}
                 </div>
               </div>
 
               <div className="text-xs">
                 <p className="mb-1.5 text-[11px]">
-                  <EstadoHoy f={f} />
+                  <UltimaJornada f={f} hoy={datos?.hoy ?? ""} />
                 </p>
-                {f.tareas_hoy.length > 0 && (
+                {f.ultima && f.ultima.tareas.length > 0 && (
                   <ul className="space-y-1">
-                    {f.tareas_hoy.map((t, i) => (
+                    {f.ultima.tareas.map((t, i) => (
                       <li key={i} className="flex items-start gap-1.5">
                         <span className="mt-0.5">
                           {t.estado === "completado" ? (
                             <CircleCheck size={13} className="text-aether-success" />
-                          ) : t.estado === "postergado_ooo" ? (
-                            <Plane size={13} className="text-aether-accent-soft" />
                           ) : (
                             <Circle size={13} className="text-slate-500" />
                           )}
@@ -123,12 +126,12 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
                     ))}
                   </ul>
                 )}
-                {f.ooo_hoy.map((a, i) => (
-                  <p key={i} className="mt-1.5 flex items-center gap-1 text-[11px] text-aether-accent-soft">
-                    <Plane size={12} /> {a.dia_completo ? "Día completo" : `${a.hora_inicio}–${a.hora_fin}`}
-                    {a.motivo && <span className="text-slate-500">· {a.motivo}</span>}
+                {f.no_disponible_hoy && (
+                  <p className="mt-1.5 flex items-center gap-1 text-[11px] text-aether-accent-soft">
+                    <CalendarOff size={12} /> No disponible hoy
+                    {f.no_disponible_hoy.motivo && <span className="text-slate-500">· {f.no_disponible_hoy.motivo}</span>}
                   </p>
-                ))}
+                )}
               </div>
 
               <div className="space-y-2">
@@ -169,7 +172,7 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
       </div>
       {filas.some((f) => f.prioridad <= 2) && (
         <p className="mt-4 flex items-center gap-1.5 text-[11px] text-slate-500">
-          <AlertTriangle size={12} /> Orden: bloqueos sin resolver → Say-Do 14 días bajo 70% → ausentes hoy → resto.
+          <AlertTriangle size={12} /> Orden: bloqueos sin resolver → Say-Do 14 días bajo 70% → no disponibles hoy → resto.
         </p>
       )}
     </div>

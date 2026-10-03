@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
-import { bitacoraDe, gastosRecientes, proyectosActivos } from "@/lib/dominio";
+import { gastosRecientes, jornadaDelDia, jornadaEnCurso, proyectosActivos } from "@/lib/dominio";
 import { esquemaGasto } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { repartirMonto } from "@/lib/reparto";
@@ -30,7 +30,7 @@ export const POST = manejar(async (req: NextRequest) => {
     db.prepare(
       `INSERT INTO gastos (id, usuario_id, bitacora_id, item, descripcion, monto_clp)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, u.id, bitacoraDe(db, u.id, hoyLocal())?.id ?? null, g.item, g.descripcion || null, g.monto_clp);
+    ).run(id, u.id, (jornadaEnCurso(db, u.id) ?? jornadaDelDia(db, u.id, hoyLocal()))?.id ?? null, g.item, g.descripcion || null, g.monto_clp);
     const ins = db.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES (?, ?, ?)");
     g.proyecto_ids.forEach((p, i) => ins.run(id, p, partes[i]));
   })();

@@ -6,16 +6,14 @@ import { Cargando, conEmpresa, diaCorto, useDatos, type Alcance } from "./comun"
 
 const ESTILO: Record<EstadoCelda, string> = {
   disponible: "bg-aether-success/25",
-  parcial: "bg-aether-warning/30",
-  ooo: "bg-aether-accent/45",
+  no_disponible: "bg-aether-accent/45",
   fin_de_semana: "bg-white/[0.03]",
   feriado: "bg-white/[0.06]",
 };
 
 const TITULO: Record<EstadoCelda, string> = {
   disponible: "Disponible",
-  parcial: "Ausencia parcial",
-  ooo: "Fuera de oficina",
+  no_disponible: "No disponible",
   fin_de_semana: "Fin de semana",
   feriado: "Feriado",
 };
@@ -62,7 +60,7 @@ export default function Capacidad({ empresa, alcance }: { empresa: string; alcan
                           title={`${TITULO[c.estado]}${c.detalle ? ` · ${c.detalle}` : ""}`}
                           className={cx("flex h-8 min-w-8 items-center justify-center rounded text-[10px] tabular-nums", ESTILO[c.estado])}
                         >
-                          {c.estado === "parcial" ? `${Math.round(c.fraccion * 100)}%` : c.estado === "ooo" ? "OOO" : ""}
+                          {c.estado === "no_disponible" ? "N/D" : ""}
                         </div>
                       </td>
                     ))}
@@ -73,7 +71,7 @@ export default function Capacidad({ empresa, alcance }: { empresa: string; alcan
                 ))}
                 <tr>
                   <td className="sticky left-0 z-10 border-t border-aether-border bg-aether-card px-4 py-2.5 text-[11px] font-semibold uppercase text-slate-400">
-                    Personas-día
+                    Disponibles
                   </td>
                   {datos.dias.map((d) => (
                     <td
@@ -87,21 +85,19 @@ export default function Capacidad({ empresa, alcance }: { empresa: string; alcan
                     </td>
                   ))}
                   <td className="border-t border-aether-border px-3 text-right font-bold tabular-nums text-white">
-                    {Math.round(datos.filas.reduce((s, f) => s + f.dias_disponibles, 0) * 10) / 10}
+                    {datos.filas.reduce((s, f) => s + f.dias_disponibles, 0)}
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-4 text-[11px] text-slate-400">
-            {(["disponible", "parcial", "ooo", "feriado"] as EstadoCelda[]).map((e) => (
+            {(["disponible", "no_disponible", "feriado"] as EstadoCelda[]).map((e) => (
               <span key={e} className="flex items-center gap-1.5">
                 <span className={cx("h-3 w-3 rounded", ESTILO[e])} /> {TITULO[e]}
               </span>
             ))}
-            <span className="ml-auto">
-              Jornada base {datos.jornada.inicio}–{datos.jornada.fin}: una ausencia parcial descuenta la fracción que cae en ese horario.
-            </span>
+            <span className="ml-auto">Días que cada persona marcó como no disponible. Sin horario: se planifica por días.</span>
           </div>
         </>
       )}

@@ -3,7 +3,6 @@ import { esFechaValida } from "./tiempo";
 
 const texto = (max: number) => z.string().trim().min(1, "Requerido").max(max, `Máximo ${max} caracteres`);
 const fecha = z.string().refine(esFechaValida, "Fecha inválida (YYYY-MM-DD)");
-const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Hora inválida (HH:MM)");
 const pin = z.string().regex(/^\d{6}$/, "El código debe tener 6 dígitos");
 
 export const esquemaLogin = z.object({
@@ -32,7 +31,7 @@ const conProyectoUnico = (v: unknown) => {
   return v;
 };
 
-export const esquemaManana = z.object({
+export const esquemaComienzo = z.object({
   tareas: z
     .array(
       z.preprocess(
@@ -47,7 +46,7 @@ export const esquemaManana = z.object({
     .max(4, "Máximo 4 objetivos"),
 });
 
-export const esquemaTarde = z.object({
+export const esquemaTermino = z.object({
   tareas: z
     .array(
       z.object({
@@ -60,23 +59,11 @@ export const esquemaTarde = z.object({
   bloqueo: z.string().trim().max(500).optional().nullable(),
 });
 
-export const esquemaOoo = z
-  .object({
-    fecha,
-    dia_completo: z.boolean(),
-    hora_inicio: hora.optional().nullable(),
-    hora_fin: hora.optional().nullable(),
-    motivo: z.string().trim().max(200).optional().nullable(),
-  })
-  .superRefine((v, ctx) => {
-    if (!v.dia_completo) {
-      if (!v.hora_inicio || !v.hora_fin) {
-        ctx.addIssue({ code: "custom", message: "Indica hora de inicio y término", path: ["hora_inicio"] });
-      } else if (v.hora_inicio >= v.hora_fin) {
-        ctx.addIssue({ code: "custom", message: "La hora de término debe ser posterior al inicio", path: ["hora_fin"] });
-      }
-    }
-  });
+/** Día no disponible (día completo). Campos de versiones anteriores (dia_completo, horas) se ignoran. */
+export const esquemaNoDisponible = z.object({
+  fecha,
+  motivo: z.string().trim().max(200).optional().nullable(),
+});
 
 const montoClp = z.coerce
   .number({ error: "Monto inválido" })

@@ -1,8 +1,8 @@
 # Aether Ops (`ops.aether.cl`)
 
-Bitácora diaria (objetivos de la mañana → cierre de la tarde), ausencias (OOO), registro de compras por
-proyecto, racha, Say-Do y logros, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada una
-con su propia base de datos. Un solo contenedor: Next.js 15 (standalone) + SQLite (WAL).
+Jornadas por objetivos (comenzar con objetivos → terminar con el balance), días no disponibles, compras
+por proyecto, racha, Say-Do y logros, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada
+una con su propia base de datos. Pensado para un equipo que trabaja **por objetivos, sin horario**. Un solo contenedor: Next.js 15 (standalone) + SQLite (WAL).
 
 - Revisión técnica de la especificación original y decisiones tomadas: [`docs/REVISION.md`](docs/REVISION.md) (en inglés)
 - English version of this README: [`README.en.md`](README.en.md)
@@ -20,31 +20,37 @@ con su propia base de datos. Un solo contenedor: Next.js 15 (standalone) + SQLit
 - El primer administrador es `ADMIN_EMAIL`. Desde `/admin` → **Administradores** se agregan otros, con el mismo
   tablero y los mismos permisos.
 - **Supervisión**: al crear a un integrante se elige qué administradores lo supervisan (por defecto, quien lo
-  crea). Puede ser compartida o exclusiva y se cambia en **Equipo**. Standup, capacidad y compras se filtran por
+  crea). Puede ser compartida o exclusiva y se cambia en **Equipo**. Standup, disponibilidad y compras se filtran por
   «Mis supervisados» o «Todo el equipo».
 
-## La jornada del integrante (hora de Chile)
+## La jornada del integrante (sin horario)
 
-Lo que ve cada integrante en `/checkin` depende de la hora en `America/Santiago` y de lo que ya hizo hoy:
+El equipo trabaja por objetivos (boleta de honorarios), así que la aplicación no impone horas:
 
-| Hora | Si aún no lo hizo | Si ya lo hizo |
-|---|---|---|
-| Antes de las 08:30 | Tablero, con invitación a registrar objetivos | Tablero |
-| **08:30–10:30** | **Bitácora de la mañana (obligatoria)** | Tablero |
-| 10:30–17:00 | Tablero, con botón para registrar objetivos atrasados | Tablero; puede marcar objetivos logrados durante el día |
-| **17:00–19:30** | **Cierre de la tarde (obligatorio)** | Tablero |
-| Después de las 19:30 | Tablero, con aviso para cerrar igual (cuenta para Say-Do, no para la racha) | Tablero |
+1. **Comenzar jornada** (botón en `/checkin`, a cualquier hora y cualquier día): define de 2 a 4 objetivos,
+   cada uno con uno o más proyectos. Queda registrada la hora de comienzo.
+2. Mientras trabaja, toca cada objetivo cuando lo logra (confeti y +10 XP).
+3. **Terminar jornada**: confirma lo logrado, explica lo pendiente y, si quiere, avisa un bloqueo.
 
-- Las encuestas solo se imponen dentro de su ventana; al terminarlas se vuelve al tablero (registrar objetivos
-  no abre el cierre de la tarde). Fines de semana y feriados: siempre tablero.
-- La vista cambia sola al entrar en una ventana (la página revisa la hora cada 30 s). Ventanas configurables con
-  `VENTANA_MANANA` y `VENTANA_TARDE`.
-- **Tablero**: objetivos del día (se marcan con un toque, con confeti), anillo de cumplimiento, nivel y XP, racha
-  actual y mejor racha, Say-Do 14 días, semana en colores, logros y compras del día.
-- **XP**: objetivo logrado +10, objetivos registrados en la ventana de la mañana +3, cierre a tiempo +5,
-  día perfecto (100 %) +15. Confeti al registrar objetivos, al marcar uno logrado y al cerrar la jornada
-  (se desactiva si el sistema tiene «reducir movimiento»).
-- Cada objetivo puede asociarse a **uno o más proyectos**.
+- Una jornada por día. Si alguien olvida terminarla, **queda abierta** (también pasada la medianoche): al
+  volver a la app se le pide terminarla antes de comenzar la siguiente.
+- Nada se abre ni se exige por la hora. Fuera de una jornada, la persona ve su tablero: nivel y XP, racha,
+  Say-Do 14 días, su semana, logros y compras.
+- **Racha**: jornadas terminadas seguidas con al menos 75 % de sus objetivos logrados. Los días sin jornada
+  no la cortan; una jornada terminada bajo 75 % la reinicia.
+- **XP**: objetivo logrado +10, jornada terminada +5, jornada perfecta (100 %) +15. Ningún logro depende de
+  la hora (no hay "puntual" ni "madrugador").
+- **Días no disponibles** (ícono de calendario en la cabecera): días completos en que la persona no trabajará,
+  para que la jefatura planifique. No afectan la racha. No se puede comenzar jornada un día marcado.
+
+**Qué ve la jefatura**: en el standup, la última jornada de cada persona (en curso o terminada, con sus
+objetivos y resultado), bloqueos y Say-Do, **sin horas de comienzo ni de término** y sin alertas por días sin
+jornada. «Disponibilidad 14 días» muestra quién marcó días como no disponibles.
+
+> Contexto: con boleta de honorarios, imponer horario, controlar asistencia o medir puntualidad son señales de
+> subordinación que pueden usarse para calificar la relación como laboral. Por eso la aplicación no exige
+> horas, no las muestra a la jefatura y no las usa en ninguna métrica. Esto no es asesoría legal: revisa el
+> uso concreto con tu abogado o contador.
 
 ## Compras
 
@@ -62,11 +68,11 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | Incluido | Próxima etapa |
 |---|---|
 | Ingreso con email + código de 6 dígitos (inicial `000000`, cambio obligatorio, bloqueo por intentos) | Editor de feriados (vienen cargados los de Chile 2026) |
-| `/checkin`: encuestas según la hora de Chile, tablero con progreso, nivel, logros y confeti | |
+| `/checkin`: comenzar / terminar jornada sin horario, tablero con progreso, nivel, logros y confeti | |
 | Objetivos (2 a 4 por día) y compras con uno o más proyectos | |
-| Fuera de oficina: día completo / parcial, cancelar; lo postergado no cuenta en Say-Do | |
+| Días no disponibles (días completos) para la planificación | |
 | `/mi-progreso`: racha, historial de 14 días, mis compras, cambio de código | |
-| `/admin`: standup (bloqueos → Say-Do < 70% → ausentes), capacidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
+| `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
 | `/exec`: gasto por proyecto vs presupuesto, por validar, lead time, Say-Do global 14 días | |
 
 ---
@@ -141,7 +147,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 40 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 41 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -241,6 +247,15 @@ Estructura de datos:
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 
+### Actualizar desde la versión 0.3
+
+Sin cambios de base de datos: actualiza y reinicia. Lo que cambia:
+
+- Desaparecen las ventanas de 08:30 y 17:00; la jornada se comienza y termina con botones.
+- La racha y la XP se recalculan con las reglas por objetivos (los cierres antiguos fuera de hora ahora cuentan).
+- Las ausencias parciales antiguas dejan de mostrarse; las de día completo pasan a ser días no disponibles.
+- Las variables `VENTANA_MANANA`, `VENTANA_TARDE` y `JORNADA` ya no se usan (puedes quitarlas del `.env`).
+
 ### Actualizar desde la versión 0.2
 
 Basta con actualizar el código y reiniciar (`docker compose up -d --build` o `./scripts/local.sh`). Al arrancar,
@@ -263,12 +278,9 @@ Respalda antes de actualizar (`node scripts/backup.mjs` o `docker exec aether-op
 | `JWT_SECRET` | — | Obligatoria en producción, ≥ 32 caracteres |
 | `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | Primer administrador (se crea si no hay ninguno); cualquier dominio |
 | `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | Empresas: `clave\|Nombre\|dominios` separadas por `;` |
-| `JORNADA` | `08:30-18:00` | Horario base para descontar ausencias parciales en la capacidad |
 | `PIN_INICIAL` | `000000` | Código inicial de cuentas nuevas o reseteadas |
 | `DATA_DIR` | `/data` (Docker), `./data` (local) | Bases SQLite |
-| `TZ_NEGOCIO` | `America/Santiago` | Define "hoy", las ventanas de las encuestas y la racha |
-| `VENTANA_MANANA` | `08:30-10:30` | Ventana de la bitácora de la mañana (obligatoria dentro de ella) |
-| `VENTANA_TARDE` | `17:00-19:30` | Ventana del cierre de la tarde; su fin es el límite para sumar a la racha |
+| `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.
@@ -281,10 +293,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, ventanas, racha, Say-Do, XP, esquema y migración, empresas, reparto, gerencia (25 pruebas)
+npm run test:logica       # zona horaria, racha por objetivos, Say-Do, XP, esquema y migración, disponibilidad, reparto, gerencia (23 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# objetivos y compras con varios proyectos, eliminar proyectos, tableros (40 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, eliminar proyectos, tableros (41 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
@@ -298,17 +310,16 @@ docker rm -f aether-test
 
 ```
 app/                páginas (login, cambiar-pin, checkin, mi-progreso, admin, exec) y api/ (route handlers)
-components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, ModalOoo, Anillo)
-components/equipo/  jornada del integrante (encuestas, tablero, confeti, logros)
-components/admin/   tablero de jefatura (selector, standup, capacidad, compras, equipo, proyectos, administradores)
+components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, ModalNoDisponible, Anillo)
+components/equipo/  jornada del integrante (comenzar, terminar, tablero, confeti, logros)
+components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores)
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
-lib/metricas.ts     reglas de racha y Say-Do
-lib/tableros.ts     cálculos de standup, capacidad, compras y gerencia
+lib/metricas.ts     reglas de racha y Say-Do (por objetivos, sin horario)
+lib/tableros.ts     cálculos de standup, disponibilidad, compras y gerencia
 lib/supervision.ts  administradores ↔ integrantes supervisados
 lib/tiempo.ts       fechas de negocio en America/Santiago
-lib/jornada.ts      ventanas de las encuestas y qué vista corresponde a cada hora
 lib/reparto.ts      reparto del monto de una compra entre proyectos
 lib/auth.ts, jwt.ts, pin.ts, limites.ts   sesiones, hash de códigos, bloqueo por intentos
 middleware.ts       enrutamiento de páginas por rol (las rutas /api se autentican solas)

@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleCheck, Flame, KeyRound, Plane } from "lucide-react";
+import { ArrowLeft, CalendarOff, CircleCheck, Flame, KeyRound } from "lucide-react";
 import Link from "next/link";
 import Anillo from "@/components/Anillo";
 import BotonSalir from "@/components/BotonSalir";
@@ -6,28 +6,25 @@ import { empresaDe, requirePagina } from "@/lib/auth";
 import { getDbEmpresa } from "@/lib/db";
 import { ausenciasDesde, gastosRecientes } from "@/lib/dominio";
 import { calcularProgreso, type DiaResumen } from "@/lib/metricas";
-import { HORA_LIMITE_RACHA, fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
+import { UMBRAL_RACHA, fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
 const clp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 
-function Dia({ d }: { d: DiaResumen }) {
+function Dia({ d, hoy }: { d: DiaResumen; hoy: string }) {
   let detalle: string;
-  let color = "text-slate-500";
-  if (d.tipo === "fin_de_semana") detalle = "Fin de semana";
-  else if (d.tipo === "feriado") detalle = "Feriado";
-  else if (d.tipo === "ooo") detalle = "Fuera de oficina";
-  else if (d.registro === "sin_registro") {
-    detalle = "Sin registro";
-    color = "text-aether-danger";
-  } else if (d.registro === "abierto") {
-    detalle = "Sin cerrar";
-    color = "text-aether-warning";
-  } else {
-    detalle = `${d.completadas}/${d.comprometidas} · cierre ${d.cierre_local}`;
+  let color = "text-slate-600";
+  if (d.registro === "cerrado") {
+    detalle = `${d.completadas}/${d.comprometidas} · ${d.inicio_local}–${d.cierre_local}`;
     color = "text-slate-400";
-  }
+  } else if (d.registro === "abierto") {
+    detalle = d.fecha === hoy ? `En curso desde las ${d.inicio_local}` : "Sin terminar";
+    color = "text-aether-accent-soft";
+  } else if (d.tipo === "ooo") detalle = "No disponible";
+  else if (d.tipo === "feriado") detalle = "Feriado";
+  else if (d.tipo === "fin_de_semana") detalle = "Fin de semana";
+  else detalle = "Sin jornada";
   return (
     <li className="flex items-center justify-between py-2.5 text-xs">
       <div className="flex items-center gap-2">
@@ -78,7 +75,7 @@ export default async function MiProgreso() {
         <div className="tarjeta flex flex-col items-center justify-center p-4">
           <Flame size={26} className={p.racha > 0 ? "fill-aether-success text-aether-success" : "text-slate-600"} />
           <p className="mt-1 text-3xl font-bold tabular-nums text-white">{p.racha}</p>
-          <p className="text-[11px] text-slate-400">{p.racha === 1 ? "día de racha" : "días de racha"}</p>
+          <p className="text-[11px] text-slate-400">{p.racha === 1 ? "jornada de racha" : "jornadas de racha"}</p>
         </div>
         <div className="tarjeta flex flex-col items-center justify-center p-4">
           <Anillo valor={p.saydo_14d} tamano={72} etiqueta="14 días" />
@@ -89,18 +86,15 @@ export default async function MiProgreso() {
       </section>
 
       <p className="mb-5 text-[11px] leading-relaxed text-slate-500">
-        La racha suma cada día hábil cerrado antes de las {HORA_LIMITE_RACHA} con al menos 75% de cumplimiento. Fines de semana,
-        feriados y ausencias de día completo no la cortan.
-        {p.dias_sin_registro_14d > 0 && (
-          <span className="text-aether-warning"> {p.dias_sin_registro_14d} día(s) hábil(es) sin registro en las últimas 2 semanas.</span>
-        )}
+        La racha suma cada jornada terminada con al menos {UMBRAL_RACHA}% de sus objetivos logrados. Los días sin jornada
+        no la cortan; una jornada bajo {UMBRAL_RACHA}% la reinicia.
       </p>
 
       <section className="tarjeta mb-5 px-4 py-2">
         <h2 className="pt-2 text-xs font-bold uppercase tracking-wider text-slate-400">Últimos 14 días</h2>
         <ul className="divide-y divide-aether-border">
           {p.historial.map((d) => (
-            <Dia key={d.fecha} d={d} />
+            <Dia key={d.fecha} d={d} hoy={hoy} />
           ))}
         </ul>
       </section>
@@ -108,13 +102,13 @@ export default async function MiProgreso() {
       {ausencias.length > 0 && (
         <section className="tarjeta mb-5 px-4 py-3">
           <h2 className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-            <Plane size={13} /> Próximas ausencias
+            <CalendarOff size={13} /> Próximos días no disponibles
           </h2>
           <ul className="divide-y divide-aether-border text-xs">
             {ausencias.map((a) => (
               <li key={a.id} className="flex justify-between py-2">
                 <span className="capitalize text-slate-300">{a.fecha === hoy ? "Hoy" : fechaCorta(a.fecha)}</span>
-                <span className="text-slate-400">{a.dia_completo ? "Día completo" : `${a.hora_inicio} – ${a.hora_fin}`}</span>
+                <span className="text-slate-500">{a.motivo ?? ""}</span>
               </li>
             ))}
           </ul>

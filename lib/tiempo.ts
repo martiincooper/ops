@@ -1,19 +1,9 @@
 // Fechas de negocio en la zona horaria de la empresa (por defecto America/Santiago).
 // Nunca usar toISOString().split("T")[0] para "hoy": eso es la fecha UTC.
 
-import { VENTANAS_DEFECTO, leerVentana, type Ventanas } from "./jornada";
-
 export const TZ_NEGOCIO = process.env.TZ_NEGOCIO || "America/Santiago";
 
-/** Ventanas de la bitácora (hora de Chile). Configurables con VENTANA_MANANA / VENTANA_TARDE = "HH:MM-HH:MM". */
-export const VENTANAS: Ventanas = {
-  manana: leerVentana(process.env.VENTANA_MANANA, VENTANAS_DEFECTO.manana),
-  tarde: leerVentana(process.env.VENTANA_TARDE, VENTANAS_DEFECTO.tarde),
-};
-
-/** Hora límite de cierre para que el día cuente en la racha: fin de la ventana de la tarde. */
-export const HORA_LIMITE_RACHA = VENTANAS.tarde.fin;
-/** Cumplimiento mínimo (%) para que el día cuente en la racha. */
+/** Cumplimiento mínimo (%) para que una jornada terminada sume a la racha. */
 export const UMBRAL_RACHA = 75;
 
 const fmtFecha = new Intl.DateTimeFormat("en-CA", {

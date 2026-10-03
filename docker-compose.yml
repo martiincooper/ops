@@ -21,9 +21,6 @@ services:
       TZ_NEGOCIO: ${TZ_NEGOCIO:-America/Santiago}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       # Opcionales (vacío = valor por defecto)
-      VENTANA_MANANA: ${VENTANA_MANANA:-}
-      VENTANA_TARDE: ${VENTANA_TARDE:-}
-      JORNADA: ${JORNADA:-}
       EMPRESAS: ${EMPRESAS:-}
 
 volumes:
