@@ -71,15 +71,21 @@ const montoClp = z.coerce
   .min(0, "Monto inválido")
   .max(1_000_000_000, "Monto fuera de rango");
 
-/** Compra: uno o más proyectos, nombre, descripción (opcional) y monto total pagado en CLP. */
+/**
+ * Compra: uno o más proyectos, nombre, descripción (opcional), monto de la compra en CLP y, opcional, el costo
+ * de envío en CLP. Se guarda el total (compra + envío) y el envío por separado.
+ */
 export const esquemaGasto = z.preprocess(
   conProyectoUnico,
-  z.object({
-    proyecto_ids: proyectosDe(10),
-    item: texto(120),
-    descripcion: z.string().trim().max(500, "Máximo 500 caracteres").optional().nullable(),
-    monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0"),
-  }),
+  z
+    .object({
+      proyecto_ids: proyectosDe(10),
+      item: texto(120),
+      descripcion: z.string().trim().max(500, "Máximo 500 caracteres").optional().nullable(),
+      monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0"),
+      envio_clp: montoClp.optional().nullable(),
+    })
+    .refine((g) => g.monto_clp + (g.envio_clp ?? 0) <= 1_000_000_000, { message: "Monto fuera de rango", path: ["envio_clp"] }),
 );
 
 const emailNormalizado = z.string().trim().toLowerCase().pipe(z.email("Email inválido"));

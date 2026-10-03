@@ -120,7 +120,8 @@ export default async function MiProgreso() {
                   <CodigosProyecto codigos={g.proyectos} className="mt-1.5" />
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className="font-semibold text-tinta">{clp.format(g.monto_clp)}</span>
+                  <span className="font-semibold tabular-nums text-tinta">{clp.format(g.monto_clp)}</span>
+                  {g.envio_clp > 0 && <span className="whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp.format(g.envio_clp)}</span>}
                   <Insignia tono={ESTADO_GASTO[g.estado]}>{g.estado}</Insignia>
                 </div>
               </li>

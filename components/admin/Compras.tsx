@@ -55,7 +55,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                 <th>Persona</th>
                 <th>Compra</th>
                 <th>Proyecto(s)</th>
-                <th className="text-right">Monto</th>
+                <th className="text-right">Monto (CLP)</th>
                 <th>Estado</th>
                 <th className="text-right">Validar</th>
               </tr>
@@ -85,7 +85,10 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                         </p>
                       ))}
                     </td>
-                    <td className="text-right font-semibold text-tinta">{clp(g.monto_clp)}</td>
+                    <td className="text-right">
+                      <span className="block font-semibold tabular-nums text-tinta">{clp(g.monto_clp)}</span>
+                      {g.envio_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp(g.envio_clp)}</span>}
+                    </td>
                     <td>
                       <Insignia tono={ESTADO[g.estado]}>{g.estado}</Insignia>
                       {g.validado_por_nombre && <span className="mt-1 block text-xs text-tinta-3">{g.validado_por_nombre}</span>}

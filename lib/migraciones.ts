@@ -253,4 +253,11 @@ export const MIGRACIONES_EMPRESA: string[] = [
     actualizado_por TEXT
   );
   `,
+
+  // v4 — envío opcional de una compra. gastos.monto_clp sigue siendo el TOTAL pagado (compra + envío), así el
+  //      costo por proyecto y los indicadores no cambian; envio_clp es la parte del total que fue despacho
+  //      (0 = sin envío). Las compras existentes quedan con envío 0.
+  `
+  ALTER TABLE gastos ADD COLUMN envio_clp INTEGER NOT NULL DEFAULT 0 CHECK (envio_clp >= 0 AND envio_clp < monto_clp);
+  `,
 ];

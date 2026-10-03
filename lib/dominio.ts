@@ -55,7 +55,10 @@ export interface GastoResumen {
   item: string;
   descripcion: string | null;
   proyectos: string[]; // códigos
+  /** Total pagado (compra + envío). */
   monto_clp: number;
+  /** Parte del total que fue envío (0 = sin envío). */
+  envio_clp: number;
   estado: "pendiente" | "aprobado" | "rechazado";
   creado_en: string;
 }
@@ -148,7 +151,7 @@ export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoRe
   return (
     db
       .prepare(
-        `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.estado, g.creado_en,
+        `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.estado, g.creado_en,
                 (SELECT group_concat(codigo, ',') FROM (
                    SELECT p.codigo FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
                     WHERE gp.gasto_id = g.id ORDER BY p.codigo)) AS codigos

@@ -187,7 +187,10 @@ export interface FilaGasto {
   proyectos: { codigo: string; nombre: string; monto_clp: number }[];
   item: string;
   descripcion: string | null;
+  /** Total pagado (compra + envío). */
   monto_clp: number;
+  /** Parte del total que fue envío (0 = sin envío). */
+  envio_clp: number;
   estado: "pendiente" | "aprobado" | "rechazado";
   validado_por_nombre: string | null;
   validado_en: string | null;
@@ -202,7 +205,7 @@ export function gastosEmpresa(
   const filas = (
     db
       .prepare(
-        `SELECT g.id, g.usuario_id, u.nombre AS persona, g.item, g.descripcion, g.monto_clp, g.estado,
+        `SELECT g.id, g.usuario_id, u.nombre AS persona, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.estado,
                 g.validado_por_nombre, g.validado_en, g.observacion, g.creado_en
            FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
           WHERE (? = 'todos' OR g.estado = 'pendiente')

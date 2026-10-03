@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
+import { esquemaGasto } from "../lib/esquemas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { repartirMonto } from "../lib/reparto";
 import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
@@ -287,6 +288,29 @@ async function main() {
     assert.deepEqual(d.prepare("PRAGMA foreign_key_check").all(), []);
     assert.deepEqual(d.prepare("SELECT name FROM sqlite_master WHERE name LIKE '_mig%'").all(), []);
     assert.throws(() => d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp) VALUES ('c','u1','x',0)").run());
+  });
+
+  console.log("Migración v3 → v4 (envío opcional)");
+  await prueba("compras existentes quedan con envío 0; el envío debe ser menor que el total", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_EMPRESA.slice(0, 3).forEach((m) => d.exec(m));
+    d.prepare("INSERT INTO usuarios (id, nombre, email, rol) VALUES ('u1','A','a@x.cl','team')").run();
+    d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp) VALUES ('a','u1','PCB',76000)").run();
+    d.exec(MIGRACIONES_EMPRESA[3]);
+    assert.equal((d.prepare("SELECT envio_clp FROM gastos WHERE id = 'a'").get() as { envio_clp: number }).envio_clp, 0);
+    d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, envio_clp) VALUES ('b','u1','Sensor',12500,2500)").run();
+    assert.throws(() => d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, envio_clp) VALUES ('c','u1','x',2500,2500)").run());
+    assert.throws(() => d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, envio_clp) VALUES ('d','u1','x',2500,-1)").run());
+  });
+  await prueba("esquema de compra: envío opcional, entero y no negativo; total ≤ 1.000 millones", () => {
+    const base = { proyecto_ids: ["p1"], item: "PCB", monto_clp: 10000 };
+    assert.equal(esquemaGasto.safeParse(base).success, true);
+    assert.equal(esquemaGasto.safeParse({ ...base, envio_clp: null }).success, true);
+    assert.equal(esquemaGasto.safeParse({ ...base, envio_clp: 2500 }).success, true);
+    assert.equal(esquemaGasto.safeParse({ ...base, envio_clp: -1 }).success, false);
+    assert.equal(esquemaGasto.safeParse({ ...base, envio_clp: 2.5 }).success, false);
+    assert.equal(esquemaGasto.safeParse({ ...base, monto_clp: 1_000_000_000, envio_clp: 1 }).success, false);
   });
 
   console.log("Códigos");

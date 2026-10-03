@@ -355,30 +355,39 @@ async function main() {
     anaGastoId = r.datos.id;
     const g = r.datos.gastos.find((x) => x.id === anaGastoId);
     assert.equal(g.monto_clp, 43435);
+    assert.equal(g.envio_clp, 0);
     assert.equal(g.descripcion, "Programador para el sensor");
     assert.deepEqual(g.proyectos, ["AETH-SEN-01"]);
     assert.ok(!("iva_clp" in g) && !("tipo_documento" in g));
   });
-  await prueba("compra para 2 proyectos: se reparte en partes iguales sin perder pesos", async () => {
-    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Osciloscopio (arriendo)", monto_clp: 90001, proyecto_ids: [pA, pA2] }) });
+  await prueba("compra con envío para 2 proyectos: total = compra + envío, repartido en partes iguales sin perder pesos", async () => {
+    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Osciloscopio (arriendo)", monto_clp: 85001, envio_clp: 5000, proyecto_ids: [pA, pA2] }) });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
     gastoDobleId = r.datos.id;
     assert.deepEqual(r.datos.gastos.find((x) => x.id === gastoDobleId).proyectos, ["AETH-GW-03", "AETH-SEN-01"]);
     const fila = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos"))).datos.gastos.find((x) => x.id === gastoDobleId);
+    assert.equal(fila.monto_clp, 90001);
+    assert.equal(fila.envio_clp, 5000);
     const partes = Object.fromEntries(fila.proyectos.map((p) => [p.codigo, p.monto_clp]));
     assert.equal(partes["AETH-SEN-01"] + partes["AETH-GW-03"], 90001);
     assert.ok(Math.abs(partes["AETH-SEN-01"] - partes["AETH-GW-03"]) <= 1);
   });
-  await prueba("descripción opcional", async () => {
-    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Cables dupont", monto_clp: 11900, descripcion: null }) });
+  await prueba("descripción y envío opcionales (envío null = sin envío)", async () => {
+    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Cables dupont", monto_clp: 11900, descripcion: null, envio_clp: null }) });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
     assert.equal(r.datos.gastos[0].descripcion, null);
+    assert.equal(r.datos.gastos[0].monto_clp, 11900);
+    assert.equal(r.datos.gastos[0].envio_clp, 0);
   });
-  await prueba("validaciones: sin nombre, monto 0, decimales, sin proyecto, proyecto de otra empresa → 400", async () => {
+  await prueba("validaciones: sin nombre, monto 0, decimales, envío inválido, sin proyecto, proyecto de otra empresa → 400", async () => {
     const mal = async (x) => (await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra(x) })).status;
     assert.equal(await mal({ item: " " }), 400);
     assert.equal(await mal({ monto_clp: 0 }), 400);
     assert.equal(await mal({ monto_clp: 1.5 }), 400);
+    assert.equal(await mal({ envio_clp: -1 }), 400);
+    assert.equal(await mal({ envio_clp: 1500.5 }), 400);
+    assert.equal(await mal({ monto_clp: 999_999_999, envio_clp: 2 }), 400);
+    assert.equal(await mal({ monto_clp: 0, envio_clp: 5000 }), 400);
     assert.equal(await mal({ proyecto_ids: [] }), 400);
     assert.equal(await mal({ proyecto_ids: [pA, pD] }), 400);
   });

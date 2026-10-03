@@ -15,8 +15,9 @@ export const GET = manejar(async (req: NextRequest) => {
 });
 
 /**
- * Compra: nombre, descripción (opcional), monto total pagado y uno o más proyectos.
- * Con varios proyectos el monto se reparte en partes iguales (la suma siempre cuadra con el total).
+ * Compra: nombre, descripción (opcional), monto de la compra, envío opcional y uno o más proyectos (montos en CLP).
+ * Se guarda monto_clp = compra + envío (total pagado) y envio_clp aparte. Con varios proyectos el total, envío
+ * incluido, se reparte en partes iguales (la suma siempre cuadra con el total).
  */
 export const POST = manejar(async (req: NextRequest) => {
   const { u, db } = await contexto(req, ["team"]);
@@ -25,12 +26,14 @@ export const POST = manejar(async (req: NextRequest) => {
   if (g.proyecto_ids.some((id) => !activos.has(id))) throw new HttpError(400, "Proyecto inexistente o no activo");
 
   const id = randomUUID();
-  const partes = repartirMonto(g.monto_clp, g.proyecto_ids.length);
+  const envio = g.envio_clp ?? 0;
+  const total = g.monto_clp + envio;
+  const partes = repartirMonto(total, g.proyecto_ids.length);
   db.transaction(() => {
     db.prepare(
-      `INSERT INTO gastos (id, usuario_id, bitacora_id, item, descripcion, monto_clp)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, u.id, (jornadaEnCurso(db, u.id) ?? jornadaDelDia(db, u.id, hoyLocal()))?.id ?? null, g.item, g.descripcion || null, g.monto_clp);
+      `INSERT INTO gastos (id, usuario_id, bitacora_id, item, descripcion, monto_clp, envio_clp)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, u.id, (jornadaEnCurso(db, u.id) ?? jornadaDelDia(db, u.id, hoyLocal()))?.id ?? null, g.item, g.descripcion || null, total, envio);
     const ins = db.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES (?, ?, ?)");
     g.proyecto_ids.forEach((p, i) => ins.run(id, p, partes[i]));
   })();

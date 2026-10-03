@@ -32,7 +32,9 @@ Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
   control or punctuality metrics are indicators of an employment relationship (not legal advice).
 
 Objectives and purchases can belong to **one or more projects**. A purchase is name, optional description,
-amount (CLP) and projects; with several projects the amount is split equally (leftover pesos go to the first ones).
+amount in Chilean pesos (CLP, no decimals), an optional shipping cost (CLP, behind an "Agregar envío" toggle) and
+projects. The total (purchase + shipping) is stored and the shipping part shown separately; with several projects
+the total, shipping included, is split equally (leftover pesos go to the first ones).
 
 Deleting a project (`/admin` → Proyectos) also deletes objectives and purchases that belong only to it; shared
 ones just lose it and the purchase amount is re-split. Irreversible.
@@ -76,6 +78,7 @@ docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
 ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
+Upgrading from 0.6: adds `gastos.envio_clp` (automatic migration; existing purchases get 0). Totals unchanged.
 Upgrading from 0.5: no schema change. New UI; streak, XP, levels, achievements and confetti removed; same
 features and rules otherwise. New dependency `@fontsource-variable/inter` (`npm ci`; nothing to do with Docker).
 Upgrading from 0.4: adds the `metas` table (automatic migration); "Presupuesto" is relabeled "Costo estimado BOM".
@@ -88,7 +91,7 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, goal-based Say-Do, schema + migration, availability, split, exec (24)
+npm run test:logica   # timezone, goal-based Say-Do, schema + migrations, shipping, availability, split, exec (26)
 # end-to-end against a server with an EMPTY data dir (42)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```

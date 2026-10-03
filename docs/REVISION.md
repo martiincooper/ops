@@ -209,3 +209,17 @@ called the gamification irrelevant to the work. Changes:
   "vencida", not just red), meters use same-hue tracks, controls keep their labels (`aria-pressed` objective
   toggles, labelled inputs), so the e2e suite and screenshot checks run unchanged.
 - Tests: logic 24 (gamification cases removed), e2e 42 (asserts `racha`/`juego` are absent).
+
+## 12. Pass 7 — optional shipping on purchases
+
+- The purchase form has an **Agregar envío** switch (`role="switch"`); when on, a second CLP field asks for the
+  shipping cost and the form shows the total (purchase + shipping). Both fields say "pesos chilenos (CLP)", show
+  a `$ … CLP` affordance and only accept whole numbers (thousands separator added while typing).
+- Storage (schema v4): `gastos.monto_clp` stays the **total paid**, so per-project cost, the executive KPIs, the
+  validation desk totals and project-deletion re-splits are unchanged; new `gastos.envio_clp` (default 0,
+  `CHECK 0 ≤ envio_clp < monto_clp`) records the shipping part. Existing rows migrate with 0.
+- API: `POST /api/gastos` takes `monto_clp` (the purchase) and optional `envio_clp`; the server stores
+  `monto_clp + envio_clp` as the total and splits that total across projects. Responses return `monto_clp`
+  (total) and `envio_clp`. Total capped at 1,000,000,000 CLP.
+- Team list, "Mis compras" and the admin validation table show "incl. envío $X" under the total.
+- Tests: logic 26 (v3→v4 migration, schema), e2e 42 (shipping total and split, invalid shipping values).

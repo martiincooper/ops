@@ -243,12 +243,13 @@ export default function Tablero({ estado, onCambio, onAbrir, onNoDisponible }: P
                 <Receipt size={18} />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-tinta">{g.item}</p>
+                <p className="line-clamp-2 font-medium leading-snug text-tinta">{g.item}</p>
                 {g.descripcion && <p className="line-clamp-2 text-sm text-tinta-3">{g.descripcion}</p>}
                 <CodigosProyecto codigos={g.proyectos} className="mt-1.5" />
               </div>
               <div className="shrink-0 text-right">
-                <p className="font-semibold text-tinta">{clp(g.monto_clp)}</p>
+                <p className="font-semibold tabular-nums text-tinta">{clp(g.monto_clp)}</p>
+                {g.envio_clp > 0 && <p className="whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp(g.envio_clp)}</p>}
                 <p className="text-xs capitalize text-tinta-3">{g.estado}</p>
               </div>
             </li>

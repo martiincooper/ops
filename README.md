@@ -59,8 +59,10 @@ estados siempre llevan ícono y texto, no solo color.
 
 ## Compras
 
-Nombre, descripción (opcional), monto en pesos y **uno o más proyectos**. Si son varios, el monto se reparte en
-partes iguales (los pesos que sobran van a los primeros). La jefatura aprueba o rechaza (con motivo) en
+Nombre, descripción (opcional), monto en **pesos chilenos (CLP, sin decimales)** y **uno o más proyectos**. El
+interruptor **Agregar envío** permite indicar aparte el costo de despacho (también en CLP); la compra guarda el
+total (compra + envío) y muestra el envío por separado («incl. envío $3.500»). Si son varios proyectos, el total,
+envío incluido, se reparte en partes iguales (los pesos que sobran van a los primeros). La jefatura aprueba o rechaza (con motivo) en
 `/admin` → **Compras**; gerencia ve el costo acumulado de cada proyecto frente a su estimación BOM (las
 rechazadas no cuentan).
 
@@ -311,6 +313,11 @@ Estructura de datos:
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 
+### Actualizar desde la versión 0.6
+
+Se agrega la columna `envio_clp` a las compras (migración automática al arrancar; las compras existentes quedan
+sin envío). Los totales, el costo por proyecto y los indicadores no cambian.
+
 ### Actualizar desde la versión 0.5
 
 Sin cambios de base de datos: actualiza y reinicia. Cambia el diseño completo (tema claro) y se eliminan la
@@ -368,7 +375,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do por objetivos, esquema y migración, disponibilidad, reparto, gerencia (24 pruebas)
+npm run test:logica       # zona horaria, Say-Do por objetivos, esquema y migraciones, envío, disponibilidad, reparto, gerencia (26 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, eliminar proyectos, tableros (42 pruebas)
