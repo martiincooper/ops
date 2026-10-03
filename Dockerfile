@@ -31,13 +31,16 @@ RUN groupadd --system --gid 1001 aether && useradd --system --uid 1001 --gid aet
 COPY --from=build --chown=1001:1001 /app/.next/standalone ./
 COPY --from=build --chown=1001:1001 /app/.next/static ./.next/static
 COPY --from=build --chown=1001:1001 /app/public ./public
-COPY --from=build --chown=1001:1001 /app/scripts/backup.mjs ./scripts/backup.mjs
+COPY --from=build --chown=1001:1001 /app/scripts/backup.mjs /app/scripts/arranque.cjs ./scripts/
 
+# Corre como aether (1001). Si la plataforma lo inicia como root (Railway con RAILWAY_RUN_UID=0, cuyos
+# volúmenes pertenecen a root), scripts/arranque.cjs ajusta /data y baja a 1001 antes de iniciar.
+# Sin instrucción VOLUME (Railway la rechaza): el volumen se monta en /data desde docker compose, docker run -v
+# o el volumen de Railway.
 USER 1001
-VOLUME ["/data"]
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "server.js"]
+CMD ["node", "scripts/arranque.cjs"]

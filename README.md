@@ -77,13 +77,52 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 
 ---
 
+## 0. Producción en Railway
+
+El repositorio es [github.com/martiincooper/ops](https://github.com/martiincooper/ops) y Railway lo despliega con
+el `Dockerfile` de la raíz (no hace falta `railway.json`). Cada push a `main` genera un despliegue nuevo.
+
+1. **Proyecto**: en Railway, *New Project → Deploy from GitHub repo → martiincooper/ops*. Si el repositorio no
+   aparece, dale acceso a la app de Railway en GitHub. Railway detecta el `Dockerfile`.
+2. **Volumen (obligatorio)**: agrega un volumen al servicio montado en **`/data`**. Sin volumen, las bases
+   SQLite se borran en cada despliegue (el registro lo avisa con `AVISO: no hay volumen en Railway`).
+3. **Variables** del servicio:
+
+   | Variable | Valor |
+   |---|---|
+   | `JWT_SECRET` | resultado de `openssl rand -hex 32` (guárdalo: si cambia, se cierran todas las sesiones) |
+   | `ADMIN_EMAIL` | `martin@aether-tech.dev` |
+   | `ADMIN_NOMBRE` | `Martin` |
+   | `RAILWAY_RUN_UID` | `0` — el volumen de Railway pertenece a root; el contenedor ajusta los permisos de `/data` al arrancar y luego corre sin privilegios |
+   | `PORT` | `3000` |
+   | `PIN_INICIAL` | opcional pero recomendado: un código de 6 dígitos que no sea trivial, en vez de `000000` |
+
+   No definas `COOKIE_SECURE=false`: Railway sirve todo por HTTPS.
+4. **Healthcheck**: en la configuración del servicio, *Healthcheck Path* = `/api/health`.
+5. **Dominio**: en *Networking*, genera un dominio `*.up.railway.app` (puerto 3000) para probar. Para
+   `ops.aether.cl`, agrega un *Custom Domain* y crea en tu DNS los registros que Railway indique (un `CNAME`
+   y, si lo pide, un `TXT` de verificación). El certificado lo emite Railway.
+6. **Respaldos**: activa los respaldos programados del volumen en Railway (diarios o semanales).
+7. **Primer ingreso**: apenas termine el primer despliegue, entra con `ADMIN_EMAIL` y el código inicial y crea
+   tu código. Luego sigue la sección 3 (proyectos, equipo, administradores).
+
+Tener en cuenta:
+
+- Un solo servicio y una sola réplica (SQLite en un volumen; Railway no permite réplicas con volumen).
+- Con volumen, cada despliegue tiene unos segundos sin servicio: Railway no monta el mismo volumen en dos
+  despliegues a la vez.
+- Los datos que probaste en tu computador (`./data`) no se suben: producción parte vacía.
+- Si el registro dice `No se puede escribir en /data`, falta `RAILWAY_RUN_UID=0`.
+
+---
+
 ## 1. Ejecutar con Docker (recomendado)
 
 Requisitos: Docker 24+ (Docker Desktop en Mac/Windows, Docker Engine en Linux).
 
 ```bash
-git clone https://github.com/<tu-usuario>/aether-ops.git
-cd aether-ops
+git clone https://github.com/martiincooper/ops.git
+cd ops
 cp .env.example .env
 ```
 
@@ -160,11 +199,11 @@ Como el repositorio es privado, el servidor necesita iniciar sesión una vez con
 con permiso `read:packages`:
 
 ```bash
-echo <TOKEN> | docker login ghcr.io -u <tu-usuario> --password-stdin
-docker pull ghcr.io/<tu-usuario>/aether-ops:latest
+echo <TOKEN> | docker login ghcr.io -u martiincooper --password-stdin
+docker pull ghcr.io/martiincooper/ops:latest
 ```
 
-y en `docker-compose.yml` reemplaza `build: .` por `image: ghcr.io/<tu-usuario>/aether-ops:latest`.
+y en `docker-compose.yml` reemplaza `build: .` por `image: ghcr.io/martiincooper/ops:latest`.
 
 ---
 
@@ -195,7 +234,7 @@ Datos en `./data` (bórrala para empezar de cero). Detener con `Ctrl+C`.
 
 ---
 
-## 4. Producción en `ops.aether.cl`
+## 4. Producción en un servidor propio (`ops.aether.cl` sin Railway)
 
 ### DNS y proxy inverso (HTTPS)
 

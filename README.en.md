@@ -37,6 +37,19 @@ amount (CLP) and projects; with several projects the amount is split equally (le
 Deleting a project (`/admin` → Proyectos) also deletes objectives and purchases that belong only to it; shared
 ones just lose it and the purchase amount is re-split. Irreversible.
 
+## Deploy on Railway
+
+Repo: [github.com/martiincooper/ops](https://github.com/martiincooper/ops). Railway builds the root `Dockerfile`
+(no `railway.json`; the Dockerfile has no `VOLUME` instruction, which Railway rejects).
+
+1. New Project → Deploy from GitHub repo → `martiincooper/ops`.
+2. Attach a volume mounted at **`/data`** (required — without it the SQLite files are wiped on every deploy).
+3. Variables: `JWT_SECRET` (`openssl rand -hex 32`), `ADMIN_EMAIL=martin@aether-tech.dev`, `ADMIN_NOMBRE`,
+   `RAILWAY_RUN_UID=0` (Railway volumes are root-owned; `scripts/arranque.cjs` fixes `/data` ownership at start
+   and drops to uid 1001), `PORT=3000`, optionally a non-trivial `PIN_INICIAL`.
+4. Healthcheck path `/api/health`; generate a domain on port 3000 or add `ops.aether.cl` as a custom domain.
+5. Enable scheduled volume backups. One replica only; a few seconds of downtime per deploy (volume).
+
 ## Run
 
 ```bash

@@ -3,7 +3,7 @@ services:
   aether-ops:
     build: .
     # O usar la imagen publicada por GitHub Actions:
-    # image: ghcr.io/<tu-usuario>/aether-ops:latest
+    # image: ghcr.io/martiincooper/ops:latest
     image: aether-ops:latest
     container_name: aether-ops
     restart: always
