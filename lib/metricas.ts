@@ -178,3 +178,17 @@ export function calcularProgreso(db: DB, usuarioId: string, hoy: string, inicioC
     historial,
   };
 }
+
+/** Mejor racha histórica (mismas reglas que la racha actual; hasta 2 años atrás). */
+export function mejorRacha(db: DB, usuarioId: string, hoy: string, inicioCuenta: string): number {
+  const desde = [sumarDias(hoy, -730), inicioCuenta].sort()[1];
+  const datos = cargar(db, usuarioId, desde, hoy);
+  let mejor = 0;
+  let actual = 0;
+  for (let f = desde; f <= hoy; f = sumarDias(f, 1)) {
+    const r = evaluarRacha(resumir(f, datos));
+    if (r === "suma") mejor = Math.max(mejor, ++actual);
+    else if (r === "rompe" && f !== hoy) actual = 0; // hoy en curso no corta
+  }
+  return mejor;
+}

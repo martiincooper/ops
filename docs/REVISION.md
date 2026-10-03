@@ -1,4 +1,4 @@
-# Aether Ops — Spec review (v1)
+# Aether Ops — Spec review and design decisions
 
 Review of the original spec (schema, `/checkin` component, `/api/bitacora`, deployment).
 Each finding lists the failure and what this codebase does instead. Severity:
@@ -55,7 +55,7 @@ Each finding lists the failure and what this codebase does instead. Severity:
 - **Working day**: Mon–Fri, not in `feriados`, not a full-day OOO for that user.
 - **Say-Do** (day and 14-day): completed ÷ (committed − `postergado_ooo`). Tasks of past logs that were never closed count as not completed. Days with no log at all don't change Say-Do but break the streak and are reported as "días sin registro".
 - **Streak**: consecutive working days (walking back from yesterday) with the log closed **before 19:30 local** and Say-Do ≥ 75 %. Non-working days are skipped, not broken. Today adds +1 once it qualifies; an open today never breaks it.
-- **Time windows** (08:30–10:30 / 17:00–19:30) are shown in the UI, not enforced server-side — a late check-in is still better than none. The 19:30 limit only affects the streak.
+- **Time windows** (08:30–10:30 / 17:00–19:30, env `VENTANA_MANANA` / `VENTANA_TARDE`): see §8. The API still accepts a late check-in or close — a late log is better than none. The end of the afternoon window only affects the streak.
 
 ## 5. Login (email + 6-digit code, as requested)
 
@@ -99,3 +99,43 @@ capacity and expense views filter by "my supervised" or "whole team".
 - The IVA share uses net factura amounts vs gross boleta amounts (what each document shows).
 
 **Still open:** holiday editor (2026 Chilean holidays seeded in each company DB; add 2027 before January).
+
+## 8. Pass 3 — simpler purchases, multiple projects, time-aware home
+
+Requested changes, and what replaces earlier decisions:
+
+**Purchases are name + description + amount + project(s).** Document type, folio, RUT (M4, M5), shipping, IVA
+split (M2, M3) and receipt upload/serving (B3, B4, C10, D2) were removed, with their endpoints and columns.
+`gastos.monto_clp` is the total paid. Validation (approve / reject with reason) and the exec budget view remain;
+the exec IVA card is gone.
+
+**Several projects per objective and per purchase.** Join tables `tarea_proyectos` and `gasto_proyectos`
+(cascade on delete). A purchase's amount is split equally across its projects and the share is stored per row
+(`gasto_proyectos.monto_clp`, remainder pesos to the first ones), so per-project sums always add up to the
+total. Objectives count once for Say-Do regardless of how many projects they touch. The API still accepts the
+old single `proyecto_id` field. Every project must be active and belong to the caller's company (different
+company → 400).
+
+**Migration (schema v2, automatic on start).** Existing purchases: amount = item + shipping + IVA; type, folio,
+RUT and shipping are written into the description; the old project becomes its only project. Existing
+objectives keep their project. Tables are rebuilt through temporary copies so `DROP TABLE` doesn't cascade.
+Covered by a test that migrates a v1 database with data and checks `foreign_key_check`.
+
+**Time-aware home (`lib/jornada.ts`, shared by server and browser).** A survey is mandatory only inside its
+window and only if still pending; any other time the member gets a dashboard (objectives with tap-to-complete,
+level/XP, streaks, week strip, achievements, purchases). Submitting the morning survey returns to the
+dashboard — the afternoon close is not opened right away. The browser recomputes the view every 30 s from the
+Chile clock (`Intl` with `America/Santiago`, independent of the server or device time zone), so the view
+switches at 08:30 / 17:00 without reloading. Verified with a simulated clock at 07:30, 08:31, 09:10, 12:00,
+13:00, 17:40 and 21:00.
+
+**Project deletion** (added directly on the Mac copy after v0.2; ported to the new tables). Deletes the
+project and the objectives/purchases that belong only to it; shared ones lose the project and the purchase
+amount is re-split among the remaining projects; an open log left with no objectives is removed so the person
+can log again. Irreversible and it erases financial records — prefer the `entregado` state for real projects.
+Admin only; covered by an e2e test.
+
+**Gamification.** XP: objective done +10, objectives logged in the morning window +3, close within the
+afternoon window +5, perfect day +15; level n needs 50·n·(n−1) XP. Achievements are computed from history (no
+extra tables). Confetti on logging objectives, completing one, and closing the day; disabled under
+`prefers-reduced-motion`.

@@ -1,4 +1,4 @@
-// Empresas que comparten el sitio. Cada una tiene su propia base SQLite y carpeta de comprobantes.
+// Empresas que comparten el sitio. Cada una tiene su propia base SQLite.
 // Las cuentas de equipo y gerencia pertenecen a la empresa del dominio de su email.
 //
 // Configurable con EMPRESAS="clave|Nombre|dominio1,dominio2;clave2|Nombre 2|dominio3"

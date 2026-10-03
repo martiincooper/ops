@@ -1,12 +1,14 @@
-// Pruebas de reglas puras: zona horaria, racha, Say-Do, RUT, códigos. Ejecutar: npm run test:logica
+// Pruebas de reglas puras: zona horaria, ventanas, racha, Say-Do, tableros, juego, migraciones, códigos. Ejecutar: npm run test:logica
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
-import { capacidad, equipoActivo, metricasExec, standup } from "../lib/tableros";
+import { repartirMonto } from "../lib/reparto";
+import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
-import { normalizarRut } from "../lib/rut";
+import { calcularJuego, nivelDe, xpParaNivel } from "../lib/juego";
+import { momentoDe, vistaPara, VENTANAS_DEFECTO as V } from "../lib/jornada";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
 
 let ok = 0;
@@ -38,11 +40,12 @@ function bitacora(db: Database.Database, fecha: string, estados: string, cierreU
     id, fecha, `${fecha}T12:00:00.000Z`, cierreUtc,
   );
   const mapa: Record<string, string> = { c: "completado", p: "pendiente", o: "postergado_ooo" };
-  [...estados].forEach((e, i) =>
-    db.prepare("INSERT INTO tareas_diarias (id, bitacora_id, proyecto_id, orden, descripcion, estado) VALUES (?, ?, 'p1', ?, 'x', ?)").run(
+  [...estados].forEach((e, i) => {
+    db.prepare("INSERT INTO tareas_diarias (id, bitacora_id, orden, descripcion, estado) VALUES (?, ?, ?, 'x', ?)").run(
       `${id}t${i}`, id, i, mapa[e],
-    ),
-  );
+    );
+    db.prepare("INSERT INTO tarea_proyectos (tarea_id, proyecto_id) VALUES (?, 'p1')").run(`${id}t${i}`);
+  });
 }
 
 async function main() {
@@ -120,10 +123,13 @@ async function main() {
     assert.throws(() => d6.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo) VALUES ('a','u1','2026-10-05',0)").run());
     assert.throws(() => d6.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo, hora_inicio, hora_fin) VALUES ('a','u1','2026-10-05',0,'15:00','14:00')").run());
   });
-  await prueba("FK activas: tarea con proyecto inexistente falla", () => {
+  await prueba("FK activas: objetivo con proyecto inexistente falla; borrar objetivo borra sus proyectos", () => {
     const d7 = dbNueva();
-    bitacora(d7, hoy, "", null);
-    assert.throws(() => d7.prepare("INSERT INTO tareas_diarias (id, bitacora_id, proyecto_id, descripcion) VALUES ('t','b" + n + "','nope','x')").run());
+    bitacora(d7, hoy, "c", null);
+    const t = `b${n}t0`;
+    assert.throws(() => d7.prepare("INSERT INTO tarea_proyectos (tarea_id, proyecto_id) VALUES (?, 'nope')").run(t));
+    d7.prepare("DELETE FROM tareas_diarias WHERE id = ?").run(t);
+    assert.equal((d7.prepare("SELECT COUNT(*) AS n FROM tarea_proyectos").get() as { n: number }).n, 0);
   });
 
   console.log("Empresas y tableros");
@@ -148,22 +154,37 @@ async function main() {
     // 9 días hábiles entre jue 1 y mié 14 (sin 12-oct feriado) − 1 OOO − 0,32 parcial = 7,68
     assert.equal(c.filas[0].dias_disponibles, 7.7);
   });
-  await prueba("gerencia: IVA recuperable, IVA absorbido en boletas, rechazadas excluidas", () => {
+  await prueba("reparto en partes iguales sin perder pesos", () => {
+    assert.deepEqual(repartirMonto(100, 3), [34, 33, 33]);
+    assert.deepEqual(repartirMonto(90000, 2), [45000, 45000]);
+    assert.deepEqual(repartirMonto(5, 1), [5]);
+    for (const [m, k] of [[1, 3], [99999, 7], [1234567, 4]]) {
+      assert.equal(repartirMonto(m, k).reduce((x, y) => x + y, 0), m);
+    }
+  });
+  await prueba("gerencia: gasto por proyecto con compras repartidas; rechazadas excluidas", () => {
     const d = dbNueva();
-    const g = d.prepare(`INSERT INTO gastos (id, usuario_id, proyecto_id, fecha_documento, item, monto_item_clp, monto_envio_clp, iva_clp,
-      tipo_documento, rut_emisor, folio_documento, comprobante_archivo, comprobante_mime, estado)
-      VALUES (?, 'u1', 'p1', '2026-10-01', 'x', ?, ?, ?, ?, ?, ?, 'f', 'image/jpeg', ?)`);
-    g.run("g1", 32000, 4500, 6935, "factura", "76086428-5", "1", "aprobado");
-    g.run("g2", 11900, 0, 0, "boleta", null, "2", "pendiente");
-    g.run("g3", 99999, 0, 0, "boleta", null, "3", "rechazado");
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p2','AETH-02','Fuente',100000,'2026-09-01','2026-11-30')").run();
+    const g = d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, estado) VALUES (?, 'u1', 'x', ?, ?)");
+    const gp = d.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES (?, ?, ?)");
+    g.run("g1", 43435, "aprobado"); gp.run("g1", "p1", 43435);
+    g.run("g2", 90001, "pendiente"); gp.run("g2", "p1", 45001); gp.run("g2", "p2", 45000); // compra de 2 proyectos
+    g.run("g3", 99999, "rechazado"); gp.run("g3", "p2", 99999);
     const m = metricasExec(d, hoy);
-    assert.equal(m.totales.componentes_clp, 43900);
-    assert.equal(m.totales.flete_clp, 4500);
-    assert.equal(m.totales.por_validar_clp, 11900);
-    assert.equal(m.iva.iva_recuperable_clp, 6935);
-    assert.equal(m.iva.iva_absorbido_boleta_clp, 1900); // 11.900 × 19/119
-    assert.equal(m.proyectos[0].dias_comprometidos, 121); // 1-sep → 31-dic
-    assert.equal(m.proyectos[0].dias_transcurridos, 30);
+    const p1 = m.proyectos.find((p) => p.id === "p1")!;
+    const p2 = m.proyectos.find((p) => p.id === "p2")!;
+    assert.equal(p1.total_clp, 88436);
+    assert.equal(p1.por_validar_clp, 45001);
+    assert.equal(p1.compras, 2);
+    assert.equal(p2.total_clp, 45000);
+    assert.equal(p2.pct_presupuesto, 45);
+    assert.equal(m.totales.total_clp, 133436);
+    assert.equal(m.totales.por_validar_clp, 90001);
+    assert.equal(m.totales.aprobado_clp, 43435);
+    assert.equal(p1.dias_comprometidos, 121); // 1-sep → 31-dic
+    assert.equal(p1.dias_transcurridos, 30);
+    const filas = gastosEmpresa(d, { estado: "todos" });
+    assert.deepEqual(filas.find((f) => f.id === "g2")!.proyectos.map((p) => [p.codigo, p.monto_clp]), [["AETH-01", 45001], ["AETH-02", 45000]]);
   });
   await prueba("standup: bloqueo sin resolver va primero; resuelto deja de contar", () => {
     const d = dbNueva();
@@ -177,13 +198,89 @@ async function main() {
     assert.ok(s.every((f) => f.bloqueos.length === 0));
   });
 
-  console.log("RUT y códigos");
-  await prueba("RUT módulo 11", () => {
-    assert.equal(normalizarRut("12.345.678-5"), "12345678-5");
-    assert.equal(normalizarRut("11111111-1"), "11111111-1");
-    assert.equal(normalizarRut("12.345.678-9"), null);
-    assert.equal(normalizarRut("abc"), null);
+  console.log("Ventanas de la jornada (hora de Chile)");
+  await prueba("momento del día según ventanas 08:30–10:30 y 17:00–19:30", () => {
+    assert.equal(momentoDe("08:29", V), "antes");
+    assert.equal(momentoDe("08:30", V), "manana");
+    assert.equal(momentoDe("10:30", V), "manana");
+    assert.equal(momentoDe("10:31", V), "dia");
+    assert.equal(momentoDe("17:00", V), "tarde");
+    assert.equal(momentoDe("19:30", V), "tarde");
+    assert.equal(momentoDe("19:31", V), "despues");
   });
+  await prueba("encuesta obligatoria solo dentro de su ventana y si no está hecha; si no, tablero", () => {
+    assert.equal(vistaPara("pendiente_manana", "manana", true), "encuesta_manana");
+    assert.equal(vistaPara("pendiente_manana", "dia", true), "tablero"); // tarde: tablero con aviso, no obligatorio
+    assert.equal(vistaPara("pendiente_tarde", "manana", true), "tablero"); // recién registró: ve su tablero
+    assert.equal(vistaPara("pendiente_tarde", "dia", true), "tablero");
+    assert.equal(vistaPara("pendiente_tarde", "tarde", true), "encuesta_tarde");
+    assert.equal(vistaPara("pendiente_tarde", "despues", true), "tablero");
+    assert.equal(vistaPara("cerrado", "tarde", true), "tablero");
+    assert.equal(vistaPara("ooo_completo", "manana", true), "tablero");
+    assert.equal(vistaPara("pendiente_manana", "manana", false), "tablero"); // fin de semana / feriado
+  });
+
+  console.log("Juego: XP, nivel y logros");
+  await prueba("niveles: 0→1, 100→2, 300→3, 600→4", () => {
+    assert.deepEqual([1, 2, 3, 4, 5].map(xpParaNivel), [0, 100, 300, 600, 1000]);
+    assert.deepEqual([0, 99, 100, 299, 300, 650].map(nivelDe), [1, 1, 2, 2, 3, 4]);
+  });
+  await prueba("XP = objetivos×10 + cierres a tiempo×5 + días perfectos×15 + inicios a tiempo×3; logros", () => {
+    const d = dbNueva();
+    // 30-sep: inicio 08:45 (11:45Z), cierre 19:00 (22:00Z), 3/3 → perfecto
+    bitacora(d, "2026-09-30", "ccc", "2026-09-30T22:00:00Z");
+    d.prepare("UPDATE bitacoras SET checkin_manana = '2026-09-30T11:45:00Z' WHERE fecha = '2026-09-30'").run();
+    // 29-sep: inicio 11:00 (14:00Z, tarde), cierre 20:00 (23:00Z, fuera de hora), 1/2
+    bitacora(d, "2026-09-29", "cp", "2026-09-29T23:00:00Z");
+    d.prepare("UPDATE bitacoras SET checkin_manana = '2026-09-29T14:00:00Z' WHERE fecha = '2026-09-29'").run();
+    const j = calcularJuego(d, "u1", hoy, "2026-09-01");
+    assert.equal(j.objetivos_completados, 4);
+    assert.equal(j.dias_perfectos, 1);
+    assert.equal(j.xp, 4 * 10 + 1 * 5 + 1 * 15 + 1 * 3);
+    assert.equal(j.nivel, 1);
+    assert.equal(j.mejor_racha, 1);
+    const l = Object.fromEntries(j.logros.map((x) => [x.clave, x]));
+    assert.equal(l.primera.logrado, true);
+    assert.equal(l.perfecto.logrado, true);
+    assert.equal(l.madrugador.progreso, 1);
+    assert.equal(l.racha5.logrado, false);
+  });
+
+  console.log("Migración v1 → v2 (compras simples, varios proyectos)");
+  await prueba("compras: total = ítem + envío + IVA, documento en la descripción, estados conservados", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    d.exec(MIGRACIONES_EMPRESA[0]);
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p1','P','P',1,'2026-09-01','2026-12-31')").run();
+    d.prepare("INSERT INTO usuarios (id, nombre, email, rol) VALUES ('u1','A','a@x.cl','team')").run();
+    d.prepare("INSERT INTO bitacoras (id, usuario_id, fecha, checkin_manana) VALUES ('b1','u1','2026-10-01','x')").run();
+    d.prepare("INSERT INTO tareas_diarias (id, bitacora_id, proyecto_id, descripcion, estado) VALUES ('t1','b1','p1','Ruteo','completado')").run();
+    const ins = d.prepare(`INSERT INTO gastos (id, usuario_id, proyecto_id, fecha_documento, item, monto_item_clp, monto_envio_clp, iva_clp,
+      tipo_documento, rut_emisor, folio_documento, comprobante_archivo, comprobante_mime, estado) VALUES (?, 'u1','p1','2026-10-01', ?, ?, ?, ?, ?, ?, ?, 'f', 'image/jpeg', ?)`);
+    ins.run("a", "ST-Link", 32000, 4500, 6935, "factura", "76086428-5", "44102", "aprobado");
+    ins.run("b", "PCB", 54200, 21800, 0, "extranjero", null, "W1", "pendiente");
+    d.transaction(() => d.exec(MIGRACIONES_EMPRESA[1]))();
+    const filas = d.prepare("SELECT * FROM gastos ORDER BY id").all() as Record<string, unknown>[];
+    assert.equal(filas.length, 2);
+    assert.equal(filas[0].monto_clp, 43435);
+    assert.equal(filas[0].estado, "aprobado");
+    assert.equal(filas[0].descripcion, "Factura 44102 · RUT 76086428-5 · incluye envío $4500");
+    assert.equal(filas[1].monto_clp, 76000);
+    for (const col of ["rut_emisor", "folio_documento", "tipo_documento", "iva_clp", "monto_envio_clp", "comprobante_archivo", "proyecto_id"]) {
+      assert.ok(!(col in filas[0]), col);
+    }
+    assert.deepEqual(d.prepare("SELECT gasto_id, proyecto_id, monto_clp FROM gasto_proyectos ORDER BY gasto_id").all(), [
+      { gasto_id: "a", proyecto_id: "p1", monto_clp: 43435 },
+      { gasto_id: "b", proyecto_id: "p1", monto_clp: 76000 },
+    ]);
+    assert.deepEqual(d.prepare("SELECT tarea_id, proyecto_id FROM tarea_proyectos").all(), [{ tarea_id: "t1", proyecto_id: "p1" }]);
+    assert.equal((d.prepare("SELECT estado FROM tareas_diarias").get() as { estado: string }).estado, "completado");
+    assert.deepEqual(d.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.deepEqual(d.prepare("SELECT name FROM sqlite_master WHERE name LIKE '_mig%'").all(), []);
+    assert.throws(() => d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp) VALUES ('c','u1','x',0)").run());
+  });
+
+  console.log("Códigos");
   await prueba("códigos triviales rechazados", () => {
     for (const p of ["000000", "111111", "123456", "654321", "890123", "121212", "123123", "12345"]) {
       assert.notEqual(motivoPinDebil(p), null, p);

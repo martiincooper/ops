@@ -50,16 +50,6 @@ async function prueba(nombre, fn) {
   }
 }
 
-const jpeg = () =>
-  new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0xff, 0xd9])], { type: "image/jpeg" });
-
-function formGasto(campos, archivo = jpeg(), nombre = "f.jpg") {
-  const f = new FormData();
-  for (const [k, v] of Object.entries(campos)) f.set(k, String(v));
-  if (archivo) f.set("comprobante", archivo, nombre);
-  return f;
-}
-
 const q = (ruta, empresa, extra = "") => `${ruta}?empresa=${empresa}${extra}`;
 
 async function primerIngreso(email, pin) {
@@ -88,7 +78,7 @@ const sumar = (f, d) => {
 async function main() {
   const admin = new Cliente("admin");
   const anon = new Cliente("anon");
-  let adminId, admin2, admin2Id, ana, beto, dora, ggA, ggD, pA, pD, anaGastoId, manana, hoy;
+  let adminId, admin2, admin2Id, ana, beto, dora, ggA, ggD, pA, pA2, pD, anaGastoId, gastoDobleId, manana, hoy;
 
   console.log("Autenticación");
   await prueba("health 200 (abre control + bases de ambas empresas)", async () => assert.equal((await anon.pedir("/api/health")).status, 200));
@@ -146,9 +136,12 @@ async function main() {
     // mismo código permitido en la otra empresa (bases distintas)
     assert.equal((await admin.pedir(q("/api/admin/proyectos", D), { metodo: "POST", json: { ...p, codigo: "AETH-SEN-01", nombre: "x" } })).status, 201);
     assert.equal((await admin.pedir(q("/api/admin/proyectos", A), { metodo: "POST", json: { ...p, codigo: "AETH-SEN-01", nombre: "x" } })).status, 409);
+    r = await admin.pedir(q("/api/admin/proyectos", A), { metodo: "POST", json: { ...p, presupuesto_clp: 1000000, codigo: "AETH-GW-03", nombre: "Gateway LoRa" } });
+    assert.equal(r.status, 201);
+    pA2 = r.datos.id;
     const la = (await admin.pedir(q("/api/admin/proyectos", A))).datos.proyectos;
     const ld = (await admin.pedir(q("/api/admin/proyectos", D))).datos.proyectos;
-    assert.deepEqual(la.map((x) => x.codigo), ["AETH-SEN-01"]);
+    assert.deepEqual(la.map((x) => x.codigo).sort(), ["AETH-GW-03", "AETH-SEN-01"]);
     assert.deepEqual(ld.map((x) => x.codigo).sort(), ["AETH-SEN-01", "DSQ-GW-01"]);
     assert.equal((await admin.pedir(q("/api/admin/proyectos", "otra"))).status, 400);
   });
@@ -194,7 +187,7 @@ async function main() {
   await prueba("cada integrante ve solo los proyectos de su empresa (y ?empresa= se ignora)", async () => {
     const a = (await ana.cliente.pedir(q("/api/bitacora", D))).datos;
     assert.equal(a.empresa.clave, A);
-    assert.deepEqual(a.proyectos.map((p) => p.codigo), ["AETH-SEN-01"]);
+    assert.deepEqual(a.proyectos.map((p) => p.codigo), ["AETH-GW-03", "AETH-SEN-01"]);
     const d = (await dora.cliente.pedir(q("/api/bitacora", A))).datos;
     assert.equal(d.empresa.clave, D);
     assert.ok(d.proyectos.every((p) => p.id !== pA));
@@ -214,16 +207,22 @@ async function main() {
   });
 
   console.log("Bitácora");
-  await prueba("mañana: 1 objetivo → 400; proyecto de la otra empresa → 400", async () => {
-    const t = { proyecto_id: pA, descripcion: "x" };
-    assert.equal((await ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas: [t] } })).status, 400);
-    const otra = { proyecto_id: pD, descripcion: "x" };
-    assert.equal((await ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas: [otra, otra] } })).status, 400);
+  await prueba("mañana: 1 objetivo → 400; sin proyecto → 400; proyecto de la otra empresa → 400", async () => {
+    const enviar = (tareas) => ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } });
+    const t = { proyecto_ids: [pA], descripcion: "x" };
+    assert.equal((await enviar([t])).status, 400);
+    assert.equal((await enviar([t, { proyecto_ids: [], descripcion: "x" }])).status, 400);
+    assert.equal((await enviar([t, { proyecto_ids: [pA, pD], descripcion: "x" }])).status, 400);
   });
-  await prueba("mañana: 3 objetivos → 201; reenvío idempotente", async () => {
-    const tareas = ["Ruteo de líneas SPI", "Pruebas deep-sleep", "Compilar firmware FreeRTOS"].map((d) => ({ proyecto_id: pA, descripcion: d }));
+  await prueba("mañana: 3 objetivos (uno de 2 proyectos) → 201; reenvío idempotente", async () => {
+    const tareas = [
+      { proyecto_ids: [pA, pA2, pA], descripcion: "Ruteo de líneas SPI compartidas" }, // duplicado se ignora
+      { proyecto_ids: [pA], descripcion: "Pruebas deep-sleep" },
+      { proyecto_id: pA2, descripcion: "Compilar firmware FreeRTOS" }, // formato de un solo proyecto, aún aceptado
+    ];
     const r1 = await ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } });
-    assert.equal(r1.status, 201);
+    assert.equal(r1.status, 201, JSON.stringify(r1.datos));
+    assert.deepEqual(r1.datos.tareas.map((t) => t.proyectos.map((p) => p.codigo)), [["AETH-GW-03", "AETH-SEN-01"], ["AETH-SEN-01"], ["AETH-GW-03"]]);
     const r2 = await ana.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } });
     assert.equal(r2.status, 200);
     assert.equal(r2.datos.ya_existia, true);
@@ -232,13 +231,25 @@ async function main() {
     hoy = r1.datos.hoy;
   });
   await prueba("doble envío simultáneo → una sola bitácora", async () => {
-    const tareas = [{ proyecto_id: pA, descripcion: "A" }, { proyecto_id: pA, descripcion: "B" }];
+    const tareas = [{ proyecto_ids: [pA], descripcion: "A" }, { proyecto_ids: [pA], descripcion: "B" }];
     const rs = await Promise.all([1, 2, 3].map(() => beto.cliente.pedir("/api/bitacora/manana", { metodo: "POST", json: { tareas } })));
     assert.deepEqual(rs.map((r) => r.status).sort(), [200, 200, 201]);
   });
   await prueba("otro usuario no puede cerrar tareas ajenas", async () => {
     const r = await beto.cliente.pedir("/api/bitacora/tarde", { metodo: "POST", json: { tareas: manana.tareas.map((t) => ({ id: t.id, estado: "completado" })) } });
     assert.equal(r.status, 400);
+  });
+  await prueba("durante el día: marcar objetivos logrados (solo los propios) y ver XP/nivel", async () => {
+    const [a] = manana.tareas;
+    const r = await ana.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: true } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.equal(r.datos.tareas.find((t) => t.id === a.id).estado, "completado");
+    assert.equal(r.datos.juego.objetivos_completados, 1);
+    assert.equal(r.datos.ventanas.manana.inicio, "08:30");
+    assert.ok(["encuesta_manana", "encuesta_tarde", "tablero"].includes(r.datos.vista));
+    assert.equal((await beto.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: true } })).status, 404);
+    const d = await ana.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: false } });
+    assert.equal(d.datos.tareas.find((t) => t.id === a.id).estado, "pendiente");
   });
   await prueba("tarde: validaciones y cierre con bloqueo; segundo cierre → 409", async () => {
     const [a, b, c] = manana.tareas;
@@ -253,6 +264,7 @@ async function main() {
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.equal(r.datos.fase, "cerrado");
     assert.equal((await enviar(json)).status, 409);
+    assert.equal((await ana.cliente.pedir(`/api/bitacora/tareas/${a.id}`, { metodo: "PATCH", json: { completada: false } })).status, 409);
   });
 
   console.log("Tablero de jefatura");
@@ -306,63 +318,71 @@ async function main() {
     assert.ok(d.datos.tareas.every((t) => t.estado === "pendiente"));
   });
 
-  console.log("Compras, comprobantes y validación");
-  const campos = (extra = {}) => ({
-    proyecto_id: pA, item: "ST-Link V3 Mini", monto_item_clp: 32000, monto_envio_clp: 4500,
-    tipo_documento: "factura", rut_emisor: "76.086.428-5", folio_documento: "44102", fecha_documento: hoy, ...extra,
+  console.log("Compras");
+  const compra = (extra = {}) => ({
+    proyecto_ids: [pA], item: "ST-Link V3 Mini", descripcion: "Programador para el sensor", monto_clp: 43435, ...extra,
   });
-  await prueba("factura válida → IVA 6.935; mismo documento dos veces en la misma empresa → 409", async () => {
-    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos()) });
+  await prueba("compra: nombre, descripción y monto en un proyecto", async () => {
+    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra() });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
     anaGastoId = r.datos.id;
-    assert.equal(r.datos.gastos.find((x) => x.id === anaGastoId).iva_clp, 6935);
-    assert.equal((await beto.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos()) })).status, 409);
+    const g = r.datos.gastos.find((x) => x.id === anaGastoId);
+    assert.equal(g.monto_clp, 43435);
+    assert.equal(g.descripcion, "Programador para el sensor");
+    assert.deepEqual(g.proyectos, ["AETH-SEN-01"]);
+    assert.ok(!("iva_clp" in g) && !("tipo_documento" in g));
   });
-  await prueba("el mismo documento en la otra empresa se registra aparte", async () => {
-    const r = await dora.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos({ proyecto_id: pD })) });
+  await prueba("compra para 2 proyectos: se reparte en partes iguales sin perder pesos", async () => {
+    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Osciloscopio (arriendo)", monto_clp: 90001, proyecto_ids: [pA, pA2] }) });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
+    gastoDobleId = r.datos.id;
+    assert.deepEqual(r.datos.gastos.find((x) => x.id === gastoDobleId).proyectos, ["AETH-GW-03", "AETH-SEN-01"]);
+    const fila = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos"))).datos.gastos.find((x) => x.id === gastoDobleId);
+    const partes = Object.fromEntries(fila.proyectos.map((p) => [p.codigo, p.monto_clp]));
+    assert.equal(partes["AETH-SEN-01"] + partes["AETH-GW-03"], 90001);
+    assert.ok(Math.abs(partes["AETH-SEN-01"] - partes["AETH-GW-03"]) <= 1);
   });
-  await prueba("validaciones de compra: RUT, archivo, decimales", async () => {
-    assert.equal((await ana.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos({ rut_emisor: "76.086.428-1", folio_documento: "9" })) })).status, 400);
-    const falso = new Blob(["<html>no</html>"], { type: "image/jpeg" });
-    assert.equal((await ana.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos({ folio_documento: "9" }), falso) })).status, 415);
-    assert.equal((await ana.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos({ folio_documento: "9", monto_item_clp: "1.5" })) })).status, 400);
-  });
-  await prueba("boleta → IVA 0; PDF aceptado", async () => {
-    const pdf = new Blob(["%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"], { type: "application/pdf" });
-    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", form: formGasto(campos({ tipo_documento: "boleta", rut_emisor: "", folio_documento: "991", monto_item_clp: 11900, monto_envio_clp: 0 }), pdf, "b.pdf") });
+  await prueba("descripción opcional", async () => {
+    const r = await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Cables dupont", monto_clp: 11900, descripcion: null }) });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
-    assert.equal(r.datos.gastos[0].iva_clp, 0);
+    assert.equal(r.datos.gastos[0].descripcion, null);
   });
-  await prueba("comprobante: dueño, gerencia y admin de su empresa sí; otra empresa o colega no", async () => {
-    const r = await ana.cliente.pedir(`/api/comprobantes/${anaGastoId}`);
-    assert.equal(r.status, 200);
-    assert.equal(r.headers.get("content-type"), "image/jpeg");
-    assert.equal((await beto.cliente.pedir(`/api/comprobantes/${anaGastoId}`)).status, 404);
-    assert.equal((await ggA.cliente.pedir(`/api/comprobantes/${anaGastoId}`)).status, 200);
-    assert.equal((await ggD.cliente.pedir(`/api/comprobantes/${anaGastoId}`)).status, 404);
-    assert.equal((await dora.cliente.pedir(`/api/comprobantes/${anaGastoId}`)).status, 404);
-    assert.equal((await admin.pedir(q(`/api/comprobantes/${anaGastoId}`, A))).status, 200);
-    assert.equal((await admin.pedir(q(`/api/comprobantes/${anaGastoId}`, D))).status, 404);
+  await prueba("validaciones: sin nombre, monto 0, decimales, sin proyecto, proyecto de otra empresa → 400", async () => {
+    const mal = async (x) => (await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra(x) })).status;
+    assert.equal(await mal({ item: " " }), 400);
+    assert.equal(await mal({ monto_clp: 0 }), 400);
+    assert.equal(await mal({ monto_clp: 1.5 }), 400);
+    assert.equal(await mal({ proyecto_ids: [] }), 400);
+    assert.equal(await mal({ proyecto_ids: [pA, pD] }), 400);
+  });
+  await prueba("la otra empresa registra sus compras aparte", async () => {
+    const r = await dora.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ proyecto_ids: [pD] }) });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.equal((await ana.cliente.pedir("/api/gastos")).datos.gastos.length, 3);
   });
   await prueba("mesa de validación: rechazar exige motivo; rechazada sale del gasto real; aprobar", async () => {
     const lista = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos"))).datos.gastos;
-    assert.equal(lista.length, 2);
+    assert.equal(lista.length, 3);
     assert.ok(lista.every((g) => g.estado === "pendiente"));
-    const antes = (await ggA.cliente.pedir("/api/exec")).datos.totales;
-    assert.equal(antes.total_clp, 32000 + 4500 + 11900);
+    const antes = (await ggA.cliente.pedir("/api/exec")).datos;
+    assert.equal(antes.totales.total_clp, 43435 + 90001 + 11900);
+    const sen = (m) => m.proyectos.find((p) => p.codigo === "AETH-SEN-01").total_clp;
+    const gw = (m) => m.proyectos.find((p) => p.codigo === "AETH-GW-03").total_clp;
+    assert.equal(sen(antes) + gw(antes), 43435 + 90001 + 11900);
     assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "rechazado" } })).status, 400);
-    assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "rechazado", observacion: "Folio ilegible" } })).status, 200);
+    assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "rechazado", observacion: "No corresponde" } })).status, 200);
     const tras = (await ggA.cliente.pedir("/api/exec")).datos;
-    assert.equal(tras.totales.total_clp, 11900);
-    assert.equal(tras.iva.iva_recuperable_clp, 0);
-    assert.equal(tras.iva.iva_absorbido_boleta_clp, 1900);
+    assert.equal(tras.totales.total_clp, 90001 + 11900);
+    assert.equal(sen(tras), sen(antes) - 43435);
+    assert.equal(gw(tras), gw(antes));
+    assert.ok(!("iva" in tras));
     assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "aprobado" } })).status, 200);
     const g = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((x) => x.id === anaGastoId);
     assert.equal(g.estado, "aprobado");
     assert.ok(g.validado_por_nombre);
-    const datasheq = (await ggD.cliente.pedir("/api/exec")).datos.totales.total_clp;
-    assert.equal(datasheq, 36500); // la compra de Dora, separada
+    assert.equal(g.descripcion, "Programador para el sensor");
+    assert.equal((await ggA.cliente.pedir("/api/exec")).datos.totales.aprobado_clp, 43435);
+    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.totales.total_clp, 43435); // la compra de Dora, separada
   });
   await prueba("gerencia no puede validar compras", async () => {
     assert.equal((await ggA.cliente.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "aprobado" } })).status, 403);
@@ -393,6 +413,42 @@ async function main() {
   await prueba("quitar cuenta con historial → desactivada y sin sesión", async () => {
     assert.equal((await admin.pedir(q(`/api/admin/usuarios/${beto.id}`, A), { metodo: "DELETE" })).datos.accion, "desactivado");
     assert.equal((await beto.cliente.pedir("/api/bitacora")).status, 401);
+  });
+
+  await prueba("eliminar proyecto: borra lo exclusivo, reparte lo compartido y libera la bitácora vacía", async () => {
+    const p = { presupuesto_clp: 1000000, fecha_inicio: "2026-09-01", fecha_entrega_objetivo: "2026-12-15" };
+    const x = (await admin.pedir(q("/api/admin/proyectos", A), { metodo: "POST", json: { ...p, codigo: "DEL-01", nombre: "Borrar 1" } })).datos.id;
+    const y = (await admin.pedir(q("/api/admin/proyectos", A), { metodo: "POST", json: { ...p, codigo: "DEL-02", nombre: "Borrar 2" } })).datos.id;
+    const eli = await cuenta(admin, A, "eli@aether-tech.dev", "Eli Paz", "team", "583014");
+    let r = await eli.cliente.pedir("/api/bitacora/manana", {
+      metodo: "POST",
+      json: { tareas: [{ proyecto_ids: [x], descripcion: "Solo del 1" }, { proyecto_ids: [x, y], descripcion: "Compartido" }] },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.equal((await eli.cliente.pedir("/api/gastos", { metodo: "POST", json: { proyecto_ids: [x], item: "Solo 1", monto_clp: 1000 } })).status, 201);
+    const comp = (await eli.cliente.pedir("/api/gastos", { metodo: "POST", json: { proyecto_ids: [x, y], item: "Compartida", monto_clp: 1001 } })).datos.id;
+
+    assert.equal((await eli.cliente.pedir(`/api/admin/proyectos/${x}`, { metodo: "DELETE" })).status, 403);
+    assert.equal((await admin.pedir(q("/api/admin/proyectos/no-existe", A), { metodo: "DELETE" })).status, 404);
+    r = await admin.pedir(q(`/api/admin/proyectos/${x}`, A), { metodo: "DELETE" });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.deepEqual([r.datos.objetivos, r.datos.compras, r.datos.compras_reasignadas], [1, 1, 1]);
+
+    let e = (await eli.cliente.pedir("/api/bitacora")).datos;
+    assert.equal(e.fase, "pendiente_tarde");
+    assert.deepEqual(e.tareas.map((t) => [t.descripcion, t.proyectos.map((p) => p.codigo)]), [["Compartido", ["DEL-02"]]]);
+    const fila = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((g) => g.id === comp);
+    assert.ok(fila, "la compra compartida sigue");
+    assert.deepEqual(fila.proyectos.map((p) => [p.codigo, p.monto_clp]), [["DEL-02", 1001]]);
+    assert.equal((await eli.cliente.pedir("/api/gastos")).datos.gastos.length, 1);
+
+    r = await admin.pedir(q(`/api/admin/proyectos/${y}`, A), { metodo: "DELETE" });
+    assert.deepEqual([r.datos.objetivos, r.datos.compras], [1, 1]);
+    e = (await eli.cliente.pedir("/api/bitacora")).datos;
+    assert.equal(e.fase, "pendiente_manana", "la bitácora abierta sin objetivos se libera");
+    assert.equal((await eli.cliente.pedir("/api/gastos")).datos.gastos.length, 0);
+    const codigos = (await admin.pedir(q("/api/admin/proyectos", A))).datos.proyectos.map((p) => p.codigo);
+    assert.ok(!codigos.includes("DEL-01") && !codigos.includes("DEL-02"));
   });
 
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);

@@ -11,7 +11,6 @@ export type DB = Database.Database;
 // Estructura en disco:
 //   DATA_DIR/control.db                         administradores y supervisión
 //   DATA_DIR/empresas/<clave>/app.db            datos de cada empresa
-//   DATA_DIR/empresas/<clave>/comprobantes/     fotos y PDF de compras de esa empresa
 export const DATA_DIR = path.resolve(
   process.env.DATA_DIR || (process.env.NODE_ENV === "production" ? "/data" : "./data"),
 );
@@ -19,10 +18,6 @@ export const DATA_DIR = path.resolve(
 export function dirEmpresa(clave: string): string {
   if (!empresaPorClave(clave)) throw new Error(`Empresa desconocida: ${clave}`);
   return path.join(DATA_DIR, "empresas", clave);
-}
-
-export function dirComprobantes(clave: string): string {
-  return path.join(dirEmpresa(clave), "comprobantes");
 }
 
 const cache = globalThis as unknown as { __aetherDbs?: Map<string, DB> };
@@ -66,7 +61,6 @@ export function getDbEmpresa(clave: string): DB {
   let db = conexiones.get(`empresa:${clave}`);
   if (!db) {
     db = abrir(path.join(dirEmpresa(clave), "app.db"), MIGRACIONES_EMPRESA);
-    fs.mkdirSync(dirComprobantes(clave), { recursive: true });
     conexiones.set(`empresa:${clave}`, db);
   }
   return db;

@@ -1,7 +1,7 @@
 # Aether Ops (`ops.aether.cl`)
 
-Bitácora diaria (objetivos de la mañana → cierre de la tarde), ausencias (OOO), rendición de compras con
-separación de IVA, racha y Say-Do, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada una
+Bitácora diaria (objetivos de la mañana → cierre de la tarde), ausencias (OOO), registro de compras por
+proyecto, racha, Say-Do y logros, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada una
 con su propia base de datos. Un solo contenedor: Next.js 15 (standalone) + SQLite (WAL).
 
 - Revisión técnica de la especificación original y decisiones tomadas: [`docs/REVISION.md`](docs/REVISION.md) (en inglés)
@@ -23,17 +23,51 @@ con su propia base de datos. Un solo contenedor: Next.js 15 (standalone) + SQLit
   crea). Puede ser compartida o exclusiva y se cambia en **Equipo**. Standup, capacidad y compras se filtran por
   «Mis supervisados» o «Todo el equipo».
 
+## La jornada del integrante (hora de Chile)
+
+Lo que ve cada integrante en `/checkin` depende de la hora en `America/Santiago` y de lo que ya hizo hoy:
+
+| Hora | Si aún no lo hizo | Si ya lo hizo |
+|---|---|---|
+| Antes de las 08:30 | Tablero, con invitación a registrar objetivos | Tablero |
+| **08:30–10:30** | **Bitácora de la mañana (obligatoria)** | Tablero |
+| 10:30–17:00 | Tablero, con botón para registrar objetivos atrasados | Tablero; puede marcar objetivos logrados durante el día |
+| **17:00–19:30** | **Cierre de la tarde (obligatorio)** | Tablero |
+| Después de las 19:30 | Tablero, con aviso para cerrar igual (cuenta para Say-Do, no para la racha) | Tablero |
+
+- Las encuestas solo se imponen dentro de su ventana; al terminarlas se vuelve al tablero (registrar objetivos
+  no abre el cierre de la tarde). Fines de semana y feriados: siempre tablero.
+- La vista cambia sola al entrar en una ventana (la página revisa la hora cada 30 s). Ventanas configurables con
+  `VENTANA_MANANA` y `VENTANA_TARDE`.
+- **Tablero**: objetivos del día (se marcan con un toque, con confeti), anillo de cumplimiento, nivel y XP, racha
+  actual y mejor racha, Say-Do 14 días, semana en colores, logros y compras del día.
+- **XP**: objetivo logrado +10, objetivos registrados en la ventana de la mañana +3, cierre a tiempo +5,
+  día perfecto (100 %) +15. Confeti al registrar objetivos, al marcar uno logrado y al cerrar la jornada
+  (se desactiva si el sistema tiene «reducir movimiento»).
+- Cada objetivo puede asociarse a **uno o más proyectos**.
+
+## Compras
+
+Nombre, descripción (opcional), monto en pesos y **uno o más proyectos**. Si son varios, el monto se reparte en
+partes iguales (los pesos que sobran van a los primeros). La jefatura aprueba o rechaza (con motivo) en
+`/admin` → **Compras**; gerencia ve el gasto por proyecto frente a su presupuesto (las rechazadas no cuentan).
+
+**Eliminar un proyecto** (`/admin` → **Proyectos**, papelera y confirmar) borra también los objetivos y
+compras registrados solo para él; los compartidos con otros proyectos solo lo pierden y el monto se reparte de
+nuevo entre los que quedan. No se puede deshacer: para un proyecto real que terminó, usa el estado
+«entregado» en vez de eliminarlo.
+
 ## Contenido de esta versión
 
 | Incluido | Próxima etapa |
 |---|---|
 | Ingreso con email + código de 6 dígitos (inicial `000000`, cambio obligatorio, bloqueo por intentos) | Editor de feriados (vienen cargados los de Chile 2026) |
-| `/checkin`: objetivos de la mañana (2 a 4), cierre de la tarde, anillo Say-Do en vivo, racha | |
+| `/checkin`: encuestas según la hora de Chile, tablero con progreso, nivel, logros y confeti | |
+| Objetivos (2 a 4 por día) y compras con uno o más proyectos | |
 | Fuera de oficina: día completo / parcial, cancelar; lo postergado no cuenta en Say-Do | |
-| Compras: factura / boleta / extranjero, validación de RUT, folio duplicado, foto o PDF | |
 | `/mi-progreso`: racha, historial de 14 días, mis compras, cambio de código | |
-| `/admin`: standup (bloqueos → Say-Do < 70% → ausentes), capacidad 14 días, validación de compras con vista del comprobante, equipo con supervisores, proyectos, administradores | |
-| `/exec`: costo de prototipo por solución (componentes + flete vs presupuesto), recuperación de IVA, lead time, Say-Do global 14 días | |
+| `/admin`: standup (bloqueos → Say-Do < 70% → ausentes), capacidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
+| `/exec`: gasto por proyecto vs presupuesto, por validar, lead time, Say-Do global 14 días | |
 
 ---
 
@@ -76,7 +110,7 @@ docker compose up -d --build                 # actualizar tras un git pull
 docker exec aether-ops node scripts/backup.mjs   # respaldo manual de la base
 ```
 
-Los datos (base `app.db` y carpeta `comprobantes/`) quedan en el volumen de Docker `aether-data`, que
+Los datos (bases SQLite) quedan en el volumen de Docker `aether-data`, que
 sobrevive a `down`, reinicios y actualizaciones. En el servidor conviene una carpeta fija del anfitrión:
 
 ```bash
@@ -107,7 +141,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 38 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 40 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -171,12 +205,11 @@ ops.aether.cl {
 }
 ```
 
-**Nginx** — las dos líneas marcadas son obligatorias:
+**Nginx** — la línea marcada es obligatoria:
 
 ```nginx
 server {
     server_name ops.aether.cl;
-    client_max_body_size 15m;                 # obligatorio: el valor por defecto (1m) rechaza fotos de boletas (413)
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_set_header Host $host;          # obligatorio: la verificación de origen compara Origin con Host
@@ -190,7 +223,7 @@ server {
 ### Respaldos
 
 ```bash
-# /etc/cron.d/aether-ops — 02:30 todas las noches: copia consistente de SQLite (guarda 30) + comprobantes a otro equipo
+# /etc/cron.d/aether-ops — 02:30 todas las noches: copia consistente de SQLite (guarda 30) y copia a otro equipo
 # (con AETHER_DATA=/var/lib/aether-ops)
 30 2 * * * root docker exec aether-ops node scripts/backup.mjs && rsync -a /var/lib/aether-ops/ respaldo:/srv/aether-ops/
 ```
@@ -204,10 +237,22 @@ Estructura de datos:
 ```
 /data/control.db                         administradores y supervisión
 /data/empresas/aether-tech/app.db        datos de Aether Tech
-/data/empresas/aether-tech/comprobantes/ fotos y PDF de compras de Aether Tech
 /data/empresas/datasheq/app.db           datos de Datasheq
-/data/empresas/datasheq/comprobantes/
+/data/respaldos/                         copias de scripts/backup.mjs
 ```
+
+### Actualizar desde la versión 0.2
+
+Basta con actualizar el código y reiniciar (`docker compose up -d --build` o `./scripts/local.sh`). Al arrancar,
+cada base de empresa se migra sola:
+
+- Compras: el monto pasa a ser el total pagado (ítem + envío + IVA). Tipo de documento, folio, RUT y envío
+  quedan escritos en la descripción. Cada compra queda asociada a su proyecto de antes.
+- Objetivos: cada objetivo queda asociado a su proyecto de antes.
+- La carpeta `comprobantes/` de cada empresa ya no se usa. Respáldala si quieres conservar las fotos y luego
+  bórrala.
+
+Respalda antes de actualizar (`node scripts/backup.mjs` o `docker exec aether-ops node scripts/backup.mjs`).
 
 ---
 
@@ -220,8 +265,10 @@ Estructura de datos:
 | `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | Empresas: `clave\|Nombre\|dominios` separadas por `;` |
 | `JORNADA` | `08:30-18:00` | Horario base para descontar ausencias parciales en la capacidad |
 | `PIN_INICIAL` | `000000` | Código inicial de cuentas nuevas o reseteadas |
-| `DATA_DIR` | `/data` (Docker), `./data` (local) | Bases SQLite + comprobantes |
-| `TZ_NEGOCIO` | `America/Santiago` | Define "hoy", el corte de las 19:30 y la racha |
+| `DATA_DIR` | `/data` (Docker), `./data` (local) | Bases SQLite |
+| `TZ_NEGOCIO` | `America/Santiago` | Define "hoy", las ventanas de las encuestas y la racha |
+| `VENTANA_MANANA` | `08:30-10:30` | Ventana de la bitácora de la mañana (obligatoria dentro de ella) |
+| `VENTANA_TARDE` | `17:00-19:30` | Ventana del cierre de la tarde; su fin es el límite para sumar a la racha |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.
@@ -234,9 +281,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, racha, Say-Do, esquema, empresas, capacidad, gerencia, RUT, códigos (20 pruebas)
+npm run test:logica       # zona horaria, ventanas, racha, Say-Do, XP, esquema y migración, empresas, reparto, gerencia (25 pruebas)
 
-# extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión, tableros (38 pruebas)
+# extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
+# objetivos y compras con varios proyectos, eliminar proyectos, tableros (40 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
@@ -250,7 +298,8 @@ docker rm -f aether-test
 
 ```
 app/                páginas (login, cambiar-pin, checkin, mi-progreso, admin, exec) y api/ (route handlers)
-components/         componentes cliente (PinPad, Checkin, FormGasto, ModalOoo, Anillo)
+components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, ModalOoo, Anillo)
+components/equipo/  jornada del integrante (encuestas, tablero, confeti, logros)
 components/admin/   tablero de jefatura (selector, standup, capacidad, compras, equipo, proyectos, administradores)
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
@@ -259,6 +308,8 @@ lib/metricas.ts     reglas de racha y Say-Do
 lib/tableros.ts     cálculos de standup, capacidad, compras y gerencia
 lib/supervision.ts  administradores ↔ integrantes supervisados
 lib/tiempo.ts       fechas de negocio en America/Santiago
+lib/jornada.ts      ventanas de las encuestas y qué vista corresponde a cada hora
+lib/reparto.ts      reparto del monto de una compra entre proyectos
 lib/auth.ts, jwt.ts, pin.ts, limites.ts   sesiones, hash de códigos, bloqueo por intentos
 middleware.ts       enrutamiento de páginas por rol (las rutas /api se autentican solas)
 scripts/            local.sh, backup.mjs, test-logica.ts, e2e.mjs

@@ -1,143 +1,79 @@
 # Aether Ops (`ops.aether.cl`) — English
 
-Daily log (morning objectives → afternoon close), out-of-office, purchase receipts with IVA split, streak and Say-Do.
-Single container: Next.js 15 standalone + SQLite (WAL). UI in Spanish.
+Daily log (morning objectives → afternoon close), out-of-office, purchases per project, streak, Say-Do and
+achievements, for two companies on one site. Single container: Next.js 15 standalone + SQLite (WAL). UI in Spanish.
 
-**Read first:** [`docs/REVISION.md`](docs/REVISION.md) — what was wrong in the original spec and what this code does instead.
 The Spanish [`README.md`](README.md) is the maintained one; this file is a summary.
+Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
 
 ## Two companies, one site
 
 - The login email's domain picks the company and its database: `@aether-tech.dev` → Aether Tech,
   `@datasheq.cl` → Datasheq (env `EMPRESAS`). Team and executive accounts only ever see their own company.
 - Admins (middle management) live in `control.db`, can have any email domain, and switch companies with a
-  selector in `/admin` (standup, 14-day capacity, expense validation, team with supervisors, projects, admins)
+  selector in `/admin` (standup, 14-day capacity, purchase validation, team with supervisors, projects, admins)
   and `/exec`. The first admin is `ADMIN_EMAIL`; admins add other admins.
 - Supervision is many-to-many (admin ↔ team member, per company), set when creating an account and editable later.
-- Data: `/data/control.db`, `/data/empresas/<clave>/app.db` and `/data/empresas/<clave>/comprobantes/`.
+- Data: `/data/control.db` and `/data/empresas/<clave>/app.db`.
 
-## Scope of this version
+## Team member's day (Chile time)
 
-| Done | Next pass |
-|---|---|
-| Login with email + 6-digit code (initial `000000`, forced change, lockout) | `/exec` metrics (cost per solution, IVA recovered, lead time, global Say-Do) |
-| `/checkin`: morning objectives (2–4), afternoon close, live Say-Do ring, streak | `/admin` standup matrix, 14-day capacity strip, finance validation desk |
-| OOO: full day / partial, cancel, postponed tasks excluded from Say-Do | Holiday editor (2026 Chilean holidays are seeded) |
-| Expenses: factura / boleta / extranjero, RUT check, duplicate detection, photo or PDF | |
-| `/mi-progreso`: streak, 14-day history, my expenses, change code | |
-| `/admin`: add/remove people, roles, reset code, projects | |
+| Time | Not done yet | Done |
+|---|---|---|
+| before 08:30 | dashboard, invitation to log objectives | dashboard |
+| **08:30–10:30** | **morning survey (mandatory)** | dashboard |
+| 10:30–17:00 | dashboard, button to log late objectives | dashboard; tick objectives as they are achieved |
+| **17:00–19:30** | **afternoon close (mandatory)** | dashboard |
+| after 19:30 | dashboard, prompt to close anyway (counts for Say-Do, not for the streak) | dashboard |
 
-## Run locally
+Surveys are only forced inside their window; finishing one returns to the dashboard. Weekends and holidays:
+always the dashboard. Windows: `VENTANA_MANANA`, `VENTANA_TARDE`. The dashboard shows today's objectives
+(tap to complete, with confetti), completion ring, level and XP, current and best streak, 14-day Say-Do,
+the week, achievements and today's purchases.
+
+Objectives and purchases can belong to **one or more projects**. A purchase is name, optional description,
+amount (CLP) and projects; with several projects the amount is split equally (leftover pesos go to the first ones).
+
+Deleting a project (`/admin` → Proyectos) also deletes objectives and purchases that belong only to it; shared
+ones just lose it and the purchase amount is re-split. Irreversible.
+
+## Run
 
 ```bash
-npm ci
-cp .env.example .env.local        # set ADMIN_EMAIL; JWT_SECRET optional in dev
-npm run dev                       # http://localhost:3000 → log in with ADMIN_EMAIL / 000000
+# Docker
+cp .env.example .env          # set JWT_SECRET (openssl rand -hex 32) and ADMIN_EMAIL
+docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
+
+# Without Docker (Node 20+)
+ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
-Data goes to `./data` (`app.db` + `comprobantes/`). Delete the folder to start over.
+Upgrading from 0.2: back up, then restart with the new code. Each company DB migrates on start (purchase amount
+becomes the total paid; document type, folio, RUT and shipping are kept in the description; existing
+objectives and purchases keep their single project). The `comprobantes/` folders are no longer used.
 
 ## Tests
 
 ```bash
 npm run typecheck
-npm run test:logica               # timezone, streak, Say-Do, schema, companies, capacity, executive metrics, RUT, codes (20 tests)
-
-# end-to-end against a running server with an EMPTY data dir: two companies, isolation, supervision, dashboards (38 tests)
-npm run build
-DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=$(openssl rand -hex 32) \
-  COOKIE_SECURE=false PORT=3100 node .next/standalone/server.js &
+npm run test:logica   # timezone, windows, streak, Say-Do, XP, schema + migration, companies, split, exec metrics (25)
+# end-to-end against a server with an EMPTY data dir (40)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
-
-(For the standalone server outside Docker, copy `public/` and `.next/static/` into `.next/standalone/` first.)
-
-## Deploy
-
-```bash
-# 1. Persistent data on the host (container runs as uid 1001)
-sudo mkdir -p /var/lib/aether-ops/comprobantes
-sudo chown -R 1001:1001 /var/lib/aether-ops
-
-# 2. Build and run — port bound to loopback only; the proxy is the only public entry
-docker build -t aether-ops:latest .
-docker run -d --name aether-ops --restart always \
-  -p 127.0.0.1:3000:3000 \
-  -v /var/lib/aether-ops:/data \
-  -e JWT_SECRET="$(openssl rand -base64 48)" \
-  -e ADMIN_EMAIL=jefatura@aether.cl \
-  -e ADMIN_NOMBRE="Jefatura Operaciones" \
-  aether-ops:latest
-```
-
-Keep the `JWT_SECRET` value (e.g. in an env file) — changing it logs everyone out. Or use `docker compose up -d` with a `.env` file (see `docker-compose.yml`).
-The container refuses to start without a `JWT_SECRET` of at least 32 characters.
-
-### DNS and reverse proxy
-
-DNS: an `A`/`AAAA` record (or `CNAME`) for `ops.aether.cl` pointing to the server. Ports are not part of DNS; the proxy forwards to `127.0.0.1:3000`.
-
-Caddy (automatic TLS):
-
-```caddy
-ops.aether.cl {
-    reverse_proxy 127.0.0.1:3000
-}
-```
-
-Nginx (TLS via certbot): the two lines marked are required.
-
-```nginx
-server {
-    server_name ops.aether.cl;
-    client_max_body_size 15m;                 # required: default 1m rejects receipt photos (413)
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;          # required: same-origin check on POST compares Origin with Host
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    # listen 443 ssl; ssl_certificate ... (certbot --nginx)
-}
-```
-
-### Backups
-
-```bash
-# /etc/cron.d/aether-ops — 02:30 nightly: consistent SQLite copy (keeps 30) + receipts to a second disk/host
-30 2 * * * root docker exec aether-ops node scripts/backup.mjs && rsync -a /var/lib/aether-ops/ backup-host:/srv/aether-ops/
-```
-
-Don't copy `app.db` with `cp` while the app runs: without the `-wal` file the copy can be inconsistent. `scripts/backup.mjs` uses SQLite's online backup API and runs `integrity_check` on the result.
-
-## First day checklist
-
-1. Log in as `ADMIN_EMAIL` with `000000`, set your own code.
-2. `/admin` → Proyectos: create the active projects (team can't log objectives without at least one).
-3. `/admin` → Equipo: add each person. **Ask them to log in the same day**: until they change it, anyone who knows their e-mail can log in with the initial code.
-4. Before January: add 2027 holidays to the `feriados` table (see `lib/migraciones.ts` for the format).
 
 ## Configuration
 
 | Variable | Default | |
 |---|---|---|
 | `JWT_SECRET` | — | Required in production, ≥ 32 chars |
-| `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | Admin created on first start when there are no users |
+| `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | First admin, created when there are none; any domain |
+| `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | `key\|Name\|domains`, `;`-separated |
 | `PIN_INICIAL` | `000000` | Initial code for new and reset accounts |
-| `DATA_DIR` | `/data` (prod), `./data` (dev) | SQLite + receipts |
-| `TZ_NEGOCIO` | `America/Santiago` | Defines "today", the 19:30 cut-off and streaks |
-| `COOKIE_SECURE` | `true` in production | Set `false` only for plain-http testing |
+| `DATA_DIR` | `/data` (Docker), `./data` (local) | SQLite databases |
+| `TZ_NEGOCIO` | `America/Santiago` | Defines "today", survey windows and streaks |
+| `VENTANA_MANANA` | `08:30-10:30` | Morning survey window |
+| `VENTANA_TARDE` | `17:00-19:30` | Afternoon close window; its end is the streak cut-off |
+| `JORNADA` | `08:30-18:00` | Workday used to subtract partial absences in capacity |
+| `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
 
-## Layout
-
-```
-app/                pages (login, cambiar-pin, checkin, mi-progreso, admin, exec) and api/ route handlers
-components/         client components (PinPad, Checkin, FormGasto, ModalOoo, AdminPanel, Anillo)
-lib/db.ts           single SQLite connection + per-connection PRAGMAs + migrations
-lib/migraciones.ts  schema (versioned with PRAGMA user_version)
-lib/metricas.ts     streak and Say-Do rules
-lib/tiempo.ts       business dates in America/Santiago
-lib/auth.ts, jwt.ts, pin.ts, limites.ts   sessions, code hashing, lockout
-middleware.ts       page routing by role (API routes authenticate themselves)
-scripts/            backup.mjs, test-logica.ts, e2e.mjs
-```
+Production (reverse proxy, backups, first-day checklist): see the Spanish README, sections 3–4.

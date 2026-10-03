@@ -24,8 +24,9 @@ export const POST = manejar(async (req: NextRequest) => {
   }
 
   const activos = new Set(proyectosActivos(db).map((p) => p.id));
-  const invalido = tareas.find((t) => !activos.has(t.proyecto_id));
-  if (invalido) throw new HttpError(400, "Proyecto inexistente o no activo");
+  if (tareas.some((t) => t.proyecto_ids.some((id) => !activos.has(id)))) {
+    throw new HttpError(400, "Proyecto inexistente o no activo");
+  }
 
   const bitacoraId = randomUUID();
   const ahora = ahoraIso();
@@ -35,10 +36,15 @@ export const POST = manejar(async (req: NextRequest) => {
         "INSERT INTO bitacoras (id, usuario_id, fecha, checkin_manana) VALUES (?, ?, ?, ?)",
       ).run(bitacoraId, u.id, hoy, ahora);
       const ins = db.prepare(
-        `INSERT INTO tareas_diarias (id, bitacora_id, proyecto_id, orden, descripcion, estado, creado_en, actualizado_en)
-         VALUES (?, ?, ?, ?, ?, 'pendiente', ?, ?)`,
+        `INSERT INTO tareas_diarias (id, bitacora_id, orden, descripcion, estado, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, 'pendiente', ?, ?)`,
       );
-      tareas.forEach((t, i) => ins.run(randomUUID(), bitacoraId, t.proyecto_id, i, t.descripcion, ahora, ahora));
+      const insProyecto = db.prepare("INSERT INTO tarea_proyectos (tarea_id, proyecto_id) VALUES (?, ?)");
+      tareas.forEach((t, i) => {
+        const id = randomUUID();
+        ins.run(id, bitacoraId, i, t.descripcion, ahora, ahora);
+        for (const p of t.proyecto_ids) insProyecto.run(id, p);
+      });
     })();
   } catch (e) {
     // Doble envío simultáneo: la otra petición ganó la carrera.

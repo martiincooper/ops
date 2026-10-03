@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleCheck, FileText, Flame, KeyRound, Plane } from "lucide-react";
+import { ArrowLeft, CircleCheck, Flame, KeyRound, Plane } from "lucide-react";
 import Link from "next/link";
 import Anillo from "@/components/Anillo";
 import BotonSalir from "@/components/BotonSalir";
@@ -6,7 +6,7 @@ import { empresaDe, requirePagina } from "@/lib/auth";
 import { getDbEmpresa } from "@/lib/db";
 import { ausenciasDesde, gastosRecientes } from "@/lib/dominio";
 import { calcularProgreso, type DiaResumen } from "@/lib/metricas";
-import { fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
+import { HORA_LIMITE_RACHA, fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
@@ -89,7 +89,7 @@ export default async function MiProgreso() {
       </section>
 
       <p className="mb-5 text-[11px] leading-relaxed text-slate-500">
-        La racha suma cada día hábil cerrado antes de las 19:30 con al menos 75% de cumplimiento. Fines de semana,
+        La racha suma cada día hábil cerrado antes de las {HORA_LIMITE_RACHA} con al menos 75% de cumplimiento. Fines de semana,
         feriados y ausencias de día completo no la cortan.
         {p.dias_sin_registro_14d > 0 && (
           <span className="text-aether-warning"> {p.dias_sin_registro_14d} día(s) hábil(es) sin registro en las últimas 2 semanas.</span>
@@ -122,9 +122,9 @@ export default async function MiProgreso() {
       )}
 
       <section className="tarjeta mb-5 px-4 py-3">
-        <h2 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Mis compras rendidas</h2>
+        <h2 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Mis compras</h2>
         {gastos.length === 0 ? (
-          <p className="py-2 text-xs text-slate-500">Aún no has rendido compras.</p>
+          <p className="py-2 text-xs text-slate-500">Aún no registras compras.</p>
         ) : (
           <ul className="divide-y divide-aether-border">
             {gastos.map((g) => (
@@ -132,15 +132,12 @@ export default async function MiProgreso() {
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-white">{g.item}</p>
                   <p className="text-slate-500">
-                    <span className="font-mono">{g.proyecto_codigo}</span> · {fechaCorta(fechaLocal(g.creado_en))}
+                    <span className="font-mono">{g.proyectos.join(" · ")}</span> · {fechaCorta(fechaLocal(g.creado_en))}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="tabular-nums text-slate-200">{clp.format(g.monto_item_clp + g.monto_envio_clp)}</span>
+                  <span className="tabular-nums text-slate-200">{clp.format(g.monto_clp)}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${ESTADO_GASTO[g.estado]}`}>{g.estado}</span>
-                  <a href={`/api/comprobantes/${g.id}`} target="_blank" rel="noopener" aria-label="Ver comprobante" className="text-slate-400 hover:text-white">
-                    <FileText size={15} />
-                  </a>
                 </div>
               </li>
             ))}

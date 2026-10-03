@@ -32,7 +32,7 @@ export interface FilaStandup {
   prioridad: 1 | 2 | 3 | 4;
   motivo: string;
   hoy: DiaResumen;
-  tareas_hoy: { descripcion: string; estado: string; motivo_pendiente: string | null; proyecto_codigo: string }[];
+  tareas_hoy: { descripcion: string; estado: string; motivo_pendiente: string | null; proyectos: string[] }[];
   ooo_hoy: { dia_completo: number; hora_inicio: string | null; hora_fin: string | null; motivo: string | null }[];
   bloqueos: { bitacora_id: string; fecha: string; texto: string }[];
   saydo_14d: number | null;
@@ -49,8 +49,11 @@ export const UMBRAL_SAYDO_ALERTA = 70;
 export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[] {
   const desde = sumarDias(hoy, -14);
   const qTareas = db.prepare(
-    `SELECT t.descripcion, t.estado, t.motivo_pendiente, p.codigo AS proyecto_codigo
-       FROM tareas_diarias t JOIN bitacoras b ON b.id = t.bitacora_id JOIN proyectos p ON p.id = t.proyecto_id
+    `SELECT t.descripcion, t.estado, t.motivo_pendiente,
+            (SELECT group_concat(codigo, ',') FROM (
+               SELECT p.codigo FROM tarea_proyectos tp JOIN proyectos p ON p.id = tp.proyecto_id
+                WHERE tp.tarea_id = t.id ORDER BY p.codigo)) AS codigos
+       FROM tareas_diarias t JOIN bitacoras b ON b.id = t.bitacora_id
       WHERE b.usuario_id = ? AND b.fecha = ? ORDER BY t.orden`,
   );
   const qOoo = db.prepare(
@@ -85,7 +88,9 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
       prioridad,
       motivo,
       hoy: prog.hoy,
-      tareas_hoy: qTareas.all(p.id, hoy) as FilaStandup["tareas_hoy"],
+      tareas_hoy: (qTareas.all(p.id, hoy) as (Omit<FilaStandup["tareas_hoy"][number], "proyectos"> & { codigos: string | null })[]).map(
+        ({ codigos, ...t }) => ({ ...t, proyectos: codigos ? codigos.split(",") : [] }),
+      ),
       ooo_hoy,
       bloqueos,
       saydo_14d: prog.saydo_14d,
@@ -191,17 +196,10 @@ export interface FilaGasto {
   id: string;
   usuario_id: string;
   persona: string;
-  proyecto_codigo: string;
-  proyecto_nombre: string;
+  proyectos: { codigo: string; nombre: string; monto_clp: number }[];
   item: string;
-  fecha_documento: string;
-  tipo_documento: "factura" | "boleta" | "extranjero";
-  rut_emisor: string | null;
-  folio_documento: string;
-  monto_item_clp: number;
-  monto_envio_clp: number;
-  iva_clp: number;
-  comprobante_mime: string;
+  descripcion: string | null;
+  monto_clp: number;
   estado: "pendiente" | "aprobado" | "rechazado";
   validado_por_nombre: string | null;
   validado_en: string | null;
@@ -213,19 +211,23 @@ export function gastosEmpresa(
   db: DB,
   op: { estado?: "pendiente" | "todos"; ids?: Set<string> | null; limite?: number } = {},
 ): FilaGasto[] {
-  const filas = db
-    .prepare(
-      `SELECT g.id, g.usuario_id, u.nombre AS persona, p.codigo AS proyecto_codigo, p.nombre AS proyecto_nombre,
-              g.item, g.fecha_documento, g.tipo_documento, g.rut_emisor, g.folio_documento,
-              g.monto_item_clp, g.monto_envio_clp, g.iva_clp, g.comprobante_mime, g.estado,
-              g.validado_por_nombre, g.validado_en, g.observacion, g.creado_en
-         FROM gastos g JOIN usuarios u ON u.id = g.usuario_id JOIN proyectos p ON p.id = g.proyecto_id
-        WHERE (? = 'todos' OR g.estado = 'pendiente')
-        ORDER BY g.estado = 'pendiente' DESC, g.creado_en DESC
-        LIMIT ?`,
-    )
-    .all(op.estado ?? "pendiente", op.limite ?? 500) as FilaGasto[];
-  return op.ids ? filas.filter((f) => op.ids!.has(f.usuario_id)) : filas;
+  const filas = (
+    db
+      .prepare(
+        `SELECT g.id, g.usuario_id, u.nombre AS persona, g.item, g.descripcion, g.monto_clp, g.estado,
+                g.validado_por_nombre, g.validado_en, g.observacion, g.creado_en
+           FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
+          WHERE (? = 'todos' OR g.estado = 'pendiente')
+          ORDER BY g.estado = 'pendiente' DESC, g.creado_en DESC
+          LIMIT ?`,
+      )
+      .all(op.estado ?? "pendiente", op.limite ?? 500) as Omit<FilaGasto, "proyectos">[]
+  ).filter((f) => !op.ids || op.ids.has(f.usuario_id));
+  const qProyectos = db.prepare(
+    `SELECT p.codigo, p.nombre, gp.monto_clp FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
+      WHERE gp.gasto_id = ? ORDER BY p.codigo`,
+  );
+  return filas.map((f) => ({ ...f, proyectos: qProyectos.all(f.id) as FilaGasto["proyectos"] }));
 }
 
 // ───────────────────────── Gerencia ─────────────────────────
@@ -237,10 +239,9 @@ export interface MetricasExec {
     nombre: string;
     estado: string;
     presupuesto_clp: number;
-    componentes_clp: number;
-    flete_clp: number;
-    total_clp: number;
+    total_clp: number; // compras aprobadas + por validar (sin rechazadas)
     por_validar_clp: number;
+    compras: number;
     pct_presupuesto: number | null;
     fecha_inicio: string;
     fecha_entrega_objetivo: string;
@@ -249,15 +250,7 @@ export interface MetricasExec {
     dias_restantes: number;
     pct_plazo: number;
   }[];
-  totales: { componentes_clp: number; flete_clp: number; total_clp: number; por_validar_clp: number };
-  iva: {
-    neto_factura_clp: number;
-    iva_recuperable_clp: number;
-    total_boleta_clp: number;
-    iva_absorbido_boleta_clp: number;
-    total_extranjero_clp: number;
-    pct_con_factura: number | null;
-  };
+  totales: { total_clp: number; aprobado_clp: number; por_validar_clp: number; presupuesto_clp: number };
   saydo: { pct: number | null; completadas: number; comprometidas: number; personas: number };
   personas_activas: number;
 }
@@ -266,54 +259,37 @@ function diasEntre(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000);
 }
 
-/** Gasto real (excluye compras rechazadas): costo prototipo = componentes + flete. */
+/** Gasto real por proyecto (excluye compras rechazadas), lead time y Say-Do global de la empresa. */
 export function metricasExec(db: DB, hoy: string): MetricasExec {
   const proyectos = (
     db
       .prepare(
         `SELECT p.id, p.codigo, p.nombre, p.estado, p.presupuesto_clp, p.fecha_inicio, p.fecha_entrega_objetivo,
-                COALESCE(SUM(CASE WHEN g.estado <> 'rechazado' THEN g.monto_item_clp END), 0) AS componentes_clp,
-                COALESCE(SUM(CASE WHEN g.estado <> 'rechazado' THEN g.monto_envio_clp END), 0) AS flete_clp,
-                COALESCE(SUM(CASE WHEN g.estado = 'pendiente' THEN g.monto_item_clp + g.monto_envio_clp END), 0) AS por_validar_clp
-           FROM proyectos p LEFT JOIN gastos g ON g.proyecto_id = p.id
+                COALESCE(SUM(CASE WHEN g.estado <> 'rechazado' THEN gp.monto_clp END), 0) AS total_clp,
+                COALESCE(SUM(CASE WHEN g.estado = 'pendiente' THEN gp.monto_clp END), 0) AS por_validar_clp,
+                COUNT(CASE WHEN g.estado <> 'rechazado' THEN 1 END) AS compras
+           FROM proyectos p
+           LEFT JOIN gasto_proyectos gp ON gp.proyecto_id = p.id
+           LEFT JOIN gastos g ON g.id = gp.gasto_id
           GROUP BY p.id
           ORDER BY p.estado IN ('entregado', 'pausado'), p.fecha_entrega_objetivo`,
       )
       .all() as Omit<
       MetricasExec["proyectos"][number],
-      "total_clp" | "pct_presupuesto" | "dias_transcurridos" | "dias_comprometidos" | "dias_restantes" | "pct_plazo"
+      "pct_presupuesto" | "dias_transcurridos" | "dias_comprometidos" | "dias_restantes" | "pct_plazo"
     >[]
   ).map((p) => {
-    const total = p.componentes_clp + p.flete_clp;
     const comprometidos = Math.max(1, diasEntre(p.fecha_inicio, p.fecha_entrega_objetivo));
     const transcurridos = Math.max(0, diasEntre(p.fecha_inicio, hoy));
     return {
       ...p,
-      total_clp: total,
-      pct_presupuesto: p.presupuesto_clp > 0 ? Math.round((total / p.presupuesto_clp) * 100) : null,
+      pct_presupuesto: p.presupuesto_clp > 0 ? Math.round((p.total_clp / p.presupuesto_clp) * 100) : null,
       dias_transcurridos: transcurridos,
       dias_comprometidos: comprometidos,
       dias_restantes: diasEntre(hoy, p.fecha_entrega_objetivo),
       pct_plazo: Math.round((transcurridos / comprometidos) * 100),
     };
   });
-
-  const iva = db
-    .prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN tipo_documento = 'factura' THEN monto_item_clp + monto_envio_clp END), 0) AS neto_factura_clp,
-         COALESCE(SUM(CASE WHEN tipo_documento = 'factura' THEN iva_clp END), 0) AS iva_recuperable_clp,
-         COALESCE(SUM(CASE WHEN tipo_documento = 'boleta' THEN monto_item_clp + monto_envio_clp END), 0) AS total_boleta_clp,
-         COALESCE(SUM(CASE WHEN tipo_documento = 'extranjero' THEN monto_item_clp + monto_envio_clp END), 0) AS total_extranjero_clp
-       FROM gastos WHERE estado <> 'rechazado'`,
-    )
-    .get() as {
-    neto_factura_clp: number;
-    iva_recuperable_clp: number;
-    total_boleta_clp: number;
-    total_extranjero_clp: number;
-  };
-  const totalNacional = iva.neto_factura_clp + iva.total_boleta_clp;
 
   const equipo = equipoActivo(db);
   let completadas = 0;
@@ -324,19 +300,15 @@ export function metricasExec(db: DB, hoy: string): MetricasExec {
     comprometidas += prog.comprometidas_14d;
   }
 
+  const total = proyectos.reduce((s, p) => s + p.total_clp, 0);
+  const porValidar = proyectos.reduce((s, p) => s + p.por_validar_clp, 0);
   return {
     proyectos,
     totales: {
-      componentes_clp: proyectos.reduce((s, p) => s + p.componentes_clp, 0),
-      flete_clp: proyectos.reduce((s, p) => s + p.flete_clp, 0),
-      total_clp: proyectos.reduce((s, p) => s + p.total_clp, 0),
-      por_validar_clp: proyectos.reduce((s, p) => s + p.por_validar_clp, 0),
-    },
-    iva: {
-      ...iva,
-      // En una boleta el IVA va incluido en el precio y no se recupera: 19/119 del total.
-      iva_absorbido_boleta_clp: Math.round((iva.total_boleta_clp * 19) / 119),
-      pct_con_factura: totalNacional > 0 ? Math.round((iva.neto_factura_clp / totalNacional) * 100) : null,
+      total_clp: total,
+      aprobado_clp: total - porValidar,
+      por_validar_clp: porValidar,
+      presupuesto_clp: proyectos.reduce((s, p) => s + p.presupuesto_clp, 0),
     },
     saydo: {
       pct: comprometidas > 0 ? Math.round((completadas / comprometidas) * 100) : null,

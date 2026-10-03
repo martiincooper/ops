@@ -16,13 +16,32 @@ export const esquemaCambioPin = z.object({
   pin_nuevo: pin,
 });
 
+/** Uno o más proyectos. Acepta también `proyecto_id` (un solo proyecto) por compatibilidad. */
+const proyectosDe = (max: number) =>
+  z
+    .array(z.string().min(1))
+    .min(1, "Elige al menos un proyecto")
+    .max(max, `Máximo ${max} proyectos`)
+    .transform((ids) => [...new Set(ids)]);
+
+const conProyectoUnico = (v: unknown) => {
+  if (v && typeof v === "object" && !("proyecto_ids" in v) && "proyecto_id" in v) {
+    const { proyecto_id, ...resto } = v as Record<string, unknown>;
+    return { ...resto, proyecto_ids: [proyecto_id] };
+  }
+  return v;
+};
+
 export const esquemaManana = z.object({
   tareas: z
     .array(
-      z.object({
-        proyecto_id: z.string().min(1, "Selecciona un proyecto"),
-        descripcion: texto(280),
-      }),
+      z.preprocess(
+        conProyectoUnico,
+        z.object({
+          proyecto_ids: proyectosDe(5),
+          descripcion: texto(280),
+        }),
+      ),
     )
     .min(2, "Define al menos 2 objetivos")
     .max(4, "Máximo 4 objetivos"),
@@ -65,21 +84,16 @@ const montoClp = z.coerce
   .min(0, "Monto inválido")
   .max(1_000_000_000, "Monto fuera de rango");
 
-export const esquemaGasto = z
-  .object({
-    proyecto_id: z.string().min(1, "Selecciona un proyecto"),
-    item: texto(200),
-    monto_item_clp: montoClp,
-    monto_envio_clp: montoClp.default(0),
-    tipo_documento: z.enum(["factura", "boleta", "extranjero"]),
-    rut_emisor: z.string().trim().max(15).optional().nullable(),
-    folio_documento: z.string().trim().min(1, "Folio requerido").max(40),
-    fecha_documento: fecha,
-  })
-  .refine((v) => v.monto_item_clp + v.monto_envio_clp > 0, {
-    message: "El monto total debe ser mayor a 0",
-    path: ["monto_item_clp"],
-  });
+/** Compra: uno o más proyectos, nombre, descripción (opcional) y monto total pagado en CLP. */
+export const esquemaGasto = z.preprocess(
+  conProyectoUnico,
+  z.object({
+    proyecto_ids: proyectosDe(10),
+    item: texto(120),
+    descripcion: z.string().trim().max(500, "Máximo 500 caracteres").optional().nullable(),
+    monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0"),
+  }),
+);
 
 const emailNormalizado = z.string().trim().toLowerCase().pipe(z.email("Email inválido"));
 const listaIds = z.array(z.string().min(1)).max(20);
@@ -116,7 +130,6 @@ export const esquemaValidacionGasto = z
   .object({
     estado: z.enum(["aprobado", "rechazado", "pendiente"]),
     observacion: z.string().trim().max(300).optional().nullable(),
-    iva_clp: z.number().int().min(0).max(1_000_000_000).optional(),
   })
   .refine((v) => v.estado !== "rechazado" || !!v.observacion, {
     message: "Indica el motivo del rechazo",

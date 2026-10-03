@@ -2,7 +2,7 @@
 # Ejecuta Aether Ops en este computador SIN Docker (macOS o Linux), en http://localhost:3000.
 # Uso:  ADMIN_EMAIL=tu@correo ./scripts/local.sh        (la primera vez)
 #       ./scripts/local.sh                              (siguientes veces: usa .env.local)
-# Datos en ./data (base SQLite + comprobantes). Borra esa carpeta para empezar de cero.
+# Datos en ./data (bases SQLite). Borra esa carpeta para empezar de cero.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

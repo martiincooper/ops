@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { api, clp, cx, miles } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, useAccion, useDatos, type EmpresaPublica } from "./comun";
@@ -20,6 +20,7 @@ const ESTADOS: Proyecto["estado"][] = ["concepto", "prototipado", "pruebas", "en
 export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; hoy: string }) {
   const { datos, error, cargando, recargar } = useDatos<{ proyectos: Proyecto[] }>(conEmpresa("/api/admin/proyectos", empresa.clave));
   const { ocupado, aviso, ejecutar } = useAccion();
+  const [confirmar, setConfirmar] = useState<string | null>(null);
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
   const [presupuesto, setPresupuesto] = useState("");
@@ -91,12 +92,13 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                 <th className="px-4 py-3 font-medium">Inicio</th>
                 <th className="px-4 py-3 font-medium">Entrega objetivo</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-aether-border">
               {proyectos.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                     Sin proyectos. El equipo de {empresa.nombre} necesita al menos uno activo para registrar objetivos.
                   </td>
                 </tr>
@@ -127,6 +129,39 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                     >
                       {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {confirmar === p.id ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          ejecutar(p.id, async () => {
+                            const r = await api<{ objetivos: number; compras: number; compras_reasignadas: number }>(
+                              conEmpresa(`/api/admin/proyectos/${p.id}`, empresa.clave),
+                              { method: "DELETE" },
+                            );
+                            setConfirmar(null);
+                            await recargar();
+                            return `${p.codigo} eliminado: ${r.objetivos} objetivo(s) y ${r.compras} compra(s) borrados` +
+                              (r.compras_reasignadas ? `; ${r.compras_reasignadas} compra(s) compartidas repartidas entre sus otros proyectos.` : ".");
+                          })
+                        }
+                        title="Borra también los objetivos y compras registrados solo para este proyecto. No se puede deshacer."
+                        className="rounded-md bg-aether-danger px-2 py-1 text-[11px] font-semibold text-white"
+                      >
+                        ¿Eliminar?
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={ocupado !== null}
+                        onClick={() => setConfirmar(p.id)}
+                        aria-label={`Eliminar ${p.codigo}`}
+                        className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:bg-aether-danger/10 hover:text-aether-danger disabled:opacity-50"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

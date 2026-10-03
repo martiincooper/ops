@@ -167,4 +167,80 @@ export const MIGRACIONES_EMPRESA: string[] = [
     ('2026-12-08', 'Inmaculada Concepción'),
     ('2026-12-25', 'Navidad');
   `,
+  // v2 — (1) compras simplificadas: nombre, descripción y monto total pagado; pueden repartirse entre varios
+  //          proyectos (gasto_proyectos). Se quitan RUT, folio, tipo de documento, envío, IVA, fecha y comprobante.
+  //          Las compras existentes conservan su total (ítem + envío + IVA) y un resumen del documento.
+  //      (2) cada objetivo diario puede pertenecer a varios proyectos (tarea_proyectos).
+  //      Orden: se copia a tablas nuevas, se borra la vieja y recién entonces se crean las tablas puente,
+  //      para que el DROP no borre en cascada sus filas.
+  `
+  CREATE TABLE _mig_gasto_proyecto AS
+    SELECT id AS gasto_id, proyecto_id, monto_item_clp + monto_envio_clp + iva_clp AS monto_clp FROM gastos;
+  CREATE TABLE gastos_v2 (
+    id TEXT PRIMARY KEY,
+    usuario_id TEXT NOT NULL REFERENCES usuarios(id),
+    bitacora_id TEXT REFERENCES bitacoras(id) ON DELETE SET NULL,
+    item TEXT NOT NULL,                              -- nombre de la compra
+    descripcion TEXT,
+    monto_clp INTEGER NOT NULL CHECK (monto_clp > 0), -- total pagado
+    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'aprobado', 'rechazado')),
+    validado_por TEXT,
+    validado_por_nombre TEXT,
+    validado_en TEXT,
+    observacion TEXT,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  INSERT INTO gastos_v2 (id, usuario_id, bitacora_id, item, descripcion, monto_clp,
+                         estado, validado_por, validado_por_nombre, validado_en, observacion, creado_en)
+    SELECT id, usuario_id, bitacora_id, item,
+           CASE tipo_documento WHEN 'factura' THEN 'Factura' WHEN 'boleta' THEN 'Boleta' ELSE 'Compra en el extranjero' END
+             || ' ' || folio_documento
+             || CASE WHEN rut_emisor IS NOT NULL THEN ' · RUT ' || rut_emisor ELSE '' END
+             || CASE WHEN monto_envio_clp > 0 THEN ' · incluye envío $' || monto_envio_clp ELSE '' END,
+           monto_item_clp + monto_envio_clp + iva_clp,
+           estado, validado_por, validado_por_nombre, validado_en, observacion, creado_en
+      FROM gastos;
+  DROP TABLE gastos;
+  ALTER TABLE gastos_v2 RENAME TO gastos;
+  CREATE INDEX idx_gastos_usuario ON gastos (usuario_id, creado_en);
+
+  -- Reparto de cada compra entre proyectos (la suma de monto_clp = monto de la compra)
+  CREATE TABLE gasto_proyectos (
+    gasto_id TEXT NOT NULL REFERENCES gastos(id) ON DELETE CASCADE,
+    proyecto_id TEXT NOT NULL REFERENCES proyectos(id),
+    monto_clp INTEGER NOT NULL CHECK (monto_clp >= 0),
+    PRIMARY KEY (gasto_id, proyecto_id)
+  );
+  INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) SELECT gasto_id, proyecto_id, monto_clp FROM _mig_gasto_proyecto;
+  DROP TABLE _mig_gasto_proyecto;
+  CREATE INDEX idx_gasto_proyectos_proyecto ON gasto_proyectos (proyecto_id);
+
+  -- Objetivos: sin proyecto único; proyectos en tarea_proyectos
+  CREATE TABLE _mig_tarea_proyecto AS SELECT id AS tarea_id, proyecto_id FROM tareas_diarias;
+  CREATE TABLE tareas_v2 (
+    id TEXT PRIMARY KEY,
+    bitacora_id TEXT NOT NULL REFERENCES bitacoras(id) ON DELETE CASCADE,
+    orden INTEGER NOT NULL DEFAULT 0,
+    descripcion TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'pendiente'
+      CHECK (estado IN ('pendiente', 'completado', 'postergado_ooo')),
+    motivo_pendiente TEXT,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    actualizado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  INSERT INTO tareas_v2 (id, bitacora_id, orden, descripcion, estado, motivo_pendiente, creado_en, actualizado_en)
+    SELECT id, bitacora_id, orden, descripcion, estado, motivo_pendiente, creado_en, actualizado_en FROM tareas_diarias;
+  DROP TABLE tareas_diarias;
+  ALTER TABLE tareas_v2 RENAME TO tareas_diarias;
+  CREATE INDEX idx_tareas_bitacora ON tareas_diarias (bitacora_id);
+
+  CREATE TABLE tarea_proyectos (
+    tarea_id TEXT NOT NULL REFERENCES tareas_diarias(id) ON DELETE CASCADE,
+    proyecto_id TEXT NOT NULL REFERENCES proyectos(id),
+    PRIMARY KEY (tarea_id, proyecto_id)
+  );
+  INSERT INTO tarea_proyectos (tarea_id, proyecto_id) SELECT tarea_id, proyecto_id FROM _mig_tarea_proyecto;
+  DROP TABLE _mig_tarea_proyecto;
+  CREATE INDEX idx_tarea_proyectos_proyecto ON tarea_proyectos (proyecto_id);
+  `,
 ];

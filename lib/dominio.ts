@@ -2,10 +2,20 @@ import "server-only";
 import type { DB } from "./db";
 import type { Usuario } from "./auth";
 import type { Empresa } from "./empresas";
-import { calcularProgreso } from "./metricas";
-import { fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
+import { calcularJuego, type Juego } from "./juego";
+import { momentoDe, vistaPara, type Fase, type Ventanas, type Vista } from "./jornada";
+import { calcularProgreso, type DiaResumen } from "./metricas";
+import { TZ_NEGOCIO, VENTANAS, esFinDeSemana, fechaLarga, fechaLocal, horaLocal, hoyLocal } from "./tiempo";
+
+export type { Fase, Vista } from "./jornada";
 
 export interface ProyectoActivo {
+  id: string;
+  codigo: string;
+  nombre: string;
+}
+
+export interface ProyectoRef {
   id: string;
   codigo: string;
   nombre: string;
@@ -16,9 +26,7 @@ export interface TareaDia {
   descripcion: string;
   estado: "pendiente" | "completado" | "postergado_ooo";
   motivo_pendiente: string | null;
-  proyecto_id: string;
-  proyecto_codigo: string;
-  proyecto_nombre: string;
+  proyectos: ProyectoRef[]; // uno o más
 }
 
 export interface Ausencia {
@@ -33,22 +41,25 @@ export interface Ausencia {
 export interface GastoResumen {
   id: string;
   item: string;
-  proyecto_codigo: string;
-  monto_item_clp: number;
-  monto_envio_clp: number;
-  iva_clp: number;
-  tipo_documento: "factura" | "boleta" | "extranjero";
-  folio_documento: string;
+  descripcion: string | null;
+  proyectos: string[]; // códigos
+  monto_clp: number;
   estado: "pendiente" | "aprobado" | "rechazado";
   creado_en: string;
 }
-
-export type Fase = "ooo_completo" | "pendiente_manana" | "pendiente_tarde" | "cerrado";
 
 export interface EstadoDia {
   empresa: { clave: string; nombre: string };
   hoy: string;
   hoy_texto: string;
+  /** Zona horaria y ventanas: el cliente recalcula la vista cada minuto con la hora de Chile. */
+  tz: string;
+  ventanas: Ventanas;
+  /** Hora local del servidor al generar el estado (HH:MM) y la vista que corresponde a esa hora. */
+  hora: string;
+  vista: Vista;
+  laborable: boolean;
+  feriado: string | null;
   fase: Fase;
   bitacora: { id: string; checkin_manana: string; checkout_tarde: string | null; bloqueos: string | null } | null;
   tareas: TareaDia[];
@@ -60,6 +71,9 @@ export interface EstadoDia {
   gastos_hoy: GastoResumen[];
   racha: number;
   saydo_14d: number | null;
+  /** Últimos 7 días, del más antiguo a hoy. */
+  semana: DiaResumen[];
+  juego: Juego;
 }
 
 export function proyectosActivos(db: DB): ProyectoActivo[] {
@@ -81,15 +95,24 @@ export function bitacoraDe(db: DB, usuarioId: string, fecha: string) {
 }
 
 export function tareasDe(db: DB, bitacoraId: string): TareaDia[] {
-  return db
+  const tareas = db
     .prepare(
-      `SELECT t.id, t.descripcion, t.estado, t.motivo_pendiente,
-              p.id AS proyecto_id, p.codigo AS proyecto_codigo, p.nombre AS proyecto_nombre
-         FROM tareas_diarias t JOIN proyectos p ON p.id = t.proyecto_id
-        WHERE t.bitacora_id = ?
-        ORDER BY t.orden, t.creado_en`,
+      `SELECT id, descripcion, estado, motivo_pendiente FROM tareas_diarias
+        WHERE bitacora_id = ? ORDER BY orden, creado_en`,
     )
-    .all(bitacoraId) as TareaDia[];
+    .all(bitacoraId) as Omit<TareaDia, "proyectos">[];
+  const refs = db
+    .prepare(
+      `SELECT tp.tarea_id, p.id, p.codigo, p.nombre
+         FROM tarea_proyectos tp JOIN proyectos p ON p.id = tp.proyecto_id
+         JOIN tareas_diarias t ON t.id = tp.tarea_id
+        WHERE t.bitacora_id = ? ORDER BY p.codigo`,
+    )
+    .all(bitacoraId) as (ProyectoRef & { tarea_id: string })[];
+  return tareas.map((t) => ({
+    ...t,
+    proyectos: refs.filter((r) => r.tarea_id === t.id).map(({ id, codigo, nombre }) => ({ id, codigo, nombre })),
+  }));
 }
 
 export function ausenciasDesde(db: DB, usuarioId: string, desde: string): Ausencia[] {
@@ -103,16 +126,20 @@ export function ausenciasDesde(db: DB, usuarioId: string, desde: string): Ausenc
 }
 
 export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoResumen[] {
-  return db
-    .prepare(
-      `SELECT g.id, g.item, p.codigo AS proyecto_codigo, g.monto_item_clp, g.monto_envio_clp, g.iva_clp,
-              g.tipo_documento, g.folio_documento, g.estado, g.creado_en
-         FROM gastos g JOIN proyectos p ON p.id = g.proyecto_id
-        WHERE g.usuario_id = ?
-        ORDER BY g.creado_en DESC
-        LIMIT ?`,
-    )
-    .all(usuarioId, limite) as GastoResumen[];
+  return (
+    db
+      .prepare(
+        `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.estado, g.creado_en,
+                (SELECT group_concat(codigo, ',') FROM (
+                   SELECT p.codigo FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
+                    WHERE gp.gasto_id = g.id ORDER BY p.codigo)) AS codigos
+           FROM gastos g
+          WHERE g.usuario_id = ?
+          ORDER BY g.creado_en DESC
+          LIMIT ?`,
+      )
+      .all(usuarioId, limite) as (Omit<GastoResumen, "proyectos"> & { codigos: string | null })[]
+  ).map(({ codigos, ...g }) => ({ ...g, proyectos: codigos ? codigos.split(",") : [] }));
 }
 
 export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
@@ -121,7 +148,12 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
   const tareas = bitacora ? tareasDe(db, bitacora.id) : [];
   const ausencias = ausenciasDesde(db, u.id, hoy);
   const ooo_hoy = ausencias.filter((a) => a.fecha === hoy);
-  const progreso = calcularProgreso(db, u.id, hoy, fechaLocal(u.creado_en));
+  const inicio = fechaLocal(u.creado_en);
+  const progreso = calcularProgreso(db, u.id, hoy, inicio);
+  const feriado =
+    (db.prepare("SELECT nombre FROM feriados WHERE fecha = ?").get(hoy) as { nombre: string } | undefined)?.nombre ?? null;
+  const laborable = !esFinDeSemana(hoy) && !feriado;
+  const hora = horaLocal(new Date());
 
   let fase: Fase;
   if (bitacora?.checkout_tarde) fase = "cerrado";
@@ -133,7 +165,8 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
   const activos = new Set(proyectos.map((p) => p.id));
   const recientes = db
     .prepare(
-      `SELECT t.proyecto_id FROM tareas_diarias t JOIN bitacoras b ON b.id = t.bitacora_id
+      `SELECT tp.proyecto_id FROM tarea_proyectos tp
+         JOIN tareas_diarias t ON t.id = tp.tarea_id JOIN bitacoras b ON b.id = t.bitacora_id
         WHERE b.usuario_id = ? ORDER BY b.fecha DESC, t.orden LIMIT 20`,
     )
     .all(u.id) as { proyecto_id: string }[];
@@ -142,6 +175,12 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
     empresa: { clave: empresa.clave, nombre: empresa.nombre },
     hoy,
     hoy_texto: fechaLarga(hoy),
+    tz: TZ_NEGOCIO,
+    ventanas: VENTANAS,
+    hora,
+    vista: vistaPara(fase, momentoDe(hora, VENTANAS), laborable),
+    laborable,
+    feriado,
     fase,
     bitacora,
     tareas,
@@ -152,10 +191,7 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
     gastos_hoy: gastosRecientes(db, u.id, 20).filter((g) => fechaLocal(g.creado_en) === hoy),
     racha: progreso.racha,
     saydo_14d: progreso.saydo_14d,
+    semana: progreso.historial.slice(0, 7).reverse(),
+    juego: calcularJuego(db, u.id, hoy, inicio),
   };
-}
-
-/** IVA crédito fiscal: solo factura, 19 % sobre el neto (ítem + envío). */
-export function ivaRecuperable(tipo: string, netoItem: number, netoEnvio: number): number {
-  return tipo === "factura" ? Math.round((netoItem + netoEnvio) * 0.19) : 0;
 }

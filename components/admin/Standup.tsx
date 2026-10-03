@@ -116,7 +116,7 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
                           )}
                         </span>
                         <span className="text-slate-300">
-                          <span className="font-mono text-[10px] text-aether-accent-soft">{t.proyecto_codigo}</span> {t.descripcion}
+                          <span className="font-mono text-[10px] text-aether-accent-soft">{t.proyectos.join(" · ")}</span> {t.descripcion}
                           {t.motivo_pendiente && <span className="block text-[11px] text-aether-warning">↳ {t.motivo_pendiente}</span>}
                         </span>
                       </li>
