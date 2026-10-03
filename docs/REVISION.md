@@ -263,3 +263,11 @@ as one-line rows with chips that expand into a stage bar and two numbers. A one-
 paragraph; all definitions moved into one collapsed "¿Cómo se calcula?". Same data and API
 (`ProyectoEnCurso.tramos` added for the timeline). Hover titles on every mark, legends kept, labels inside
 fills switch to dark ink on the lightest stage color; no horizontal overflow at 360/390 px.
+
+## 15. Pass 10 — editing project data
+
+`PATCH /api/admin/proyectos/:id` now also accepts `codigo` and `fecha_inicio` (all fields optional; only sent
+fields change). Rules: estimated delivery ≥ start (checked against the merged values), code unique per company
+(409), and a new start date may not pass the start of the second stage; the first stage row moves with it in the
+same transaction so `fecha_inicio` and the stage history never disagree. UI: an "Editar" button per project
+opens an inline form that sends only the changed fields. e2e 46.

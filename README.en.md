@@ -36,6 +36,8 @@ amount in Chilean pesos (CLP, no decimals), an optional shipping cost (CLP, behi
 projects. The total (purchase + shipping) is stored and the shipping part shown separately; with several projects
 the total, shipping included, is split equally (leftover pesos go to the first ones).
 
+Editing a project (`/admin` → Proyectos → Editar) changes code, name, BOM estimate, start and estimated delivery
+dates; the start date also moves the first stage and cannot pass the next stage or the delivery date.
 Deleting a project (`/admin` → Proyectos) also deletes objectives and purchases that belong only to it; shared
 ones just lose it and the purchase amount is re-split. Irreversible.
 
@@ -103,7 +105,7 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 ```bash
 npm run typecheck
 npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, exec (28)
-# end-to-end against a server with an EMPTY data dir (45)
+# end-to-end against a server with an EMPTY data dir (46)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 

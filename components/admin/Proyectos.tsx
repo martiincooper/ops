@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, History, LoaderCircle, Trash2 } from "lucide-react";
+import { AlertTriangle, History, LoaderCircle, Pencil, Trash2 } from "lucide-react";
 import { Fragment, useState } from "react";
 import { api, clp, cx, miles } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, useAccion, useDatos, type EmpresaPublica } from "./comun";
@@ -94,11 +94,89 @@ function EditorEtapas({ p, empresa, hoy, onGuardado, onCerrar }: { p: Proyecto; 
   );
 }
 
+/** Edición de los datos del proyecto. Solo se envían los campos que cambiaron. */
+function EditorProyecto({ p, empresa, onGuardado, onCerrar }: { p: Proyecto; empresa: string; onGuardado: (texto: string) => void; onCerrar: () => void }) {
+  const [codigo, setCodigo] = useState(p.codigo);
+  const [nombre, setNombre] = useState(p.nombre);
+  const [presupuesto, setPresupuesto] = useState(String(p.presupuesto_clp));
+  const [inicio, setInicio] = useState(p.fecha_inicio);
+  const [entrega, setEntrega] = useState(p.fecha_entrega_objetivo);
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const cambios: Record<string, string | number> = {};
+  if (codigo.trim().toUpperCase() !== p.codigo) cambios.codigo = codigo;
+  if (nombre.trim() !== p.nombre) cambios.nombre = nombre;
+  if (Number(presupuesto || 0) !== p.presupuesto_clp) cambios.presupuesto_clp = Number(presupuesto || 0);
+  if (inicio !== p.fecha_inicio) cambios.fecha_inicio = inicio;
+  if (entrega !== p.fecha_entrega_objetivo) cambios.fecha_entrega_objetivo = entrega;
+  const hayCambios = Object.keys(cambios).length > 0;
+  const id = (c: string) => `ed-${p.id}-${c}`;
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hayCambios) return onCerrar();
+    setError(null);
+    setOcupado(true);
+    try {
+      await api(conEmpresa(`/api/admin/proyectos/${p.id}`, empresa), { method: "PATCH", json: cambios });
+      onGuardado(`${(cambios.codigo as string | undefined)?.trim().toUpperCase() ?? p.codigo}: datos actualizados.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  return (
+    <form onSubmit={guardar} className="rounded-2xl bg-suave p-4">
+      <p className="mb-3 text-sm font-semibold text-tinta">Editar {p.codigo}</p>
+      <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-[1.2fr_2fr_1.2fr_1fr_1fr]">
+        <div>
+          <label htmlFor={id("codigo")} className="etiqueta">Código</label>
+          <input id={id("codigo")} required value={codigo} onChange={(e) => setCodigo(e.target.value.toUpperCase())} className="campo bg-superficie font-mono text-sm" />
+        </div>
+        <div>
+          <label htmlFor={id("nombre")} className="etiqueta">Nombre</label>
+          <input id={id("nombre")} required maxLength={120} value={nombre} onChange={(e) => setNombre(e.target.value)} className="campo bg-superficie text-sm" />
+        </div>
+        <div>
+          <label htmlFor={id("bom")} className="etiqueta">Costo estimado BOM (CLP)</label>
+          <input
+            id={id("bom")}
+            inputMode="numeric"
+            required
+            value={presupuesto ? miles(Number(presupuesto)) : ""}
+            onChange={(e) => setPresupuesto(e.target.value.replace(/\D/g, "").slice(0, 12))}
+            className="campo bg-superficie text-sm tabular-nums"
+          />
+        </div>
+        <div>
+          <label htmlFor={id("inicio")} className="etiqueta">Inicio</label>
+          <input id={id("inicio")} type="date" required max={entrega} value={inicio} onChange={(e) => setInicio(e.target.value)} className="campo bg-superficie text-sm" />
+        </div>
+        <div>
+          <label htmlFor={id("entrega")} className="etiqueta">Entrega estimada</label>
+          <input id={id("entrega")} type="date" required min={inicio} value={entrega} onChange={(e) => setEntrega(e.target.value)} className="campo bg-superficie text-sm" />
+        </div>
+      </div>
+      {error && <p className="mt-3 rounded-2xl bg-error-fondo px-4 py-2 text-sm text-error-tinta">{error}</p>}
+      <div className="mt-3 flex items-center gap-2">
+        <button type="submit" disabled={ocupado || !hayCambios} className="boton">
+          {ocupado && <LoaderCircle size={14} className="animate-spin" />} Guardar cambios
+        </button>
+        <button type="button" onClick={onCerrar} className="boton-texto">Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
 export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; hoy: string }) {
   const { datos, error, cargando, recargar } = useDatos<{ proyectos: Proyecto[] }>(conEmpresa("/api/admin/proyectos", empresa.clave));
   const { ocupado, aviso, ejecutar } = useAccion();
   const [confirmar, setConfirmar] = useState<string | null>(null);
-  const [etapas, setEtapas] = useState<string | null>(null);
+  const [abierto, setAbierto] = useState<{ id: string; modo: "editar" | "etapas" } | null>(null);
+  const alternar = (id: string, modo: "editar" | "etapas") => setAbierto(abierto?.id === id && abierto.modo === modo ? null : { id, modo });
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
   const [presupuesto, setPresupuesto] = useState("");
@@ -220,19 +298,26 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                     )}
                   </td>
                   <td className="whitespace-nowrap text-right">
-                    <button
-                      type="button"
-                      aria-expanded={etapas === p.id}
-                      aria-label={`Etapas de ${p.codigo}`}
-                      title="Historial de etapas"
-                      onClick={() => setEtapas(etapas === p.id ? null : p.id)}
-                      className={cx(
-                        "mr-1 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
-                        etapas === p.id ? "bg-indigo-suave text-indigo-tinta" : "text-tinta-2 hover:bg-suave",
-                      )}
-                    >
-                      <History size={13} /> Etapas
-                    </button>
+                    {(["editar", "etapas"] as const).map((modo) => {
+                      const activo = abierto?.id === p.id && abierto.modo === modo;
+                      const Icono = modo === "editar" ? Pencil : History;
+                      return (
+                        <button
+                          key={modo}
+                          type="button"
+                          aria-expanded={activo}
+                          aria-label={`${modo === "editar" ? "Editar" : "Etapas de"} ${p.codigo}`}
+                          title={modo === "editar" ? "Editar datos del proyecto" : "Historial de etapas"}
+                          onClick={() => alternar(p.id, modo)}
+                          className={cx(
+                            "mr-1 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                            activo ? "bg-indigo-suave text-indigo-tinta" : "text-tinta-2 hover:bg-suave",
+                          )}
+                        >
+                          <Icono size={13} /> {modo === "editar" ? "Editar" : "Etapas"}
+                        </button>
+                      );
+                    })}
                     {confirmar === p.id ? (
                       <button
                         type="button"
@@ -266,22 +351,37 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                     )}
                   </td>
                 </tr>
-                {etapas === p.id && (
+                {abierto?.id === p.id && (
                   <tr>
                     <td colSpan={7}>
-                      <EditorEtapas
-                        key={p.etapas.map((e) => e.id + e.desde).join()}
-                        p={p}
-                        empresa={empresa.clave}
-                        hoy={hoy}
-                        onCerrar={() => setEtapas(null)}
-                        onGuardado={async (texto) => {
-                          await ejecutar(p.id, async () => {
-                            await recargar();
-                            return texto;
-                          });
-                        }}
-                      />
+                      {abierto.modo === "etapas" ? (
+                        <EditorEtapas
+                          key={p.etapas.map((e) => e.id + e.desde).join()}
+                          p={p}
+                          empresa={empresa.clave}
+                          hoy={hoy}
+                          onCerrar={() => setAbierto(null)}
+                          onGuardado={async (texto) => {
+                            await ejecutar(p.id, async () => {
+                              await recargar();
+                              return texto;
+                            });
+                          }}
+                        />
+                      ) : (
+                        <EditorProyecto
+                          p={p}
+                          empresa={empresa.clave}
+                          onCerrar={() => setAbierto(null)}
+                          onGuardado={async (texto) => {
+                            setAbierto(null);
+                            await ejecutar(p.id, async () => {
+                              await recargar();
+                              return texto;
+                            });
+                          }}
+                        />
+                      )}
                     </td>
                   </tr>
                 )}

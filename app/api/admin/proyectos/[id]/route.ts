@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
-import { registrarCambioEtapa } from "@/lib/etapas";
+import { NOMBRE_ESTADO, leerEtapas, registrarCambioEtapa } from "@/lib/etapas";
 import { esquemaProyectoCambio } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { repartirMonto } from "@/lib/reparto";
@@ -8,28 +8,46 @@ import { hoyLocal } from "@/lib/tiempo";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+/**
+ * Edita un proyecto: código, nombre, estimación BOM, fechas de inicio y de entrega estimada, y estado.
+ * Solo cambian los campos enviados. El inicio es también el comienzo de su primera etapa (se mueven juntos) y no
+ * puede quedar después de la etapa siguiente ni de la entrega estimada. Un cambio de estado queda en el historial.
+ */
 export const PATCH = manejar<Ctx>(async (req, { params }) => {
   const { db } = await contexto(req, ["admin"]);
   const { id } = await params;
   const c = await leerJson(req, esquemaProyectoCambio);
-  const p = db.prepare("SELECT id, estado, fecha_inicio FROM proyectos WHERE id = ?").get(id) as
-    | { id: string; estado: string; fecha_inicio: string }
+  const p = db.prepare("SELECT id, codigo, estado, fecha_inicio, fecha_entrega_objetivo FROM proyectos WHERE id = ?").get(id) as
+    | { id: string; codigo: string; estado: string; fecha_inicio: string; fecha_entrega_objetivo: string }
     | undefined;
   if (!p) throw new HttpError(404, "Proyecto no encontrado");
-  if (c.fecha_entrega_objetivo && c.fecha_entrega_objetivo < p.fecha_inicio) {
-    throw new HttpError(400, "La entrega estimada no puede ser anterior al inicio");
+
+  const inicio = c.fecha_inicio ?? p.fecha_inicio;
+  const entrega = c.fecha_entrega_objetivo ?? p.fecha_entrega_objetivo;
+  if (entrega < inicio) throw new HttpError(400, "La entrega estimada no puede ser anterior al inicio");
+  if (c.codigo && c.codigo !== p.codigo && db.prepare("SELECT 1 FROM proyectos WHERE codigo = ? AND id <> ?").get(c.codigo, id)) {
+    throw new HttpError(409, `El código ${c.codigo} ya existe`);
   }
+  const etapas = leerEtapas(db, id).get(id) ?? [];
+  const cambiaInicio = c.fecha_inicio !== undefined && c.fecha_inicio !== p.fecha_inicio;
+  if (cambiaInicio && etapas[1] && inicio > etapas[1].desde) {
+    throw new HttpError(400, `El inicio no puede ser posterior al comienzo de ${NOMBRE_ESTADO[etapas[1].estado]} (${etapas[1].desde})`);
+  }
+
   db.transaction(() => {
+    if (cambiaInicio && etapas[0]) db.prepare("UPDATE proyecto_etapas SET desde = ? WHERE id = ?").run(inicio, etapas[0].id);
     // Cada cambio de estado queda en el historial de etapas con la fecha de hoy
-    if (c.estado) registrarCambioEtapa(db, p, c.estado, hoyLocal());
+    if (c.estado) registrarCambioEtapa(db, { ...p, fecha_inicio: inicio }, c.estado, hoyLocal());
     db.prepare(
       `UPDATE proyectos SET
+          codigo = COALESCE(?, codigo),
           nombre = COALESCE(?, nombre),
           presupuesto_clp = COALESCE(?, presupuesto_clp),
-          fecha_entrega_objetivo = COALESCE(?, fecha_entrega_objetivo),
+          fecha_inicio = ?,
+          fecha_entrega_objetivo = ?,
           estado = COALESCE(?, estado)
         WHERE id = ?`,
-    ).run(c.nombre ?? null, c.presupuesto_clp ?? null, c.fecha_entrega_objetivo ?? null, c.estado ?? null, id);
+    ).run(c.codigo ?? null, c.nombre ?? null, c.presupuesto_clp ?? null, inicio, entrega, c.estado ?? null, id);
   })();
   return NextResponse.json({ ok: true });
 });

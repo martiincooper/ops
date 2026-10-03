@@ -499,6 +499,27 @@ async function main() {
     assert.ok(e.dias_concepto_cliente >= 0 && e.desvio_dias < 0);
     assert.equal(m.costo.total_clp, 43435); // la compra de Dora no cambia
   });
+  await prueba("editar proyecto: código, nombre, BOM y fechas; validaciones; el inicio mueve la primera etapa", async () => {
+    const patch = (cl, json) => cl.pedir(q(`/api/admin/proyectos/${pEt}`, D), { metodo: "PATCH", json });
+    const leer = async () => (await admin.pedir(q("/api/admin/proyectos", D))).datos.proyectos.find((p) => p.id === pEt);
+    assert.equal((await patch(ggD.cliente, { nombre: "x" })).status, 403);
+    let r = await patch(admin, { codigo: "dsq-etp-1b", nombre: "Encoder absoluto", presupuesto_clp: 2500000, fecha_entrega_objetivo: "2027-04-30" });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    let p = await leer();
+    assert.deepEqual([p.codigo, p.nombre, p.presupuesto_clp, p.fecha_entrega_objetivo], ["DSQ-ETP-1B", "Encoder absoluto", 2500000, "2027-04-30"]);
+    assert.equal((await patch(admin, { codigo: "DSQ-GW-01" })).status, 409);
+    assert.equal((await patch(admin, { codigo: "x y" })).status, 400);
+    assert.equal((await patch(admin, { fecha_entrega_objetivo: "2026-08-01" })).status, 400); // antes del inicio
+    assert.equal((await patch(admin, { fecha_inicio: "2026-09-20" })).status, 400); // después del comienzo de prototipado (15-sep)
+    r = await patch(admin, { fecha_inicio: "2026-08-10" });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    p = await leer();
+    assert.equal(p.fecha_inicio, "2026-08-10");
+    assert.deepEqual(p.etapas.map((e) => [e.estado, e.desde]), [["concepto", "2026-08-10"], ["prototipado", "2026-09-15"]]);
+    const m = (await ggD.cliente.pedir("/api/exec")).datos;
+    const enExec = m.tiempo.proyectos.find((x) => x.id === pEt);
+    assert.deepEqual([enExec.codigo, enExec.nombre, enExec.dias_por_etapa.concepto], ["DSQ-ETP-1B", "Encoder absoluto", 36]);
+  });
   await prueba("gerencia no puede validar compras", async () => {
     assert.equal((await ggA.cliente.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "aprobado" } })).status, 403);
   });

@@ -85,6 +85,9 @@ Las definiciones quedan en «¿Cómo se calcula?», al final.
 - **Proyectos entregados** (al final): cada uno se abre con sus propios indicadores — días reales de concepto a
   cliente con el desglose por etapa, entrega frente a su fecha estimada (a tiempo o días de atraso) y costo final
   frente a su estimación BOM.
+- **Editar un proyecto**: en `/admin` → **Proyectos**, el botón **Editar** de cada fila cambia código, nombre,
+  costo estimado BOM, inicio y entrega estimada. El inicio mueve también el comienzo de su primera etapa y no puede
+  quedar después de la etapa siguiente ni de la entrega estimada; un código repetido se rechaza.
 - **Historial de etapas**: cada cambio de estado en `/admin` → **Proyectos** queda registrado con la fecha del día
   (dos cambios el mismo día se corrigen entre sí). El botón **Etapas** de cada proyecto permite corregir esas fechas,
   por ejemplo la fecha real de entrega de un proyecto antiguo; la primera fecha es el inicio del proyecto.
@@ -108,7 +111,7 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | `/mi-progreso`: objetivos logrados en 14 días, historial, mis compras, cambio de código | |
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
 | `/exec`: costo vs estimación BOM, tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
-| Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) | |
+| Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) y edición de los datos del proyecto | |
 
 ---
 
@@ -221,7 +224,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 45 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 46 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -395,7 +398,7 @@ npm run typecheck
 npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, gerencia (28 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, etapas, pipeline, eliminar proyectos, tableros (45 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, etapas, pipeline, editar y eliminar proyectos, tableros (46 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test

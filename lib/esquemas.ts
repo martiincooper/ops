@@ -131,13 +131,15 @@ export const esquemaValidacionGasto = z
 
 const estadoProyecto = z.enum(["concepto", "prototipado", "pruebas", "entregado", "pausado"]);
 
+const codigoProyecto = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9][A-Z0-9-]{1,23}$/, "Código: letras, números y guiones (ej. AETH-SEN-01)");
+
 export const esquemaProyectoNuevo = z
   .object({
-    codigo: z
-      .string()
-      .trim()
-      .toUpperCase()
-      .regex(/^[A-Z0-9][A-Z0-9-]{1,23}$/, "Código: letras, números y guiones (ej. AETH-SEN-01)"),
+    codigo: codigoProyecto,
     nombre: texto(120),
     presupuesto_clp: montoClp,
     fecha_inicio: fecha,
@@ -157,9 +159,12 @@ export const esquemaEtapas = z.object({
     .max(100),
 });
 
+/** Edición de un proyecto: solo los campos enviados cambian. */
 export const esquemaProyectoCambio = z.object({
+  codigo: codigoProyecto.optional(),
   nombre: texto(120).optional(),
   presupuesto_clp: montoClp.optional(),
+  fecha_inicio: fecha.optional(),
   fecha_entrega_objetivo: fecha.optional(),
   estado: estadoProyecto.optional(),
 });
