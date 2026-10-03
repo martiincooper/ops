@@ -196,7 +196,9 @@ async function main() {
     const r = await ggD.cliente.pedir(q("/api/exec", A));
     assert.equal(r.status, 200);
     assert.equal(r.datos.empresa.clave, D);
-    assert.ok(r.datos.proyectos.every((p) => p.id !== pA));
+    assert.ok(r.datos.costo.proyectos.every((p) => p.id !== pA));
+    assert.ok(r.datos.plazo.proyectos.every((p) => p.id !== pA));
+    assert.deepEqual(Object.keys(r.datos.metas).sort(), ["bloqueo_max_dias", "objetivos_diarios_pct", "tolerancia_costo_pct"]);
   });
   await prueba("administrador elige la empresa del tablero de gerencia", async () => {
     assert.equal((await admin.pedir(q("/api/exec", A))).datos.empresa.clave, A);
@@ -391,14 +393,14 @@ async function main() {
     assert.equal(lista.length, 3);
     assert.ok(lista.every((g) => g.estado === "pendiente"));
     const antes = (await ggA.cliente.pedir("/api/exec")).datos;
-    assert.equal(antes.totales.total_clp, 43435 + 90001 + 11900);
-    const sen = (m) => m.proyectos.find((p) => p.codigo === "AETH-SEN-01").total_clp;
-    const gw = (m) => m.proyectos.find((p) => p.codigo === "AETH-GW-03").total_clp;
+    assert.equal(antes.costo.total_clp, 43435 + 90001 + 11900);
+    const sen = (m) => m.costo.proyectos.find((p) => p.codigo === "AETH-SEN-01").total_clp;
+    const gw = (m) => m.costo.proyectos.find((p) => p.codigo === "AETH-GW-03").total_clp;
     assert.equal(sen(antes) + gw(antes), 43435 + 90001 + 11900);
     assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "rechazado" } })).status, 400);
     assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "rechazado", observacion: "No corresponde" } })).status, 200);
     const tras = (await ggA.cliente.pedir("/api/exec")).datos;
-    assert.equal(tras.totales.total_clp, 90001 + 11900);
+    assert.equal(tras.costo.total_clp, 90001 + 11900);
     assert.equal(sen(tras), sen(antes) - 43435);
     assert.equal(gw(tras), gw(antes));
     assert.ok(!("iva" in tras));
@@ -407,8 +409,18 @@ async function main() {
     assert.equal(g.estado, "aprobado");
     assert.ok(g.validado_por_nombre);
     assert.equal(g.descripcion, "Programador para el sensor");
-    assert.equal((await ggA.cliente.pedir("/api/exec")).datos.totales.aprobado_clp, 43435);
-    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.totales.total_clp, 43435); // la compra de Dora, separada
+    const fin = (await ggA.cliente.pedir("/api/exec")).datos;
+    assert.equal(fin.costo.total_clp - fin.costo.por_validar_clp, 43435); // aprobado
+    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.costo.total_clp, 43435); // la compra de Dora, separada
+  });
+  await prueba("metas de gerencia: solo administradores las cambian; gerencia las ve", async () => {
+    const metas = { tolerancia_costo_pct: 15, objetivos_diarios_pct: 85, bloqueo_max_dias: 2 };
+    assert.equal((await ggA.cliente.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: metas })).status, 403);
+    assert.equal((await admin.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: { ...metas, objetivos_diarios_pct: 120 } })).status, 400);
+    const r = await admin.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: metas });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.deepEqual((await ggA.cliente.pedir("/api/exec")).datos.metas, metas);
+    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.metas.objetivos_diarios_pct, 80); // otra empresa: por defecto
   });
   await prueba("gerencia no puede validar compras", async () => {
     assert.equal((await ggA.cliente.pedir(q(`/api/admin/gastos/${anaGastoId}`, A), { metodo: "PATCH", json: { estado: "aprobado" } })).status, 403);

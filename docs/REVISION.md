@@ -169,3 +169,23 @@ building those signals into the tool. Not legal advice.
 - **Unavailable days** replace OOO: whole days only (`/api/no-disponible`), for planning; they never affect the
   streak. Partial absences from earlier versions are ignored; postponing objectives "por ausencia" is no
   longer offered (old postponed items keep their state). The 14-day view counts available working days.
+
+## 10. Pass 5 — executive KPIs (SMART)
+
+The executive view had three tiles (global Say-Do, spend, pending purchases) and two lists, without targets or
+periods, and the Say-Do label read like project progress. Replaced by four KPIs ordered by relevance to
+upper management, each with definition, value, target, period, status and comparison:
+
+1. **Projects on schedule** — active projects not past their committed delivery date. Target 100 %. Point in
+   time (no history of project states, so no comparison). Projects due within 14 days are listed as such.
+2. **Accumulated cost vs BOM estimate** — there are no budgets; each project has a BOM cost estimate made before
+   it starts (stored in `proyectos.presupuesto_clp`, relabelled in the UI). Within ≤ 100 %; up to +tolerance
+   (default 10 %) = at risk; above = off target. Comparison: cost added in the last 14 days vs the previous 14.
+3. **Team daily-objective completion** — achieved ÷ committed objectives of finished jornadas, last 14 days vs
+   previous 14; target ≥ 80 % (at risk within 10 pp). Explicitly labelled as day-to-day execution, not project
+   milestones (managed in the Gantt chart).
+4. **Unresolved blockers** — target: none open longer than N days (default 3); at risk if any open.
+
+Pending purchases left the executive view (they remain in the admin validation desk). Targets live in a new
+per-company `metas` table (schema v3), editable by admins only (`PUT /api/admin/metas`); defaults in
+`lib/metas.ts`.

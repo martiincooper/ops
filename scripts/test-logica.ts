@@ -7,6 +7,7 @@ import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { repartirMonto } from "../lib/reparto";
 import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
+import { METAS_DEFECTO, esquemaMetas, guardarMetas, leerMetas } from "../lib/metas";
 import { calcularJuego, nivelDe, xpParaNivel } from "../lib/juego";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
 
@@ -170,29 +171,81 @@ async function main() {
       assert.equal(repartirMonto(m, k).reduce((x, y) => x + y, 0), m);
     }
   });
-  await prueba("gerencia: gasto por proyecto con compras repartidas; rechazadas excluidas", () => {
-    const d = dbNueva();
+  await prueba("gerencia · costo vs estimación BOM: compras repartidas, rechazadas excluidas, tolerancia", () => {
+    const d = dbNueva(); // p1 AETH-01: estimación 1.000.000
     d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p2','AETH-02','Fuente',100000,'2026-09-01','2026-11-30')").run();
-    const g = d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, estado) VALUES (?, 'u1', 'x', ?, ?)");
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p3','AETH-03','Gateway',0,'2026-09-01','2026-11-30')").run();
+    const g = d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, estado, creado_en) VALUES (?, 'u1', 'x', ?, ?, ?)");
     const gp = d.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES (?, ?, ?)");
-    g.run("g1", 43435, "aprobado"); gp.run("g1", "p1", 43435);
-    g.run("g2", 90001, "pendiente"); gp.run("g2", "p1", 45001); gp.run("g2", "p2", 45000); // compra de 2 proyectos
-    g.run("g3", 99999, "rechazado"); gp.run("g3", "p2", 99999);
-    const m = metricasExec(d, hoy);
-    const p1 = m.proyectos.find((p) => p.id === "p1")!;
-    const p2 = m.proyectos.find((p) => p.id === "p2")!;
-    assert.equal(p1.total_clp, 88436);
-    assert.equal(p1.por_validar_clp, 45001);
-    assert.equal(p1.compras, 2);
-    assert.equal(p2.total_clp, 45000);
-    assert.equal(p2.pct_presupuesto, 45);
-    assert.equal(m.totales.total_clp, 133436);
-    assert.equal(m.totales.por_validar_clp, 90001);
-    assert.equal(m.totales.aprobado_clp, 43435);
-    assert.equal(p1.dias_comprometidos, 121); // 1-sep → 31-dic
-    assert.equal(p1.dias_transcurridos, 30);
+    g.run("g1", 43435, "aprobado", "2026-09-10T15:00:00Z"); gp.run("g1", "p1", 43435); //    periodo anterior
+    g.run("g2", 90001, "pendiente", "2026-09-25T15:00:00Z"); gp.run("g2", "p1", 45001); gp.run("g2", "p2", 45000);
+    g.run("g3", 99999, "rechazado", "2026-09-26T15:00:00Z"); gp.run("g3", "p2", 99999); //  no cuenta
+    g.run("g4", 62000, "aprobado", "2026-09-30T15:00:00Z"); gp.run("g4", "p2", 62000); //   p2: 107.000 = 107 %
+    let m = metricasExec(d, hoy);
+    const p1 = m.costo.proyectos.find((p) => p.id === "p1")!;
+    const p2 = m.costo.proyectos.find((p) => p.id === "p2")!;
+    assert.deepEqual([p1.total_clp, p1.por_validar_clp, p1.compras, p1.pct, p1.situacion], [88436, 45001, 2, 9, "dentro"]);
+    assert.deepEqual([p2.total_clp, p2.pct, p2.situacion], [107000, 107, "en_riesgo"]);
+    assert.equal(m.costo.proyectos.find((p) => p.id === "p3")!.situacion, "sin_estimacion");
+    assert.equal(m.costo.proyectos[0].id, "p2"); // lo más grave primero
+    assert.deepEqual([m.costo.con_estimacion, m.costo.dentro, m.costo.en_riesgo, m.costo.fuera, m.costo.estado], [2, 1, 1, 0, "en_riesgo"]);
+    assert.equal(m.costo.total_clp, 195436);
+    assert.equal(m.costo.periodo_clp, 90001 + 62000); // 18-sep → 1-oct
+    assert.equal(m.costo.periodo_anterior_clp, 43435); // 4-sep → 17-sep
+    m = metricasExec(d, hoy, { ...m.metas, tolerancia_costo_pct: 5 });
+    assert.equal(m.costo.estado, "fuera");
     const filas = gastosEmpresa(d, { estado: "todos" });
     assert.deepEqual(filas.find((f) => f.id === "g2")!.proyectos.map((p) => [p.codigo, p.monto_clp]), [["AETH-01", 45001], ["AETH-02", 45000]]);
+  });
+  await prueba("gerencia · plazo: atrasado fuera de meta; pausados y entregados no cuentan", () => {
+    const d = dbNueva(); // p1 vence 31-dic: en plazo
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p2','A2','x',1,'2026-08-01','2026-09-25','pruebas')").run();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p3','A3','x',1,'2026-08-01','2026-10-10','prototipado')").run();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p4','A4','x',1,'2026-07-01','2026-09-01','pausado')").run();
+    const m = metricasExec(d, hoy);
+    assert.deepEqual([m.plazo.activos, m.plazo.en_plazo, m.plazo.atrasados, m.plazo.por_vencer, m.plazo.estado], [3, 2, 1, 1, "fuera"]);
+    assert.deepEqual(m.plazo.proyectos.map((p) => p.situacion), ["atrasado", "por_vencer", "en_plazo", "pausado"]);
+    const p1 = m.plazo.proyectos.find((p) => p.id === "p1")!;
+    assert.equal(p1.dias_comprometidos, 121); // 1-sep → 31-dic
+    assert.equal(p1.dias_transcurridos, 30);
+    d.prepare("UPDATE proyectos SET estado = 'entregado' WHERE id = 'p2'").run();
+    assert.equal(metricasExec(d, hoy).plazo.estado, "en_meta");
+  });
+  await prueba("gerencia · objetivos diarios: 14 días vs 14 anteriores, meta y estado", () => {
+    const d = dbNueva();
+    bitacora(d, "2026-09-10", "cp", "2026-09-10T20:00:00Z"); //   anterior: 1/2 = 50 %
+    bitacora(d, "2026-09-22", "cccp", "2026-09-22T20:00:00Z"); // actual
+    bitacora(d, "2026-09-29", "ccc", "2026-09-29T20:00:00Z"); //  actual: 6/7 = 86 %
+    bitacora(d, hoy, "pp", null); //                             en curso: no cuenta
+    let m = metricasExec(d, hoy);
+    assert.deepEqual([m.equipo.completadas, m.equipo.comprometidas, m.equipo.pct, m.equipo.pct_anterior], [6, 7, 86, 50]);
+    assert.deepEqual([m.equipo.jornadas, m.equipo.personas_con_jornadas, m.equipo.personas, m.equipo.estado], [2, 1, 1, "en_meta"]);
+    m = metricasExec(d, hoy, { ...m.metas, objetivos_diarios_pct: 90 });
+    assert.equal(m.equipo.estado, "en_riesgo"); // 86 ≥ 90 − 10
+    m = metricasExec(d, hoy, { ...m.metas, objetivos_diarios_pct: 100 });
+    assert.equal(m.equipo.estado, "fuera");
+  });
+  await prueba("gerencia · bloqueos: abiertos, vencidos según la meta de días, resueltos fuera", () => {
+    const d = dbNueva();
+    bitacora(d, "2026-09-25", "c", "2026-09-25T20:00:00Z");
+    bitacora(d, "2026-09-30", "c", "2026-09-30T20:00:00Z");
+    d.prepare("UPDATE bitacoras SET bloqueos = 'Falta stock' WHERE fecha = '2026-09-25'").run();
+    d.prepare("UPDATE bitacoras SET bloqueos = 'Aduana' WHERE fecha = '2026-09-30'").run();
+    let m = metricasExec(d, hoy);
+    assert.deepEqual([m.bloqueos.abiertos, m.bloqueos.vencidos, m.bloqueos.estado], [2, 1, "fuera"]); // 6 días > 3
+    assert.deepEqual(m.bloqueos.lista.map((b) => [b.texto, b.dias, b.proyectos]), [["Falta stock", 6, ["AETH-01"]], ["Aduana", 1, ["AETH-01"]]]);
+    assert.equal(m.bloqueos.nuevos_periodo, 2);
+    d.prepare("UPDATE bitacoras SET bloqueo_resuelto_en = 'x' WHERE fecha = '2026-09-25'").run();
+    m = metricasExec(d, hoy);
+    assert.deepEqual([m.bloqueos.abiertos, m.bloqueos.vencidos, m.bloqueos.estado], [1, 0, "en_riesgo"]);
+  });
+  await prueba("metas: por defecto, guardadas por empresa, validadas", () => {
+    const d = dbNueva();
+    assert.deepEqual(leerMetas(d), METAS_DEFECTO);
+    guardarMetas(d, { tolerancia_costo_pct: 15, objetivos_diarios_pct: 85, bloqueo_max_dias: 2 }, "Martin");
+    assert.deepEqual(leerMetas(d), { tolerancia_costo_pct: 15, objetivos_diarios_pct: 85, bloqueo_max_dias: 2 });
+    assert.equal(metricasExec(d, hoy).metas.objetivos_diarios_pct, 85);
+    assert.equal(esquemaMetas.safeParse({ tolerancia_costo_pct: 10, objetivos_diarios_pct: 40, bloqueo_max_dias: 3 }).success, false);
   });
   await prueba("standup: bloqueo sin resolver va primero; resuelto deja de contar", () => {
     const d = dbNueva();

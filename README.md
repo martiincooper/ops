@@ -56,7 +56,26 @@ jornada. «Disponibilidad 14 días» muestra quién marcó días como no disponi
 
 Nombre, descripción (opcional), monto en pesos y **uno o más proyectos**. Si son varios, el monto se reparte en
 partes iguales (los pesos que sobran van a los primeros). La jefatura aprueba o rechaza (con motivo) en
-`/admin` → **Compras**; gerencia ve el gasto por proyecto frente a su presupuesto (las rechazadas no cuentan).
+`/admin` → **Compras**; gerencia ve el costo acumulado de cada proyecto frente a su estimación BOM (las
+rechazadas no cuentan).
+
+## Vista de gerencia (`/exec`)
+
+Cuatro indicadores SMART, en este orden. Cada uno muestra definición, valor, meta, periodo, estado
+(en meta / en riesgo / fuera de meta, con ícono y texto) y la comparación con el periodo anterior.
+
+| # | Indicador | Meta por defecto | Periodo |
+|---|---|---|---|
+| 1 | **Proyectos en plazo**: proyectos activos que no han pasado su fecha de entrega | 100 % | al día de hoy |
+| 2 | **Costo acumulado vs estimación BOM**: compras aprobadas y por validar de cada proyecto frente al costo estimado antes de comenzarlo | ≤ 100 %; hasta +10 % «en riesgo» | acumulado; muestra lo agregado en 14 días vs los 14 anteriores |
+| 3 | **Cumplimiento de objetivos diarios del equipo**: de los objetivos que cada persona se propone al comenzar su jornada, cuántos logra | ≥ 80 % (bajo 70 % «fuera de meta») | últimos 14 días vs los 14 anteriores |
+| 4 | **Bloqueos sin resolver** | 0 con más de 3 días | al día de hoy; reportados en 14 días vs los 14 anteriores |
+
+- El indicador 3 mide la ejecución del día a día, **no** el avance de los hitos del proyecto (esos se gestionan
+  en la carta Gantt).
+- Las metas (tolerancia de costo, % de objetivos diarios, días de un bloqueo) las define la jefatura por empresa
+  en `/exec` → **Metas de los indicadores** (solo administradores). Gerencia las ve en cada indicador.
+- Para el indicador 2, registra el **costo estimado BOM** de cada proyecto en `/admin` → **Proyectos**.
 
 **Eliminar un proyecto** (`/admin` → **Proyectos**, papelera y confirmar) borra también los objetivos y
 compras registrados solo para él; los compartidos con otros proyectos solo lo pierden y el monto se reparte de
@@ -73,7 +92,7 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | Días no disponibles (días completos) para la planificación | |
 | `/mi-progreso`: racha, historial de 14 días, mis compras, cambio de código | |
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
-| `/exec`: gasto por proyecto vs presupuesto, por validar, lead time, Say-Do global 14 días | |
+| `/exec`: 4 indicadores SMART (plazo, costo vs estimación BOM, objetivos diarios del equipo, bloqueos) con metas editables | |
 
 ---
 
@@ -186,7 +205,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 41 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 42 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -225,7 +244,8 @@ Datos en `./data` (bórrala para empezar de cero). Detener con `Ctrl+C`.
 
 1. Ingresa con tu email y `000000`, crea tu código.
 2. Con el selector en **Aether Tech** y luego en **Datasheq**:
-   - **Proyectos**: crea los proyectos activos (sin al menos uno, el equipo no puede registrar objetivos).
+   - **Proyectos**: crea los proyectos activos con su fecha de entrega y su costo estimado BOM (sin al menos
+     un proyecto activo, el equipo no puede registrar objetivos).
    - **Equipo**: agrega a cada persona (rol Equipo o Gerencia) y elige quién la supervisa.
 3. **Administradores**: agrega a otros jefes si corresponde.
 4. **Pide a cada persona que ingrese ese mismo día**: hasta que cambie el código inicial, cualquiera que conozca
@@ -286,6 +306,11 @@ Estructura de datos:
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 
+### Actualizar desde la versión 0.4
+
+Se agrega la tabla `metas` (migración automática al arrancar). En `/admin` → **Proyectos** la columna
+«Presupuesto» pasa a llamarse «Costo estimado BOM» (mismo dato).
+
 ### Actualizar desde la versión 0.3
 
 Sin cambios de base de datos: actualiza y reinicia. Lo que cambia:
@@ -332,10 +357,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, racha por objetivos, Say-Do, XP, esquema y migración, disponibilidad, reparto, gerencia (23 pruebas)
+npm run test:logica       # zona horaria, racha por objetivos, Say-Do, XP, esquema y migración, disponibilidad, reparto, gerencia (27 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, eliminar proyectos, tableros (41 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, eliminar proyectos, tableros (42 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
@@ -356,7 +381,8 @@ lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
 lib/metricas.ts     reglas de racha y Say-Do (por objetivos, sin horario)
-lib/tableros.ts     cálculos de standup, disponibilidad, compras y gerencia
+lib/tableros.ts     cálculos de standup, disponibilidad, compras e indicadores de gerencia
+lib/metas.ts        metas de los indicadores de gerencia (por empresa)
 lib/supervision.ts  administradores ↔ integrantes supervisados
 lib/tiempo.ts       fechas de negocio en America/Santiago
 lib/reparto.ts      reparto del monto de una compra entre proyectos

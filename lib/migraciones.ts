@@ -243,4 +243,14 @@ export const MIGRACIONES_EMPRESA: string[] = [
   DROP TABLE _mig_tarea_proyecto;
   CREATE INDEX idx_tarea_proyectos_proyecto ON tarea_proyectos (proyecto_id);
   `,
+
+  // v3 — metas de los indicadores de gerencia (las define la jefatura; sin fila = valor por defecto)
+  `
+  CREATE TABLE metas (
+    clave TEXT PRIMARY KEY,
+    valor INTEGER NOT NULL,
+    actualizado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    actualizado_por TEXT
+  );
+  `,
 ];

@@ -51,6 +51,14 @@ Repo: [github.com/martiincooper/ops](https://github.com/martiincooper/ops). Rail
 4. Healthcheck path `/api/health`; generate a domain on port 3000 or add `ops.aether.cl` as a custom domain.
 5. Enable scheduled volume backups. One replica only; a few seconds of downtime per deploy (volume).
 
+## Executive view (`/exec`)
+
+Four SMART KPIs, in this order, each with definition, value, target, period, status (icon + label) and
+comparison with the previous period: 1) projects on schedule (target 100 %), 2) accumulated cost vs the BOM
+estimate made before the project starts (≤ 100 %, up to +10 % = at risk), 3) team daily-objective completion,
+last 14 days vs previous 14 (≥ 80 %) — daily execution, **not** project milestones, which live in the Gantt
+chart, 4) unresolved blockers (0 older than 3 days). Targets are per company and editable by admins on `/exec`.
+
 ## Run
 
 ```bash
@@ -71,8 +79,8 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, goal-based streak, Say-Do, XP, schema + migration, availability, split, exec (23)
-# end-to-end against a server with an EMPTY data dir (41)
+npm run test:logica   # timezone, goal-based streak, Say-Do, XP, schema + migration, availability, split, exec (27)
+# end-to-end against a server with an EMPTY data dir (42)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 

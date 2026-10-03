@@ -63,7 +63,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
           <input id="p-nombre" required value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Sensor IoT v2.1" className="campo text-sm" />
         </div>
         <div>
-          <label htmlFor="p-presupuesto" className="etiqueta">Presupuesto CLP</label>
+          <label htmlFor="p-presupuesto" className="etiqueta">Costo estimado BOM (CLP)</label>
           <input id="p-presupuesto" inputMode="numeric" required value={presupuesto ? miles(Number(presupuesto)) : ""} onChange={(e) => setPresupuesto(e.target.value.replace(/\D/g, "").slice(0, 12))} placeholder="5.000.000" className="campo text-sm tabular-nums" />
         </div>
         <div>
@@ -88,7 +88,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
               <tr>
                 <th className="px-4 py-3 font-medium">Código</th>
                 <th className="px-4 py-3 font-medium">Nombre</th>
-                <th className="px-4 py-3 text-right font-medium">Presupuesto</th>
+                <th className="px-4 py-3 text-right font-medium">Costo estimado BOM</th>
                 <th className="px-4 py-3 font-medium">Inicio</th>
                 <th className="px-4 py-3 font-medium">Entrega objetivo</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
