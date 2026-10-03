@@ -33,11 +33,10 @@ COPY --from=build --chown=1001:1001 /app/.next/static ./.next/static
 COPY --from=build --chown=1001:1001 /app/public ./public
 COPY --from=build --chown=1001:1001 /app/scripts/backup.mjs /app/scripts/arranque.cjs ./scripts/
 
-# Corre como aether (1001). Si la plataforma lo inicia como root (Railway con RAILWAY_RUN_UID=0, cuyos
-# volúmenes pertenecen a root), scripts/arranque.cjs ajusta /data y baja a 1001 antes de iniciar.
+# Inicia como root solo para preparar /data (los volúmenes de Railway pertenecen a root): scripts/arranque.cjs
+# deja /data a nombre de aether (1001) y baja a ese usuario antes de cargar el servidor.
 # Sin instrucción VOLUME (Railway la rechaza): el volumen se monta en /data desde docker compose, docker run -v
 # o el volumen de Railway.
-USER 1001
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

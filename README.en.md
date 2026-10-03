@@ -45,8 +45,9 @@ Repo: [github.com/martiincooper/ops](https://github.com/martiincooper/ops). Rail
 1. New Project → Deploy from GitHub repo → `martiincooper/ops`.
 2. Attach a volume mounted at **`/data`** (required — without it the SQLite files are wiped on every deploy).
 3. Variables: `JWT_SECRET` (`openssl rand -hex 32`), `ADMIN_EMAIL=martin@aether-tech.dev`, `ADMIN_NOMBRE`,
-   `RAILWAY_RUN_UID=0` (Railway volumes are root-owned; `scripts/arranque.cjs` fixes `/data` ownership at start
-   and drops to uid 1001), `PORT=3000`, optionally a non-trivial `PIN_INICIAL`.
+   `PORT=3000`, optionally a non-trivial `PIN_INICIAL`. Railway volumes are root-owned: the container starts as
+   root only to chown `/data`, then `scripts/arranque.cjs` drops to uid 1001 before loading the server
+   (no `RAILWAY_RUN_UID` needed).
 4. Healthcheck path `/api/health`; generate a domain on port 3000 or add `ops.aether.cl` as a custom domain.
 5. Enable scheduled volume backups. One replica only; a few seconds of downtime per deploy (volume).
 

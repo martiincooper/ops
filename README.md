@@ -93,7 +93,6 @@ el `Dockerfile` de la raíz (no hace falta `railway.json`). Cada push a `main` g
    | `JWT_SECRET` | resultado de `openssl rand -hex 32` (guárdalo: si cambia, se cierran todas las sesiones) |
    | `ADMIN_EMAIL` | `martin@aether-tech.dev` |
    | `ADMIN_NOMBRE` | `Martin` |
-   | `RAILWAY_RUN_UID` | `0` — el volumen de Railway pertenece a root; el contenedor ajusta los permisos de `/data` al arrancar y luego corre sin privilegios |
    | `PORT` | `3000` |
    | `PIN_INICIAL` | opcional pero recomendado: un código de 6 dígitos que no sea trivial, en vez de `000000` |
 
@@ -112,7 +111,8 @@ Tener en cuenta:
 - Con volumen, cada despliegue tiene unos segundos sin servicio: Railway no monta el mismo volumen en dos
   despliegues a la vez.
 - Los datos que probaste en tu computador (`./data`) no se suben: producción parte vacía.
-- Si el registro dice `No se puede escribir en /data`, falta `RAILWAY_RUN_UID=0`.
+- El volumen de Railway pertenece a root: el contenedor inicia como root solo para dejar `/data` a nombre del
+  usuario de la aplicación y luego corre sin privilegios. No hace falta `RAILWAY_RUN_UID` (si la agregaste, déjala en `0` o quítala).
 
 ---
 

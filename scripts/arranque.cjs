@@ -1,9 +1,9 @@
 // Arranque del contenedor (CMD del Dockerfile).
 //
-// La imagen corre como el usuario "aether" (uid 1001). Algunas plataformas montan el volumen de datos como
-// root (Railway, por ejemplo): ahí el servicio se inicia como root con RAILWAY_RUN_UID=0, este script deja la
-// carpeta de datos a nombre de aether y baja a ese usuario antes de iniciar el servidor. Así la aplicación
-// nunca corre como root.
+// El contenedor inicia como root solo para preparar la carpeta de datos: los volúmenes de algunas plataformas
+// (Railway, por ejemplo) se montan a nombre de root. Este script deja /data a nombre del usuario "aether"
+// (uid 1001) y baja a ese usuario antes de cargar el servidor, así la aplicación nunca corre como root.
+// Es el mismo patrón que usan las imágenes oficiales de Postgres o Redis.
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -19,23 +19,28 @@ function chownRecursivo(ruta) {
   }
 }
 
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
 if (typeof process.getuid === "function" && process.getuid() === 0) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  chownRecursivo(DATA_DIR);
-  process.setgroups([]);
-  process.setgid(GID);
-  process.setuid(UID);
-  log(`Permisos de ${DATA_DIR} ajustados; la aplicación corre como uid ${UID}.`);
+  try {
+    chownRecursivo(DATA_DIR);
+    process.setgroups([]);
+    process.setgid(GID);
+    process.setuid(UID);
+    log(`Datos en ${DATA_DIR}; la aplicación corre como uid ${UID}.`);
+  } catch (e) {
+    // Plataformas que no permiten cambiar dueño o usuario: se sigue como root antes que no arrancar.
+    console.warn(`[aether-ops] AVISO: no se pudo bajar a uid ${UID} (${e.code || e.message}); se sigue como root.`);
+  }
 }
 
 try {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.accessSync(DATA_DIR, fs.constants.W_OK);
 } catch {
   console.error(
-    `[aether-ops] No se puede escribir en ${DATA_DIR}. El volumen pertenece a otro usuario.\n` +
-      "  - Railway: agrega la variable RAILWAY_RUN_UID=0 (el contenedor ajusta los permisos y baja a un usuario sin privilegios).\n" +
-      "  - Docker: sudo chown -R 1001:1001 <carpeta del anfitrión>",
+    `[aether-ops] No se puede escribir en ${DATA_DIR}: el contenedor corre como uid ${process.getuid?.()} y la carpeta ` +
+      "pertenece a otro usuario. No fuerces otro usuario (docker run --user / RAILWAY_RUN_UID distinto de 0), " +
+      "o en Docker ejecuta: sudo chown -R 1001:1001 <carpeta del anfitrión>",
   );
   process.exit(1);
 }

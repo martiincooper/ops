@@ -7,6 +7,17 @@ import fs from "node:fs";
 import path from "node:path";
 
 const dataDir = process.env.DATA_DIR || "/data";
+
+// Ejecutado como root (p. ej. docker exec): trabaja como el dueño de la carpeta de datos, para no dejar
+// respaldos a nombre de root.
+if (process.getuid?.() === 0 && fs.existsSync(dataDir)) {
+  const { uid, gid } = fs.statSync(dataDir);
+  if (uid !== 0) {
+    process.setgroups([]);
+    process.setgid(gid);
+    process.setuid(uid);
+  }
+}
 const raiz = path.resolve(process.argv[2] || path.join(dataDir, "respaldos"));
 const marca = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
 const destino = path.join(raiz, marca);
