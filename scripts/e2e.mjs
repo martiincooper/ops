@@ -245,12 +245,12 @@ async function main() {
     const r = await beto.cliente.pedir("/api/jornada/terminar", { metodo: "POST", json: { tareas: manana.tareas.map((t) => ({ id: t.id, estado: "completado" })) } });
     assert.equal(r.status, 400);
   });
-  await prueba("jornada en curso: marcar objetivos logrados (solo los propios) y ver XP/nivel", async () => {
+  await prueba("jornada en curso: marcar objetivos logrados (solo los propios)", async () => {
     const [a] = manana.tareas;
     const r = await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: true } });
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.equal(r.datos.tareas.find((t) => t.id === a.id).estado, "completado");
-    assert.equal(r.datos.juego.objetivos_completados, 1);
+    assert.ok(!("juego" in r.datos) && !("racha" in r.datos));
     assert.equal(r.datos.fase, "en_curso");
     assert.equal((await beto.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: true } })).status, 404);
     const d = await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: false } });
@@ -269,7 +269,6 @@ async function main() {
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.equal(r.datos.fase, "terminada");
     assert.ok(r.datos.jornada.checkout_tarde);
-    assert.equal(r.datos.racha, 0); // 2/3 = 67 % < 75 %
     assert.equal((await enviar(json)).status, 404); // ya no hay jornada en curso
     assert.equal((await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: false } })).status, 409);
     const otra = await ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas: [{ proyecto_ids: [pA], descripcion: "x" }, { proyecto_ids: [pA], descripcion: "y" }] } });

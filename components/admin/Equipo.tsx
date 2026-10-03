@@ -2,6 +2,7 @@
 
 import { Check, LoaderCircle, Lock, Pencil, RotateCcw, Trash2, UserPlus } from "lucide-react";
 import { useState } from "react";
+import { Avatar } from "@/components/ui";
 import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, fechaHora, useAccion, useDatos, type EmpresaPublica, type Yo } from "./comun";
 
@@ -28,10 +29,10 @@ interface AdminLista {
 const ROLES = { team: "Equipo", executive: "Gerencia" } as const;
 
 function estadoCuenta(u: Cuenta) {
-  if (!u.activo) return { texto: "Desactivada", clase: "text-slate-500 bg-slate-500/10" };
-  if (u.bloqueado_hasta && new Date(u.bloqueado_hasta) > new Date()) return { texto: "Bloqueada", clase: "text-aether-danger bg-aether-danger/10" };
-  if (u.debe_cambiar_pin) return { texto: "Sin primer ingreso", clase: "text-aether-warning bg-aether-warning/10" };
-  return { texto: "Activa", clase: "text-aether-success bg-aether-success/10" };
+  if (!u.activo) return { texto: "Desactivada", clase: "text-tinta-3 bg-suave" };
+  if (u.bloqueado_hasta && new Date(u.bloqueado_hasta) > new Date()) return { texto: "Bloqueada", clase: "text-error-tinta bg-error-fondo" };
+  if (u.debe_cambiar_pin) return { texto: "Sin primer ingreso", clase: "text-alerta-tinta bg-alerta-fondo" };
+  return { texto: "Activa", clase: "text-ok-tinta bg-ok-fondo" };
 }
 
 function SelectorSupervisores({
@@ -56,8 +57,8 @@ function SelectorSupervisores({
               aria-pressed={on}
               onClick={() => onCambio(on ? valor.filter((x) => x !== a.id) : [...valor, a.id])}
               className={cx(
-                "flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
-                on ? "border-aether-accent bg-aether-accent/15 text-aether-accent-soft" : "border-aether-border text-slate-400 hover:text-slate-200",
+                "flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                on ? "bg-indigo text-white" : "bg-superficie text-tinta-2 ring-1 ring-linea hover:ring-indigo/40",
               )}
             >
               {on && <Check size={11} />} {a.nombre}
@@ -108,9 +109,9 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
             return `${e2} agregado a ${empresa.nombre}. Ingresa con el código inicial y deberá cambiarlo; pídele que entre hoy.`;
           });
         }}
-        className="tarjeta mb-5 space-y-3 p-4"
+        className="tarjeta mb-6 space-y-4 p-5"
       >
-        <div className="grid grid-cols-[2fr_2fr_1.2fr_auto] items-end gap-3">
+        <div className="grid gap-3 md:grid-cols-[2fr_2fr_1.2fr_auto] md:items-end">
           <div>
             <label htmlFor="n-email" className="etiqueta">Email ({empresa.dominios.map((d) => "@" + d).join(", ")})</label>
             <input id="n-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={`nombre@${empresa.dominios[0]}`} className="campo text-sm" />
@@ -126,17 +127,17 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
               <option value="executive">Gerencia</option>
             </select>
           </div>
-          <button type="submit" disabled={ocupado !== null} className="flex h-[46px] items-center gap-1.5 rounded-lg bg-aether-accent px-4 text-xs font-bold text-white disabled:opacity-50">
+          <button type="submit" disabled={ocupado !== null} className="boton h-[50px] px-5">
             {ocupado === "nuevo" ? <LoaderCircle size={14} className="animate-spin" /> : <UserPlus size={14} />} Agregar
           </button>
         </div>
         {rol === "team" ? (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="etiqueta mb-0 shrink-0">Supervisado por</span>
             <SelectorSupervisores admins={admins} valor={sup} onCambio={setSup} />
           </div>
         ) : (
-          <p className="text-[11px] text-slate-500">Gerencia ve el tablero de {empresa.nombre} completo; no tiene supervisores.</p>
+          <p className="text-sm text-tinta-3">Gerencia ve el tablero de {empresa.nombre} completo; no tiene supervisores.</p>
         )}
       </form>
 
@@ -144,43 +145,48 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
       <Cargando cargando={cargando && !datos} error={error} />
 
       {usuarios.length > 0 && (
-        <div className="tarjeta overflow-hidden">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-aether-border text-[11px] uppercase tracking-wide text-slate-500">
+        <div className="tarjeta overflow-x-auto">
+          <table className="tabla">
+            <thead>
               <tr>
-                <th className="px-4 py-3 font-medium">Persona</th>
-                <th className="px-4 py-3 font-medium">Rol</th>
-                <th className="px-4 py-3 font-medium">Supervisado por</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 font-medium">Último acceso</th>
-                <th className="px-4 py-3 text-right font-medium">Acciones</th>
+                <th>Persona</th>
+                <th>Rol</th>
+                <th>Supervisado por</th>
+                <th>Estado</th>
+                <th>Último acceso</th>
+                <th className="text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-aether-border">
+            <tbody>
               {usuarios.map((u) => {
                 const est = estadoCuenta(u);
                 const enEdicion = editando?.id === u.id;
                 return (
                   <tr key={u.id} className={cx(!u.activo && "opacity-60")}>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-white">{u.nombre}</p>
-                      <p className="text-slate-500">{u.email}</p>
+                    <td>
+                      <span className="flex items-center gap-2.5">
+                        <Avatar nombre={u.nombre} tamano={36} />
+                        <span>
+                          <span className="block font-semibold text-tinta">{u.nombre}</span>
+                          <span className="block text-xs text-tinta-3">{u.email}</span>
+                        </span>
+                      </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td>
                       <select
                         aria-label={`Rol de ${u.nombre}`}
                         value={u.rol}
                         disabled={!u.activo || ocupado !== null}
                         onChange={(e) => patch(u, { rol: e.target.value }, `Rol de ${u.email} actualizado. Sus sesiones abiertas se cerraron.`)}
-                        className="rounded-md border border-aether-border bg-aether-bg px-2 py-1 text-slate-200"
+                        className="rounded-full border-0 bg-suave px-3 py-1.5 text-tinta"
                         style={{ fontSize: 12 }}
                       >
                         {Object.entries(ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
                     </td>
-                    <td className="px-4 py-3">
+                    <td>
                       {u.rol !== "team" ? (
-                        <span className="text-slate-600">—</span>
+                        <span className="text-tinta-3">—</span>
                       ) : enEdicion ? (
                         <div className="space-y-2">
                           <SelectorSupervisores admins={admins} valor={editando.sup} onCambio={(v) => setEditando({ id: u.id, sup: v })} />
@@ -191,11 +197,11 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                                 const ok = await patch(u, { supervisores: editando.sup }, `Supervisión de ${u.nombre} actualizada.`);
                                 if (ok) setEditando(null);
                               }}
-                              className="rounded-md bg-aether-accent px-2 py-1 font-semibold text-white"
+                              className="rounded-full bg-indigo px-3 py-1 text-xs font-semibold text-white"
                             >
                               Guardar
                             </button>
-                            <button type="button" onClick={() => setEditando(null)} className="px-2 py-1 text-slate-400">Cancelar</button>
+                            <button type="button" onClick={() => setEditando(null)} className="boton-texto px-2.5 py-1 text-xs">Cancelar</button>
                           </div>
                         </div>
                       ) : (
@@ -206,28 +212,28 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                           className="group flex flex-wrap items-center gap-1 text-left"
                         >
                           {u.supervisores.length === 0 ? (
-                            <span className="text-aether-warning">Sin supervisor</span>
+                            <span className="text-alerta-tinta">Sin supervisor</span>
                           ) : (
                             u.supervisores.map((s) => (
-                              <span key={s.id} className={cx("rounded-full px-2 py-0.5 text-[11px]", s.id === yo.id ? "bg-aether-accent/15 text-aether-accent-soft" : "bg-white/5 text-slate-300")}>
+                              <span key={s.id} className={cx("rounded-full px-2.5 py-0.5 text-xs font-medium", s.id === yo.id ? "bg-indigo-suave text-indigo-tinta" : "bg-suave text-tinta-2")}>
                                 {s.id === yo.id ? "Yo" : s.nombre}
                               </span>
                             ))
                           )}
-                          {u.activo ? <Pencil size={11} className="text-slate-600 group-hover:text-slate-300" /> : null}
+                          {u.activo ? <Pencil size={13} className="text-tinta-3 group-hover:text-indigo" /> : null}
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={cx("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold", est.clase)}>
+                    <td>
+                      <span className={cx("chip", est.clase)}>
                         {est.texto === "Bloqueada" && <Lock size={10} />}
                         {est.texto}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-400">{fechaHora(u.ultimo_acceso)}</td>
-                    <td className="px-4 py-3">
+                    <td className="text-tinta-3">{fechaHora(u.ultimo_acceso)}</td>
+                    <td>
                       <div className="flex items-center justify-end gap-1">
-                        {ocupado === u.id && <LoaderCircle size={14} className="mr-1 animate-spin text-slate-400" />}
+                        {ocupado === u.id && <LoaderCircle size={14} className="mr-1 animate-spin text-tinta-3" />}
                         {u.activo ? (
                           <>
                             <button
@@ -235,7 +241,7 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                               title="Volver al código inicial (cierra sus sesiones)"
                               disabled={ocupado !== null}
                               onClick={() => patch(u, { resetear_pin: true }, `Código de ${u.email} reseteado; deberá cambiarlo al ingresar.`)}
-                              className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-white"
+                              className="boton-texto px-2.5 py-1 text-xs"
                             >
                               <RotateCcw size={13} /> Resetear código
                             </button>
@@ -252,7 +258,7 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                                       : `${u.email} tiene registros: se desactivó (sin acceso) para conservar su historial.`;
                                   })
                                 }
-                                className="rounded-md bg-aether-danger px-2 py-1 font-semibold text-white"
+                                className="rounded-full bg-error px-3 py-1 text-xs font-semibold text-white"
                               >
                                 ¿{u.tiene_historial ? "Desactivar" : "Eliminar"}?
                               </button>
@@ -261,7 +267,7 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                                 type="button"
                                 disabled={ocupado !== null}
                                 onClick={() => setConfirmar(u.id)}
-                                className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:bg-aether-danger/10 hover:text-aether-danger"
+                                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-tinta-2 hover:bg-error-fondo hover:text-error-tinta"
                               >
                                 <Trash2 size={13} /> Quitar
                               </button>
@@ -272,7 +278,7 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                             type="button"
                             disabled={ocupado !== null}
                             onClick={() => patch(u, { activo: true, resetear_pin: true }, `${u.email} reactivado con código inicial.`)}
-                            className="rounded-md px-2 py-1 text-aether-accent-soft hover:bg-white/5"
+                            className="rounded-full px-3 py-1 text-xs font-semibold text-indigo-tinta hover:bg-indigo-suave"
                           >
                             Reactivar
                           </button>
@@ -287,7 +293,7 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
         </div>
       )}
       {datos && usuarios.length === 0 && (
-        <p className="tarjeta px-4 py-6 text-center text-xs text-slate-500">{empresa.nombre} aún no tiene cuentas. Agrega la primera arriba.</p>
+        <p className="tarjeta px-6 py-10 text-center text-sm text-tinta-3">{empresa.nombre} aún no tiene cuentas. Agrega la primera arriba.</p>
       )}
     </div>
   );

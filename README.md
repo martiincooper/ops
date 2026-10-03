@@ -1,7 +1,7 @@
 # Aether Ops (`ops.aether.cl`)
 
 Jornadas por objetivos (comenzar con objetivos → terminar con el balance), días no disponibles, compras
-por proyecto, racha, Say-Do y logros, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada
+por proyecto y Say-Do, para **dos empresas en el mismo sitio** (Aether Tech y Datasheq), cada
 una con su propia base de datos. Pensado para un equipo que trabaja **por objetivos, sin horario**. Un solo contenedor: Next.js 15 (standalone) + SQLite (WAL).
 
 - Revisión técnica de la especificación original y decisiones tomadas: [`docs/REVISION.md`](docs/REVISION.md) (en inglés)
@@ -29,19 +29,17 @@ El equipo trabaja por objetivos (boleta de honorarios), así que la aplicación 
 
 1. **Comenzar jornada** (botón en `/checkin`, a cualquier hora y cualquier día): define de 2 a 4 objetivos,
    cada uno con uno o más proyectos. Queda registrada la hora de comienzo.
-2. Mientras trabaja, toca cada objetivo cuando lo logra (confeti y +10 XP).
+2. Mientras trabaja, toca cada objetivo cuando lo logra.
 3. **Terminar jornada**: confirma lo logrado, explica lo pendiente y, si quiere, avisa un bloqueo.
 
 - Una jornada por día. Si alguien olvida terminarla, **queda abierta** (también pasada la medianoche): al
   volver a la app se le pide terminarla antes de comenzar la siguiente.
-- Nada se abre ni se exige por la hora. Fuera de una jornada, la persona ve su tablero: nivel y XP, racha,
-  Say-Do 14 días, su semana, logros y compras.
-- **Racha**: jornadas terminadas seguidas con al menos 75 % de sus objetivos logrados. Los días sin jornada
-  no la cortan; una jornada terminada bajo 75 % la reinicia.
-- **XP**: objetivo logrado +10, jornada terminada +5, jornada perfecta (100 %) +15. Ningún logro depende de
-  la hora (no hay "puntual" ni "madrugador").
+- Nada se abre ni se exige por la hora. Fuera de una jornada, la persona ve su tablero: objetivos del día,
+  % logrado, su semana y sus compras. En `/mi-progreso`: objetivos logrados en 14 días e historial.
+- Sin gamificación: no hay racha, XP, niveles, logros ni confeti. Lo que se mide es el % de objetivos
+  logrados (Say-Do), lo mismo que ve la jefatura.
 - **Días no disponibles** (ícono de calendario en la cabecera): días completos en que la persona no trabajará,
-  para que la jefatura planifique. No afectan la racha. No se puede comenzar jornada un día marcado.
+  para que la jefatura planifique. No cuentan en el Say-Do. No se puede comenzar jornada un día marcado.
 
 **Qué ve la jefatura**: en el standup, la última jornada de cada persona (en curso o terminada, con sus
 objetivos y resultado), bloqueos y Say-Do, **sin horas de comienzo ni de término** y sin alertas por días sin
@@ -51,6 +49,13 @@ jornada. «Disponibilidad 14 días» muestra quién marcó días como no disponi
 > subordinación que pueden usarse para calificar la relación como laboral. Por eso la aplicación no exige
 > horas, no las muestra a la jefatura y no las usa en ninguna métrica. Esto no es asesoría legal: revisa el
 > uso concreto con tu abogado o contador.
+
+## Diseño
+
+Tema claro lavanda e índigo, tarjetas redondeadas y tipografía Inter (incluida en la aplicación, sin
+depender de Google Fonts). El equipo usa la app desde el celular (`/checkin`, `/mi-progreso`); jefatura tiene
+una barra lateral en escritorio y pestañas en el celular; gerencia, un tablero que funciona en ambos. Los
+estados siempre llevan ícono y texto, no solo color.
 
 ## Compras
 
@@ -87,10 +92,10 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | Incluido | Próxima etapa |
 |---|---|
 | Ingreso con email + código de 6 dígitos (inicial `000000`, cambio obligatorio, bloqueo por intentos) | Editor de feriados (vienen cargados los de Chile 2026) |
-| `/checkin`: comenzar / terminar jornada sin horario, tablero con progreso, nivel, logros y confeti | |
+| `/checkin`: comenzar / terminar jornada sin horario, tablero con objetivos del día, % logrado y semana | |
 | Objetivos (2 a 4 por día) y compras con uno o más proyectos | |
 | Días no disponibles (días completos) para la planificación | |
-| `/mi-progreso`: racha, historial de 14 días, mis compras, cambio de código | |
+| `/mi-progreso`: objetivos logrados en 14 días, historial, mis compras, cambio de código | |
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
 | `/exec`: 4 indicadores SMART (plazo, costo vs estimación BOM, objetivos diarios del equipo, bloqueos) con metas editables | |
 
@@ -306,6 +311,13 @@ Estructura de datos:
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 
+### Actualizar desde la versión 0.5
+
+Sin cambios de base de datos: actualiza y reinicia. Cambia el diseño completo (tema claro) y se eliminan la
+racha, la XP, los niveles, los logros y el confeti. Las funciones y reglas de jornada, compras, standup y
+gerencia son las mismas. Nueva dependencia: `@fontsource-variable/inter` (`npm ci` la instala; con Docker no
+hay que hacer nada).
+
 ### Actualizar desde la versión 0.4
 
 Se agrega la tabla `metas` (migración automática al arrancar). En `/admin` → **Proyectos** la columna
@@ -316,7 +328,6 @@ Se agrega la tabla `metas` (migración automática al arrancar). En `/admin` →
 Sin cambios de base de datos: actualiza y reinicia. Lo que cambia:
 
 - Desaparecen las ventanas de 08:30 y 17:00; la jornada se comienza y termina con botones.
-- La racha y la XP se recalculan con las reglas por objetivos (los cierres antiguos fuera de hora ahora cuentan).
 - Las ausencias parciales antiguas dejan de mostrarse; las de día completo pasan a ser días no disponibles.
 - Las variables `VENTANA_MANANA`, `VENTANA_TARDE` y `JORNADA` ya no se usan (puedes quitarlas del `.env`).
 
@@ -357,7 +368,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, racha por objetivos, Say-Do, XP, esquema y migración, disponibilidad, reparto, gerencia (27 pruebas)
+npm run test:logica       # zona horaria, Say-Do por objetivos, esquema y migración, disponibilidad, reparto, gerencia (24 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, eliminar proyectos, tableros (42 pruebas)
@@ -373,14 +384,15 @@ docker rm -f aether-test
 ## 7. Estructura
 
 ```
+app/globals.css     sistema de diseño (colores, tarjetas, botones)
 app/                páginas (login, cambiar-pin, checkin, mi-progreso, admin, exec) y api/ (route handlers)
-components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, ModalNoDisponible, Anillo)
-components/equipo/  jornada del integrante (comenzar, terminar, tablero, confeti, logros)
+components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, ModalNoDisponible, Anillo, ui)
+components/equipo/  jornada del integrante (comenzar, terminar, tablero)
 components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores)
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
-lib/metricas.ts     reglas de racha y Say-Do (por objetivos, sin horario)
+lib/metricas.ts     Say-Do e historial (por objetivos, sin horario)
 lib/tableros.ts     cálculos de standup, disponibilidad, compras e indicadores de gerencia
 lib/metas.ts        metas de los indicadores de gerencia (por empresa)
 lib/supervision.ts  administradores ↔ integrantes supervisados

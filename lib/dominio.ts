@@ -2,7 +2,6 @@ import "server-only";
 import type { DB } from "./db";
 import type { Usuario } from "./auth";
 import type { Empresa } from "./empresas";
-import { calcularJuego, type Juego } from "./juego";
 import { calcularProgreso, type DiaResumen } from "./metricas";
 import { TZ_NEGOCIO, fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
 
@@ -77,11 +76,9 @@ export interface EstadoDia {
   /** Proyecto activo usado más recientemente: preselección en los formularios. */
   ultimo_proyecto_id: string | null;
   gastos_hoy: GastoResumen[];
-  racha: number;
   saydo_14d: number | null;
   /** Últimos 7 días, del más antiguo a hoy. */
   semana: DiaResumen[];
-  juego: Juego;
 }
 
 export function proyectosActivos(db: DB): ProyectoActivo[] {
@@ -199,9 +196,7 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
     proyectos,
     ultimo_proyecto_id: recientes.find((r) => activos.has(r.proyecto_id))?.proyecto_id ?? null,
     gastos_hoy: gastosRecientes(db, u.id, 20).filter((g) => fechaLocal(g.creado_en) === hoy),
-    racha: progreso.racha,
     saydo_14d: progreso.saydo_14d,
     semana: progreso.historial.slice(0, 7).reverse(),
-    juego: calcularJuego(db, u.id, hoy, inicio),
   };
 }

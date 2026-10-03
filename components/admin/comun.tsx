@@ -53,8 +53,8 @@ export function Aviso({ aviso }: { aviso: AvisoTipo }) {
     <p
       role="status"
       className={cx(
-        "mb-4 rounded-lg px-3 py-2 text-xs",
-        aviso.tipo === "ok" ? "bg-aether-success/10 text-aether-success" : "bg-aether-danger/10 text-aether-danger",
+        "mb-4 rounded-2xl px-4 py-3 text-sm",
+        aviso.tipo === "ok" ? "bg-ok-fondo text-ok-tinta" : "bg-error-fondo text-error-tinta",
       )}
     >
       {aviso.texto}
@@ -63,13 +63,18 @@ export function Aviso({ aviso }: { aviso: AvisoTipo }) {
 }
 
 export function Cargando({ cargando, error }: { cargando: boolean; error: string | null }) {
-  if (error) return <p className="rounded-lg bg-aether-danger/10 px-3 py-2 text-xs text-aether-danger">{error}</p>;
+  if (error) return <p className="rounded-2xl bg-error-fondo px-4 py-3 text-sm text-error-tinta">{error}</p>;
   if (!cargando) return null;
   return (
-    <p className="flex items-center gap-2 py-6 text-xs text-slate-500">
-      <LoaderCircle size={14} className="animate-spin" /> Cargando…
+    <p className="flex items-center gap-2 py-6 text-sm text-tinta-3">
+      <LoaderCircle size={16} className="animate-spin" /> Cargando…
     </p>
   );
+}
+
+/** Mensaje de lista vacía dentro de una tarjeta. */
+export function Vacio({ children }: { children: React.ReactNode }) {
+  return <p className="tarjeta px-6 py-10 text-center text-sm text-tinta-3">{children}</p>;
 }
 
 /** Ejecuta una acción con estado ocupado + aviso. */

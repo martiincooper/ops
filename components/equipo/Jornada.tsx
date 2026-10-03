@@ -1,12 +1,11 @@
 "use client";
 
+import { CircleCheck, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import ModalNoDisponible from "@/components/ModalNoDisponible";
 import type { EstadoDia } from "@/lib/dominio";
 import { api } from "@/lib/cliente";
 import Cabecera from "./Cabecera";
-import Celebracion, { type Mensaje } from "./Celebracion";
-import Confeti, { type Disparo } from "./Confeti";
 import FormComienzo from "./FormComienzo";
 import FormTermino from "./FormTermino";
 import Tablero from "./Tablero";
@@ -19,8 +18,7 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
   const [estado, setEstado] = useState(inicial);
   const [abierto, setAbierto] = useState<"comenzar" | "terminar" | null>(null);
   const [modal, setModal] = useState(false);
-  const [disparo, setDisparo] = useState<Disparo | null>(null);
-  const [mensaje, setMensaje] = useState<Mensaje | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
 
   const recargar = useCallback(async () => {
     try {
@@ -37,18 +35,18 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
     return () => document.removeEventListener("visibilitychange", alVolver);
   }, [recargar]);
 
+  useEffect(() => {
+    if (!aviso) return;
+    const t = setTimeout(() => setAviso(null), 5000);
+    return () => clearTimeout(t);
+  }, [aviso]);
+
   const vista =
     abierto === "comenzar" && estado.fase === "sin_iniciar"
       ? "comenzar"
       : abierto === "terminar" && estado.fase === "en_curso"
         ? "terminar"
         : "tablero";
-
-  const celebrar = useCallback((d: Omit<Disparo, "id">, m?: Omit<Mensaje, "id">) => {
-    const id = Date.now();
-    setDisparo({ ...d, id });
-    if (m) setMensaje({ ...m, id });
-  }, []);
 
   const cerrarModal = useCallback(() => setModal(false), []);
   const volver = () => {
@@ -57,10 +55,18 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
   };
 
   return (
-    <div className="mx-auto min-h-dvh max-w-md border-x border-aether-border px-4 pb-24 pt-[env(safe-area-inset-top)]">
-      <Confeti disparo={disparo} />
-      <Celebracion mensaje={mensaje} />
-      <Cabecera estado={estado} nombre={nombre} onNoDisponible={() => setModal(true)} compacta={vista !== "tablero"} />
+    <div className="mx-auto min-h-dvh max-w-lg px-4 pb-16 pt-[max(env(safe-area-inset-top),1rem)]">
+      {vista === "tablero" && <Cabecera estado={estado} nombre={nombre} onNoDisponible={() => setModal(true)} />}
+
+      {aviso && (
+        <div role="status" className="mb-4 flex animate-aparecer items-center gap-2 rounded-2xl bg-ok-fondo px-4 py-3 text-sm font-medium text-ok-tinta">
+          <CircleCheck size={18} className="shrink-0" />
+          <span className="flex-1">{aviso}</span>
+          <button type="button" onClick={() => setAviso(null)} aria-label="Cerrar aviso" className="rounded-full p-1 hover:bg-white/60">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {vista === "comenzar" && (
         <FormComienzo
@@ -69,7 +75,7 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
           onListo={(e) => {
             setEstado(e);
             volver();
-            celebrar({ tipo: "grande" }, { titulo: "¡Jornada en marcha!", detalle: `${e.tareas.length} objetivos. ¡A darle!` });
+            setAviso(`Jornada comenzada con ${e.tareas.length} objetivos.`);
           }}
         />
       )}
@@ -81,17 +87,9 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
           onListo={(e) => {
             setEstado(e);
             volver();
-            const post = e.tareas.filter((t) => t.estado === "postergado_ooo").length;
             const comp = e.tareas.filter((t) => t.estado === "completado").length;
-            const total = e.tareas.length - post;
-            const pct = total ? Math.round((comp / total) * 100) : 0;
-            celebrar(
-              { tipo: pct >= 75 ? "grande" : "chico" },
-              {
-                titulo: pct === 100 ? "¡Jornada perfecta!" : pct >= 75 ? "¡Jornada terminada!" : "Jornada terminada",
-                detalle: `${comp} de ${total} objetivos logrados${e.racha ? ` · racha de ${e.racha}` : ""}`,
-              },
-            );
+            const total = e.tareas.filter((t) => t.estado !== "postergado_ooo").length;
+            setAviso(`Jornada terminada: ${comp} de ${total} objetivos logrados.`);
           }}
         />
       )}
@@ -101,11 +99,11 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
           estado={estado}
           onCambio={setEstado}
           onAbrir={(cual) => {
+            setAviso(null);
             setAbierto(cual);
             window.scrollTo({ top: 0 });
           }}
           onNoDisponible={() => setModal(true)}
-          celebrar={celebrar}
         />
       )}
 

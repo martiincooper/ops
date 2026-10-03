@@ -1,8 +1,8 @@
 "use client";
 
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { AlertTriangle, LoaderCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { api, clp, cx, miles } from "@/lib/cliente";
+import { api, clp, miles } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, useAccion, useDatos, type EmpresaPublica } from "./comun";
 
 interface Proyecto {
@@ -52,7 +52,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
             return `Proyecto creado en ${empresa.nombre}.`;
           });
         }}
-        className="tarjeta mb-5 grid grid-cols-[1.2fr_2fr_1.2fr_1fr_1fr_auto] items-end gap-3 p-4"
+        className="tarjeta mb-6 grid gap-3 p-5 md:grid-cols-3 xl:grid-cols-[1.2fr_2fr_1.2fr_1fr_1fr_auto] xl:items-end"
       >
         <div>
           <label htmlFor="p-codigo" className="etiqueta">Código</label>
@@ -74,7 +74,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
           <label htmlFor="p-entrega" className="etiqueta">Entrega objetivo</label>
           <input id="p-entrega" type="date" required min={inicio} value={entrega} onChange={(e) => setEntrega(e.target.value)} className="campo text-sm" />
         </div>
-        <button type="submit" disabled={ocupado !== null} className="flex h-[46px] items-center gap-1.5 rounded-lg bg-aether-accent px-4 text-xs font-bold text-white disabled:opacity-50">
+        <button type="submit" disabled={ocupado !== null} className="boton h-[50px] px-5">
           {ocupado === "nuevo" && <LoaderCircle size={14} className="animate-spin" />} Crear
         </button>
       </form>
@@ -82,37 +82,44 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
       <Aviso aviso={aviso} />
       <Cargando cargando={cargando && !datos} error={error} />
       {datos && (
-        <div className="tarjeta overflow-hidden">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-aether-border text-[11px] uppercase tracking-wide text-slate-500">
+        <div className="tarjeta overflow-x-auto">
+          <table className="tabla">
+            <thead>
               <tr>
-                <th className="px-4 py-3 font-medium">Código</th>
-                <th className="px-4 py-3 font-medium">Nombre</th>
-                <th className="px-4 py-3 text-right font-medium">Costo estimado BOM</th>
-                <th className="px-4 py-3 font-medium">Inicio</th>
-                <th className="px-4 py-3 font-medium">Entrega objetivo</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3" />
+                <th>Código</th>
+                <th>Nombre</th>
+                <th className="text-right">Costo estimado BOM</th>
+                <th>Inicio</th>
+                <th>Entrega objetivo</th>
+                <th>Estado</th>
+                <th />
               </tr>
             </thead>
-            <tbody className="divide-y divide-aether-border">
+            <tbody>
               {proyectos.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="py-10 text-center text-tinta-3">
                     Sin proyectos. El equipo de {empresa.nombre} necesita al menos uno activo para registrar objetivos.
                   </td>
                 </tr>
               )}
               {proyectos.map((p) => (
                 <tr key={p.id}>
-                  <td className="px-4 py-3 font-mono font-semibold text-aether-accent-soft">{p.codigo}</td>
-                  <td className="px-4 py-3 text-white">{p.nombre}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-300">{clp(p.presupuesto_clp)}</td>
-                  <td className="px-4 py-3 text-slate-400">{p.fecha_inicio}</td>
-                  <td className={cx("px-4 py-3", p.fecha_entrega_objetivo < hoy && !["entregado", "pausado"].includes(p.estado) ? "text-aether-danger" : "text-slate-400")}>
-                    {p.fecha_entrega_objetivo}
+                  <td className="font-mono font-semibold text-indigo-tinta">{p.codigo}</td>
+                  <td className="font-medium text-tinta">{p.nombre}</td>
+                  <td className="text-right text-tinta-2">{clp(p.presupuesto_clp)}</td>
+                  <td className="text-tinta-3">{p.fecha_inicio}</td>
+                  <td>
+                    {p.fecha_entrega_objetivo < hoy && !["entregado", "pausado"].includes(p.estado) ? (
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-error-tinta">
+                        <AlertTriangle size={14} aria-hidden /> {p.fecha_entrega_objetivo}
+                        <span className="text-xs font-medium">vencida</span>
+                      </span>
+                    ) : (
+                      <span className="text-tinta-3">{p.fecha_entrega_objetivo}</span>
+                    )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td>
                     <select
                       aria-label={`Estado de ${p.codigo}`}
                       value={p.estado}
@@ -124,13 +131,13 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                           return `${p.codigo}: ${e.target.value}.`;
                         })
                       }
-                      className="rounded-md border border-aether-border bg-aether-bg px-2 py-1 capitalize text-slate-200"
+                      className="rounded-full border-0 bg-suave px-3 py-1.5 capitalize text-tinta"
                       style={{ fontSize: 12 }}
                     >
                       {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="text-right">
                     {confirmar === p.id ? (
                       <button
                         type="button"
@@ -147,7 +154,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                           })
                         }
                         title="Borra también los objetivos y compras registrados solo para este proyecto. No se puede deshacer."
-                        className="rounded-md bg-aether-danger px-2 py-1 text-[11px] font-semibold text-white"
+                        className="rounded-full bg-error px-3 py-1 text-xs font-semibold text-white"
                       >
                         ¿Eliminar?
                       </button>
@@ -157,7 +164,7 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                         disabled={ocupado !== null}
                         onClick={() => setConfirmar(p.id)}
                         aria-label={`Eliminar ${p.codigo}`}
-                        className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-400 hover:bg-aether-danger/10 hover:text-aether-danger disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-tinta-2 hover:bg-error-fondo hover:text-error-tinta disabled:opacity-50"
                       >
                         <Trash2 size={13} />
                       </button>

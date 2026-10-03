@@ -76,34 +76,30 @@ export default function CambiarPin({ obligatorio, nombre }: { obligatorio: boole
   };
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-10 pt-[max(env(safe-area-inset-top),2.5rem)]">
-      {!obligatorio && (
-        <Link href="/" className="mb-6 flex items-center gap-1.5 text-xs text-slate-400">
-          <ArrowLeft size={14} /> Volver
-        </Link>
-      )}
-      <div className="mb-8 text-center">
-        <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-aether-accent/15 text-aether-accent-soft">
-          <KeyRound size={20} />
-        </span>
-        {obligatorio ? (
-          <>
-            <h1 className="text-lg font-bold text-white">Hola, {nombre.split(" ")[0]}</h1>
-            <p className="mt-1 text-xs text-slate-400">Antes de continuar, reemplaza el código inicial por uno personal.</p>
-          </>
-        ) : (
-          <h1 className="text-lg font-bold text-white">Cambiar código</h1>
+    <main className="flex min-h-dvh items-start justify-center px-4 pb-10 pt-[max(env(safe-area-inset-top),2rem)] sm:items-center sm:pt-10">
+      <div className="w-full max-w-md">
+        {!obligatorio && (
+          <Link href="/" className="boton-texto mb-4">
+            <ArrowLeft size={16} /> Volver
+          </Link>
         )}
+        <div className="tarjeta px-6 py-8">
+          <div className="mb-6 text-center">
+            <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-suave text-indigo-tinta">
+              <KeyRound size={22} />
+            </span>
+            {obligatorio ? (
+              <>
+                <h1 className="text-xl font-semibold text-tinta">Hola, {nombre.split(" ")[0]}</h1>
+                <p className="mt-1 text-sm text-tinta-3">Antes de continuar, reemplaza el código inicial por uno personal.</p>
+              </>
+            ) : (
+              <h1 className="text-xl font-semibold text-tinta">Cambiar código</h1>
+            )}
+          </div>
+          <PinPad key={paso} titulo={textos[paso][0]} subtitulo={textos[paso][1]} onCompleto={completo} ocupado={ocupado} error={error} reinicio={reinicio} />
+        </div>
       </div>
-      <PinPad
-        key={paso}
-        titulo={textos[paso][0]}
-        subtitulo={textos[paso][1]}
-        onCompleto={completo}
-        ocupado={ocupado}
-        error={error}
-        reinicio={reinicio}
-      />
     </main>
   );
 }

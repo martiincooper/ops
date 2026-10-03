@@ -1,4 +1,4 @@
-// Pruebas de reglas puras: zona horaria, racha por objetivos, Say-Do, tableros, juego, migraciones, códigos. Ejecutar: npm run test:logica
+// Pruebas de reglas puras: zona horaria, Say-Do por objetivos, tableros, migraciones, códigos. Ejecutar: npm run test:logica
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
@@ -8,7 +8,6 @@ import { repartirMonto } from "../lib/reparto";
 import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
 import { METAS_DEFECTO, esquemaMetas, guardarMetas, leerMetas } from "../lib/metas";
-import { calcularJuego, nivelDe, xpParaNivel } from "../lib/juego";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
 
 let ok = 0;
@@ -62,50 +61,40 @@ async function main() {
   });
   await prueba("sumarDias cruza meses", () => assert.equal(sumarDias("2026-10-01", -1), "2026-09-30"));
 
-  console.log("Racha y Say-Do (por objetivos, sin horario)");
+  console.log("Say-Do por objetivos (sin horario)");
   const hoy = "2026-10-01"; // jueves
   const db = dbNueva();
-  bitacora(db, "2026-09-24", "ppp", null); //                  jue: nunca terminada (datos antiguos) → 0/3, corta
-  bitacora(db, "2026-09-25", "cc", "2026-09-25T22:45:00Z"); //   vie: terminada 19:45 → la hora no importa, suma
-  bitacora(db, "2026-09-28", "cccc", "2026-09-29T04:30:00Z"); // lun: terminada 01:30 del día siguiente, suma
+  bitacora(db, "2026-09-24", "ppp", null); //                  jue: nunca terminada (datos antiguos) → 0/3
+  bitacora(db, "2026-09-25", "cc", "2026-09-25T22:45:00Z"); //   vie: terminada 19:45 → la hora no importa
+  bitacora(db, "2026-09-28", "cccc", "2026-09-29T04:30:00Z"); // lun: terminada 01:30 del día siguiente
   db.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo) VALUES ('o1','u1','2026-09-29',1)").run(); // mar: no disponible
-  bitacora(db, "2026-09-30", "cccp", "2026-09-30T15:00:00Z"); // mié: 75 %, suma
+  bitacora(db, "2026-09-30", "cccp", "2026-09-30T15:00:00Z"); // mié: 3/4
 
-  await prueba("racha = 3 (mié + lun + vie; días sin jornada no cortan; la jornada antigua sin terminar sí)", () => {
-    assert.equal(calcularProgreso(db, "u1", hoy, "2026-09-01").racha, 3);
-  });
-  await prueba("jornada en curso: no cuenta en la racha ni en Say-Do hasta terminarla", () => {
+  await prueba("jornada en curso: no cuenta en Say-Do hasta terminarla", () => {
     bitacora(db, hoy, "cc", null);
     let p = calcularProgreso(db, "u1", hoy, "2026-09-01");
-    assert.equal(p.racha, 3);
     assert.equal(p.completadas_14d, 9); // (0+2+4+3)/(3+2+4+4)
     assert.equal(p.comprometidas_14d, 13);
     assert.equal(p.hoy.registro, "abierto");
     db.prepare("UPDATE bitacoras SET checkout_tarde = '2026-10-01T21:00:00Z' WHERE fecha = ?").run(hoy);
     p = calcularProgreso(db, "u1", hoy, "2026-09-01");
-    assert.equal(p.racha, 4);
     assert.equal(p.saydo_14d, 73); // 11/15
     assert.equal(p.jornadas_14d, 5);
+    assert.equal(p.historial.find((d) => d.fecha === "2026-09-29")!.tipo, "ooo");
+    assert.equal(p.historial.find((d) => d.fecha === "2026-09-28")!.cierre_local, "01:30");
   });
-  await prueba("una jornada terminada bajo 75 % reinicia la racha", () => {
+  await prueba("la ventana es de 14 días: jornadas anteriores no cuentan", () => {
     const d = dbNueva();
-    bitacora(d, "2026-09-28", "cc", "2026-09-28T20:00:00Z");
-    bitacora(d, "2026-09-29", "cpp", "2026-09-29T20:00:00Z"); // 33 %
-    bitacora(d, "2026-09-30", "cc", "2026-09-30T20:00:00Z");
-    assert.equal(calcularProgreso(d, "u1", hoy, "2026-09-01").racha, 1);
-  });
-  await prueba("semanas sin trabajar no cortan la racha", () => {
-    const d = dbNueva();
-    bitacora(d, "2026-09-07", "cc", "2026-09-07T20:00:00Z");
-    bitacora(d, "2026-09-30", "cc", "2026-09-30T20:00:00Z");
-    assert.equal(calcularProgreso(d, "u1", hoy, "2026-09-01").racha, 2);
+    bitacora(d, "2026-09-17", "pppp", "2026-09-17T20:00:00Z"); // 15 días antes: fuera
+    bitacora(d, "2026-09-18", "cc", "2026-09-18T20:00:00Z"); //   14 días: dentro
+    const p = calcularProgreso(d, "u1", hoy, "2026-09-01");
+    assert.deepEqual([p.completadas_14d, p.comprometidas_14d, p.historial.length], [2, 2, 14]);
   });
   await prueba("la jornada en curso puede ser de ayer (pasada la medianoche) y sigue sin contar", () => {
     const d = dbNueva();
     bitacora(d, "2026-09-29", "cc", "2026-09-29T20:00:00Z");
     bitacora(d, "2026-09-30", "cp", null); // comenzada ayer, aún abierta
     const p = calcularProgreso(d, "u1", hoy, "2026-09-01");
-    assert.equal(p.racha, 1);
     assert.equal(p.comprometidas_14d, 2);
     assert.equal(p.historial[1].registro, "abierto");
   });
@@ -115,7 +104,11 @@ async function main() {
     const p = calcularProgreso(d2, "u1", hoy, "2026-09-01");
     assert.equal(p.hoy.comprometidas, 1);
     assert.equal(p.hoy.saydo, 100);
-    assert.equal(p.racha, 1);
+  });
+  await prueba("días antes de crear la cuenta no aparecen en el historial", () => {
+    const d4 = dbNueva();
+    bitacora(d4, "2026-09-30", "cc", "2026-09-30T21:00:00Z");
+    assert.equal(calcularProgreso(d4, "u1", hoy, "2026-09-30").historial.length, 2);
   });
 
   console.log("Esquema");
@@ -260,33 +253,6 @@ async function main() {
     d.prepare("UPDATE bitacoras SET bloqueo_resuelto_en = '2026-10-01T12:00:00Z' WHERE id = 'bx'").run();
     s = standup(d, hoy, equipoActivo(d));
     assert.ok(s.every((f) => f.bloqueos.length === 0));
-  });
-
-  console.log("Juego: XP, nivel y logros");
-  await prueba("niveles: 0→1, 100→2, 300→3, 600→4", () => {
-    assert.deepEqual([1, 2, 3, 4, 5].map(xpParaNivel), [0, 100, 300, 600, 1000]);
-    assert.deepEqual([0, 99, 100, 299, 300, 650].map(nivelDe), [1, 1, 2, 2, 3, 4]);
-  });
-  await prueba("XP = objetivos×10 + jornadas terminadas×5 + jornadas perfectas×15 (la hora no suma); logros", () => {
-    const d = dbNueva();
-    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p2','AETH-02','Fuente',1,'2026-09-01','2026-12-31')").run();
-    bitacora(d, "2026-09-29", "cp", "2026-09-30T03:00:00Z"); // 1/2, terminada a medianoche
-    bitacora(d, "2026-09-30", "ccc", "2026-09-30T13:00:00Z"); // 3/3 → perfecta
-    d.prepare("INSERT INTO tarea_proyectos (tarea_id, proyecto_id) SELECT id, 'p2' FROM tareas_diarias WHERE bitacora_id = ? AND orden = 0").run(`b${n}`);
-    bitacora(d, hoy, "c", null); // en curso: su objetivo logrado suma; la jornada aún no
-    const j = calcularJuego(d, "u1", hoy, "2026-09-01");
-    assert.equal(j.objetivos_completados, 5);
-    assert.equal(j.jornadas_perfectas, 1);
-    assert.equal(j.xp, 5 * 10 + 2 * 5 + 1 * 15);
-    assert.equal(j.nivel, 1);
-    assert.equal(j.mejor_racha, 1);
-    const l = Object.fromEntries(j.logros.map((x) => [x.clave, x]));
-    assert.equal(l.primera.logrado, true);
-    assert.equal(l.perfecto.logrado, true);
-    assert.equal(l.constante.progreso, 2);
-    assert.equal(l.todoterreno.progreso, 2);
-    assert.equal(l.racha5.logrado, false);
-    assert.ok(!("madrugador" in l) && !("puntual" in l));
   });
 
   console.log("Migración v1 → v2 (compras simples, varios proyectos)");

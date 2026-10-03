@@ -2,6 +2,7 @@
 
 import { ArrowLeft, LoaderCircle } from "lucide-react";
 import { useCallback, useState } from "react";
+import Marca from "@/components/Marca";
 import PinPad from "@/components/PinPad";
 import { ErrorApi, api } from "@/lib/cliente";
 
@@ -35,71 +36,71 @@ export default function Login() {
   );
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-10 pt-[max(env(safe-area-inset-top),3rem)]">
-      <div className="mb-10 text-center">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-aether-muted">Aether</p>
-        <h1 className="mt-1 text-2xl font-bold text-white">Operaciones</h1>
-      </div>
+    <main className="flex min-h-dvh items-start justify-center px-4 pb-10 pt-[max(env(safe-area-inset-top),2.5rem)] sm:items-center sm:pt-10">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex justify-center">
+          <Marca />
+        </div>
 
-      {paso === "email" ? (
-        <form
-          className="animate-aparecer space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Ingresa un email válido");
-            setEmail(email.trim().toLowerCase());
-            setError(null);
-            setPaso("pin");
-          }}
-        >
-          <div>
-            <label htmlFor="email" className="etiqueta">Email de trabajo</label>
-            <input
-              id="email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              autoCapitalize="none"
-              autoFocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="nombre@aether.cl"
-              className="campo"
-            />
-          </div>
-          {error && <p className="text-xs text-aether-danger">{error}</p>}
-          <button type="submit" className="boton-primario">Continuar</button>
-          <p className="pt-2 text-center text-xs text-slate-500">
-            ¿Primer ingreso? Usa el código inicial que te entregó tu jefatura; se te pedirá cambiarlo.
-          </p>
-        </form>
-      ) : (
-        <div className="animate-aparecer">
-          <button
-            type="button"
-            onClick={() => {
-              setPaso("email");
-              setError(null);
-            }}
-            className="mb-6 flex items-center gap-1.5 text-xs text-slate-400"
-          >
-            <ArrowLeft size={14} /> {email}
-          </button>
-          <PinPad
-            titulo="Ingresa tu código"
-            subtitulo="6 dígitos"
-            onCompleto={enviarPin}
-            ocupado={ocupado}
-            error={error}
-            reinicio={reinicio}
-          />
-          {ocupado && (
-            <p className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400">
-              <LoaderCircle size={14} className="animate-spin" /> Verificando…
-            </p>
+        <div className="tarjeta px-6 py-8 sm:px-8">
+          {paso === "email" ? (
+            <form
+              className="animate-aparecer space-y-5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Ingresa un email válido");
+                setEmail(email.trim().toLowerCase());
+                setError(null);
+                setPaso("pin");
+              }}
+            >
+              <div>
+                <h1 className="text-2xl font-semibold text-tinta">Ingresar</h1>
+                <p className="mt-1 text-sm text-tinta-3">Con tu email de trabajo y tu código de 6 dígitos.</p>
+              </div>
+              <div>
+                <label htmlFor="email" className="etiqueta">Email de trabajo</label>
+                <input
+                  id="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoFocus
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="nombre@empresa.cl"
+                  className="campo"
+                />
+              </div>
+              {error && <p className="rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
+              <button type="submit" className="boton-primario">Continuar</button>
+              <p className="text-center text-sm text-tinta-3">
+                ¿Primer ingreso? Usa el código inicial que te entregó tu jefatura; se te pedirá cambiarlo.
+              </p>
+            </form>
+          ) : (
+            <div className="animate-aparecer">
+              <button
+                type="button"
+                onClick={() => {
+                  setPaso("email");
+                  setError(null);
+                }}
+                className="boton-texto -ml-3 mb-4"
+              >
+                <ArrowLeft size={16} /> {email}
+              </button>
+              <PinPad titulo="Ingresa tu código" subtitulo="6 dígitos" onCompleto={enviarPin} ocupado={ocupado} error={error} reinicio={reinicio} />
+              {ocupado && (
+                <p className="mt-6 flex items-center justify-center gap-2 text-sm text-tinta-3">
+                  <LoaderCircle size={16} className="animate-spin" /> Verificando…
+                </p>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
     </main>
   );
 }

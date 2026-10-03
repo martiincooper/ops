@@ -1,9 +1,9 @@
 "use client";
 
-import { CircleCheck, Circle, Flag, LifeBuoy, LoaderCircle } from "lucide-react";
+import { ArrowLeft, Check, Flag, LifeBuoy, LoaderCircle } from "lucide-react";
 import { useMemo, useState } from "react";
-import Anillo from "@/components/Anillo";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
+import { PASTELES } from "@/components/ui";
 import type { EstadoDia } from "@/lib/dominio";
 import { ErrorApi, api, cx, horaDe } from "@/lib/cliente";
 
@@ -62,68 +62,80 @@ export default function FormTermino({ estado, onListo, onCancelar }: Props) {
   }
 
   return (
-    <section className="animate-aparecer">
-      <div className="mb-5 flex items-center gap-4 rounded-2xl border border-aether-warning/25 bg-gradient-to-br from-aether-warning/10 to-transparent p-4">
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-aether-warning">
-            <Flag size={14} /> Terminar jornada
-          </p>
-          <h1 className="mt-2 text-lg font-bold text-white">¿Cómo te fue?</h1>
-          <p className="mt-1 text-xs text-slate-400">
-            {deOtroDia ? `Jornada del ${j!.fecha_texto.toLowerCase()}. ` : j ? `Comenzaste a las ${horaDe(j.checkin_manana)}. ` : ""}
-            Confirma lo logrado y cuéntanos qué quedó pendiente.
-          </p>
-        </div>
-        <Anillo valor={cuenta.pct} tamano={68} etiqueta="logrado" />
+    <section className="tarjeta animate-aparecer p-5">
+      <div className="mb-5 flex items-center justify-between">
+        <button type="button" onClick={onCancelar} aria-label="Volver al tablero" className="boton-icono">
+          <ArrowLeft size={20} />
+        </button>
+        <span className="chip bg-indigo-suave text-indigo-tinta">{cuenta.pct === null ? "—" : `${cuenta.pct}% logrado`}</span>
       </div>
 
+      <h1 className="text-2xl font-semibold leading-tight text-tinta">Terminar jornada</h1>
+      <p className="mt-2 text-sm text-tinta-2">
+        {deOtroDia ? `Jornada del ${j!.fecha_texto.toLowerCase()}. ` : j ? `Comenzaste a las ${horaDe(j.checkin_manana)}. ` : ""}
+        Confirma lo logrado y cuéntanos qué quedó pendiente.
+      </p>
+
+      <div className="mb-3 mt-6 flex items-baseline justify-between">
+        <h2 className="titulo-seccion">Objetivos</h2>
+        <span className="text-sm text-tinta-3">
+          {cuenta.comp} de {cuenta.total} logrados
+        </span>
+      </div>
       <div className="space-y-3">
-        {estado.tareas.map((t) => {
+        {estado.tareas.map((t, i) => {
           const m = marcas[t.id] ?? { estado: "pendiente" as EstadoTarea, motivo: "" };
           const hecho = m.estado === "completado";
           return (
-            <div key={t.id} className={cx("rounded-xl border transition-colors", hecho ? "border-aether-success/30 bg-aether-success/5" : "border-aether-border bg-aether-card")}>
-              <button type="button" aria-pressed={hecho} onClick={() => marcar(t.id, hecho ? "pendiente" : "completado")} className="flex w-full items-start gap-3 p-3.5 text-left">
-                <span className={cx("mt-0.5 transition-transform", hecho ? "scale-110 text-aether-success" : "text-slate-500")}>
-                  {hecho ? <CircleCheck size={20} className="fill-aether-success text-aether-bg" /> : <Circle size={20} />}
+            <div key={t.id} className={cx("rounded-3xl", PASTELES[i % PASTELES.length])}>
+              <button
+                type="button"
+                aria-pressed={hecho}
+                onClick={() => marcar(t.id, hecho ? "pendiente" : "completado")}
+                className="flex w-full items-start gap-3 p-4 text-left"
+              >
+                <span
+                  className={cx(
+                    "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition",
+                    hecho ? "bg-tinta text-white" : "bg-superficie text-transparent ring-2 ring-tinta/15",
+                  )}
+                >
+                  <Check size={15} strokeWidth={3} />
                 </span>
-                <span className="flex-1">
-                  <CodigosProyecto codigos={t.proyectos.map((p) => p.codigo)} />
-                  <span className={cx("mt-1 block text-sm leading-snug", hecho ? "text-slate-400 line-through" : "font-medium text-slate-100")}>{t.descripcion}</span>
+                <span className="min-w-0 flex-1">
+                  <span className={cx("block font-medium leading-snug text-tinta", hecho && "text-tinta-2 line-through decoration-tinta-3")}>{t.descripcion}</span>
+                  <CodigosProyecto codigos={t.proyectos.map((p) => p.codigo)} className="mt-2" />
                 </span>
               </button>
               {!hecho && (
-                <div className="space-y-2 px-3.5 pb-3.5">
+                <div className="px-4 pb-4">
                   <input
                     aria-label={`Motivo pendiente: ${t.descripcion}`}
                     value={m.motivo}
                     maxLength={280}
                     onChange={(e) => setMarcas((ms) => ({ ...ms, [t.id]: { ...m, motivo: e.target.value } }))}
                     placeholder="¿Por qué quedó pendiente?"
-                    className="campo border-aether-warning/25 py-2 text-sm focus:border-aether-warning"
+                    className="campo bg-superficie py-2.5 text-sm"
                   />
                 </div>
               )}
             </div>
           );
         })}
-
-        <div className="tarjeta p-3.5">
-          <label htmlFor="bloqueo" className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-aether-warning">
-            <LifeBuoy size={14} /> ¿Algo te bloquea y necesitas ayuda? (opcional)
-          </label>
-          <input id="bloqueo" value={bloqueo} maxLength={500} onChange={(e) => setBloqueo(e.target.value)} placeholder="Ej: Esperando componentes de importación" className="campo py-2 text-sm" />
-          <p className="mt-1.5 text-[11px] text-slate-500">Tu jefatura lo verá primero en el standup.</p>
-        </div>
       </div>
 
-      {error && <p role="alert" className="mt-4 rounded-xl border border-aether-danger/30 bg-aether-danger/10 px-3 py-2.5 text-xs text-aether-danger">{error}</p>}
+      <div className="mt-5 rounded-3xl bg-suave p-4">
+        <label htmlFor="bloqueo" className="mb-2 flex items-center gap-2 text-sm font-semibold text-tinta">
+          <LifeBuoy size={16} className="text-alerta" /> ¿Algo te bloquea y necesitas ayuda? <span className="font-normal text-tinta-3">(opcional)</span>
+        </label>
+        <input id="bloqueo" value={bloqueo} maxLength={500} onChange={(e) => setBloqueo(e.target.value)} placeholder="Ej: Esperando componentes de importación" className="campo bg-superficie py-2.5 text-sm" />
+        <p className="mt-2 text-xs text-tinta-3">Tu jefatura lo verá primero en el standup.</p>
+      </div>
 
-      <button type="button" onClick={enviar} disabled={ocupado} className="boton-primario mt-5">
-        {ocupado && <LoaderCircle size={16} className="animate-spin" />} Terminar jornada
-      </button>
-      <button type="button" onClick={onCancelar} className="mx-auto mt-4 block text-xs text-slate-400 hover:text-white">
-        Volver al tablero
+      {error && <p role="alert" className="mt-4 rounded-2xl bg-error-fondo px-4 py-3 text-sm text-error-tinta">{error}</p>}
+
+      <button type="button" onClick={enviar} disabled={ocupado} className="boton-primario mt-6">
+        {ocupado ? <LoaderCircle size={18} className="animate-spin" /> : <Flag size={18} />} Terminar jornada
       </button>
     </section>
   );

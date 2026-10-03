@@ -1,13 +1,11 @@
-// Reglas de Say-Do y racha por objetivos (ver docs/REVISION.md §9). Sin "server-only" para probarlas con tsx.
+// Cumplimiento (Say-Do) por objetivos (ver docs/REVISION.md §9). Sin "server-only" para probarlo con tsx.
 //
 // El equipo trabaja por objetivos, sin horario: cada jornada se comienza y se termina cuando la persona quiere
 // (una por día). Nada de lo que se mide depende de la hora:
-//  - Racha: jornadas terminadas seguidas con ≥ 75 % de sus objetivos logrados. Los días sin jornada no la
-//    cortan; una jornada terminada bajo 75 % la reinicia. La jornada en curso no cuenta todavía.
 //  - Say-Do: objetivos logrados ÷ comprometidos (sin los postergados) de las jornadas de los últimos 14 días,
 //    sin la jornada en curso.
 import type Database from "better-sqlite3";
-import { UMBRAL_RACHA, esFinDeSemana, horaLocal, sumarDias } from "./tiempo";
+import { esFinDeSemana, horaLocal, sumarDias } from "./tiempo";
 
 type DB = Database.Database;
 
@@ -25,7 +23,6 @@ export interface DiaResumen {
   saydo: number | null; // %
   inicio_local: string | null; // HH:MM (solo para la propia persona)
   cierre_local: string | null; // HH:MM
-  cuenta_racha: boolean;
 }
 
 export interface FilaJornada {
@@ -68,18 +65,6 @@ export function idJornadaEnCurso(db: DB, usuarioId: string): string | null {
 }
 
 const comprometidasDe = (j: FilaJornada) => j.total - j.postergadas;
-const cuentaRacha = (j: FilaJornada) => {
-  const s = porcentaje(j.completadas, comprometidasDe(j));
-  return j.checkout_tarde !== null && s !== null && s >= UMBRAL_RACHA;
-};
-
-/** Qué hace una jornada con la racha. La en curso todavía no cuenta; una sin terminar (datos antiguos) la corta. */
-function efecto(j: FilaJornada, enCurso: string | null): "suma" | "omite" | "rompe" {
-  if (j.id === enCurso) return "omite";
-  if (!j.checkout_tarde) return "rompe";
-  if (comprometidasDe(j) === 0) return "omite"; // todo postergado
-  return cuentaRacha(j) ? "suma" : "rompe";
-}
 
 function resumir(fecha: string, j: FilaJornada | undefined, ooo: Set<string>, feriados: Set<string>): DiaResumen {
   const tipo: TipoDia = ooo.has(fecha)
@@ -93,7 +78,7 @@ function resumir(fecha: string, j: FilaJornada | undefined, ooo: Set<string>, fe
     return {
       fecha, tipo, registro: "sin_registro",
       comprometidas: 0, completadas: 0, postergadas: 0,
-      saydo: null, inicio_local: null, cierre_local: null, cuenta_racha: false,
+      saydo: null, inicio_local: null, cierre_local: null,
     };
   }
   const comprometidas = comprometidasDe(j);
@@ -107,13 +92,11 @@ function resumir(fecha: string, j: FilaJornada | undefined, ooo: Set<string>, fe
     saydo: porcentaje(j.completadas, comprometidas),
     inicio_local: horaLocal(j.checkin_manana),
     cierre_local: j.checkout_tarde ? horaLocal(j.checkout_tarde) : null,
-    cuenta_racha: cuentaRacha(j),
   };
 }
 
 export interface Progreso {
   hoy: DiaResumen;
-  racha: number;
   saydo_14d: number | null;
   comprometidas_14d: number;
   completadas_14d: number;
@@ -123,16 +106,9 @@ export interface Progreso {
 
 /** @param inicioCuenta fecha local de creación de la cuenta: no se mira antes. */
 export function calcularProgreso(db: DB, usuarioId: string, hoy: string, inicioCuenta: string): Progreso {
-  const desde = [sumarDias(hoy, -400), inicioCuenta].sort()[1];
+  const desde = [sumarDias(hoy, -13), inicioCuenta].sort()[1];
   const lista = jornadas(db, usuarioId, desde, hoy);
   const enCurso = idJornadaEnCurso(db, usuarioId);
-
-  let racha = 0;
-  for (let i = lista.length - 1; i >= 0; i--) {
-    const e = efecto(lista[i], enCurso);
-    if (e === "rompe") break;
-    if (e === "suma") racha++;
-  }
 
   const desde14 = sumarDias(hoy, -13);
   let comprometidas = 0;
@@ -167,25 +143,10 @@ export function calcularProgreso(db: DB, usuarioId: string, hoy: string, inicioC
 
   return {
     hoy: historial[0] ?? resumir(hoy, porFecha.get(hoy), ooo, feriados),
-    racha,
     saydo_14d: porcentaje(completadas, comprometidas),
     comprometidas_14d: comprometidas,
     completadas_14d: completadas,
     jornadas_14d: cuantas,
     historial,
   };
-}
-
-/** Mejor racha histórica (mismas reglas; hasta 2 años atrás). */
-export function mejorRacha(db: DB, usuarioId: string, hoy: string, inicioCuenta: string): number {
-  const desde = [sumarDias(hoy, -730), inicioCuenta].sort()[1];
-  const enCurso = idJornadaEnCurso(db, usuarioId);
-  let mejor = 0;
-  let actual = 0;
-  for (const j of jornadas(db, usuarioId, desde, hoy)) {
-    const e = efecto(j, enCurso);
-    if (e === "suma") mejor = Math.max(mejor, ++actual);
-    else if (e === "rompe") actual = 0;
-  }
-  return mejor;
 }

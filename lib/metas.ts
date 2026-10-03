@@ -18,8 +18,8 @@ export const METAS_DEFECTO = {
 export type Metas = typeof METAS_DEFECTO;
 
 export const esquemaMetas = z.object({
-  tolerancia_costo_pct: z.number().int().min(0, "Mínimo 0 %").max(100, "Máximo 100 %"),
-  objetivos_diarios_pct: z.number().int().min(50, "Mínimo 50 %").max(100, "Máximo 100 %"),
+  tolerancia_costo_pct: z.number().int().min(0, "Mínimo 0%").max(100, "Máximo 100%"),
+  objetivos_diarios_pct: z.number().int().min(50, "Mínimo 50%").max(100, "Máximo 100%"),
   bloqueo_max_dias: z.number().int().min(1, "Mínimo 1 día").max(30, "Máximo 30 días"),
 });
 

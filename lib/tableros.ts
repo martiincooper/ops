@@ -46,7 +46,6 @@ export interface FilaStandup {
   no_disponible_hoy: { motivo: string | null } | null;
   bloqueos: { bitacora_id: string; fecha: string; texto: string }[];
   saydo_14d: number | null;
-  racha: number;
 }
 
 export const UMBRAL_SAYDO_ALERTA = 70;
@@ -121,7 +120,6 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
       no_disponible_hoy,
       bloqueos,
       saydo_14d: prog.saydo_14d,
-      racha: prog.racha,
     };
   });
   return filas.sort((a, b) => a.prioridad - b.prioridad || a.nombre.localeCompare(b.nombre, "es"));

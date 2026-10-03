@@ -3,8 +3,6 @@
 
 export const TZ_NEGOCIO = process.env.TZ_NEGOCIO || "America/Santiago";
 
-/** Cumplimiento mínimo (%) para que una jornada terminada sume a la racha. */
-export const UMBRAL_RACHA = 75;
 
 const fmtFecha = new Intl.DateTimeFormat("en-CA", {
   timeZone: TZ_NEGOCIO,

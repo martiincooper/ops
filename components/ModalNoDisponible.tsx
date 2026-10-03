@@ -67,7 +67,7 @@ export default function ModalNoDisponible({ hoy, dias, onCambio, onCerrar }: Pro
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-tinta/30 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onCerrar}
       role="dialog"
       aria-modal="true"
@@ -75,20 +75,21 @@ export default function ModalNoDisponible({ hoy, dias, onCambio, onCerrar }: Pro
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[92dvh] w-full max-w-md animate-subir space-y-4 overflow-y-auto rounded-t-3xl border-t border-aether-border bg-aether-card p-5 pb-[max(env(safe-area-inset-bottom),1.25rem)]"
+        className="max-h-[92dvh] w-full max-w-md animate-subir space-y-4 overflow-y-auto rounded-t-[2rem] bg-superficie p-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] shadow-tarjeta sm:rounded-[2rem]"
       >
-        <div className="mx-auto -mt-1 mb-1 h-1 w-10 rounded-full bg-slate-700" />
-        <div className="flex items-center justify-between">
-          <h3 id="titulo-nd" className="flex items-center gap-2 text-sm font-bold text-white">
-            <CalendarOff size={16} className="text-aether-accent-soft" /> Días no disponibles
+        <div className="mx-auto -mt-2 mb-1 h-1.5 w-12 rounded-full bg-linea sm:hidden" />
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-pastel-azul text-indigo">
+            <CalendarOff size={22} />
+          </span>
+          <h3 id="titulo-nd" className="flex-1 text-lg font-semibold text-tinta">
+            Días no disponibles
           </h3>
-          <button onClick={onCerrar} aria-label="Cerrar" className="rounded-full p-1.5 text-slate-400 hover:bg-white/5">
+          <button onClick={onCerrar} aria-label="Cerrar" className="boton-icono h-10 w-10">
             <X size={18} />
           </button>
         </div>
-        <p className="-mt-2 text-[11px] text-slate-500">
-          Avisa qué días no vas a trabajar para que tu jefatura pueda planificar. No afecta tu racha.
-        </p>
+        <p className="text-sm text-tinta-3">Avisa qué días no vas a trabajar para que tu jefatura pueda planificar.</p>
 
         <div>
           <label htmlFor="nd-fecha" className="etiqueta">Día</label>
@@ -107,37 +108,32 @@ export default function ModalNoDisponible({ hoy, dias, onCambio, onCerrar }: Pro
           />
         </div>
 
-        {error && <p className="rounded-lg bg-aether-danger/10 px-3 py-2 text-xs text-aether-danger">{error}</p>}
-        {ok && <p className="rounded-lg bg-aether-success/10 px-3 py-2 text-xs text-aether-success">{ok}</p>}
+        {error && <p className="rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
+        {ok && <p className="rounded-2xl bg-ok-fondo px-4 py-2.5 text-sm text-ok-tinta">{ok}</p>}
 
-        <button
-          type="button"
-          onClick={marcar}
-          disabled={ocupado !== null}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-aether-success py-3 text-sm font-bold text-black transition-all active:scale-[0.99] disabled:opacity-50"
-        >
-          {ocupado === "nuevo" && <LoaderCircle size={16} className="animate-spin" />}
+        <button type="button" onClick={marcar} disabled={ocupado !== null} className="boton-primario">
+          {ocupado === "nuevo" && <LoaderCircle size={18} className="animate-spin" />}
           Marcar no disponible
         </button>
 
         {dias.length > 0 && (
-          <div className="border-t border-aether-border pt-3">
-            <p className="etiqueta">Próximos días no disponibles</p>
-            <ul className="divide-y divide-aether-border">
+          <div className="pt-2">
+            <p className="mb-2 text-sm font-semibold text-tinta">Próximos días no disponibles</p>
+            <ul className="space-y-2">
               {dias.map((a) => (
-                <li key={a.id} className="flex items-center justify-between py-2 text-xs">
+                <li key={a.id} className="flex items-center justify-between rounded-2xl bg-suave px-4 py-2.5 text-sm">
                   <div>
-                    <span className="font-semibold text-white">{a.fecha === hoy ? "Hoy" : fechaCorta(a.fecha)}</span>
-                    {a.motivo && <p className="text-[11px] text-slate-500">{a.motivo}</p>}
+                    <span className="font-semibold capitalize text-tinta">{a.fecha === hoy ? "Hoy" : fechaCorta(a.fecha)}</span>
+                    {a.motivo && <p className="text-xs text-tinta-3">{a.motivo}</p>}
                   </div>
                   <button
                     type="button"
                     onClick={() => quitar(a.id)}
                     disabled={ocupado !== null}
                     aria-label={`Quitar ${a.fecha === hoy ? "hoy" : fechaCorta(a.fecha)}`}
-                    className="rounded-lg p-2 text-slate-500 hover:bg-aether-danger/10 hover:text-aether-danger disabled:opacity-40"
+                    className="rounded-full p-2 text-tinta-3 hover:bg-error-fondo hover:text-error-tinta disabled:opacity-40"
                   >
-                    {ocupado === a.id ? <LoaderCircle size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                    {ocupado === a.id ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
                   </button>
                 </li>
               ))}

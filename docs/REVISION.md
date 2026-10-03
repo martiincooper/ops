@@ -56,8 +56,7 @@ Each finding lists the failure and what this codebase does instead. Severity:
   (America/Santiago). An unfinished jornada stays open until finished, even past midnight.
 - **Say-Do** (per jornada and 14 days): achieved ÷ (committed − postponed), over jornadas dated in the last 14
   days, excluding the one in progress. Old unfinished jornadas (pre-0.4 data) count their pending items as not done.
-- **Streak**: consecutive finished jornadas with Say-Do ≥ 75 %. Days without a jornada are ignored; a finished
-  jornada below 75 % (or an old unfinished one) resets it; the jornada in progress doesn't count yet.
+- No streak, XP, levels or achievements (removed in pass 6, §11).
 - No rule uses the time of day.
 
 ## 5. Login (email + 6-digit code, as requested)
@@ -189,3 +188,24 @@ upper management, each with definition, value, target, period, status and compar
 Pending purchases left the executive view (they remain in the admin validation desk). Targets live in a new
 per-company `metas` table (schema v3), editable by admins only (`PUT /api/admin/metas`); defaults in
 `lib/metas.ts`.
+
+## 11. Pass 6 — redesign, gamification removed
+
+The owner asked for a new UI (reference: light task/dashboard apps) with the same features and logic, and
+called the gamification irrelevant to the work. Changes:
+
+- **Gamification removed entirely**: streak, XP, levels, achievements, confetti and the celebration overlay
+  (`lib/juego.ts`, `components/equipo/Confeti.tsx`, `Celebracion.tsx` deleted; `UMBRAL_RACHA` gone).
+  `GET /api/jornada` and `/mi-progreso` no longer return `racha`/`juego`; the standup row no longer has a
+  streak. The remaining personal measure is Say-Do (objectives achieved ÷ committed), the same number
+  management sees. No schema change.
+- **Design system** in `app/globals.css` (Tailwind v4 `@theme` tokens): light lavender background, white
+  rounded cards, indigo primary, pastel tiles for objectives, Inter (self-hosted, `@fontsource-variable/inter`).
+  Shared pieces in `components/ui.tsx` (avatar with initials, status badge).
+- **Layouts**: team screens are phone-first (summary tiles + donut, objective cards with check circles, week
+  strip); admin has an icon sidebar on desktop and a compact header + section tabs on phones; executive view
+  has summary tiles + detailed KPI cards. Verified with no horizontal overflow at 360/390 px.
+- **Accessibility kept**: status always has icon + text (overdue delivery dates now show an icon and
+  "vencida", not just red), meters use same-hue tracks, controls keep their labels (`aria-pressed` objective
+  toggles, labelled inputs), so the e2e suite and screenshot checks run unchanged.
+- Tests: logic 24 (gamification cases removed), e2e 42 (asserts `racha`/`juego` are absent).

@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  Building2,
   CalendarRange,
+  ChevronRight,
   FolderKanban,
   KeyRound,
   LayoutList,
@@ -14,6 +14,8 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import BotonSalir from "@/components/BotonSalir";
+import Marca from "@/components/Marca";
+import { Avatar } from "@/components/ui";
 import { cx } from "@/lib/cliente";
 import Administradores from "./Administradores";
 import Capacidad from "./Capacidad";
@@ -25,13 +27,13 @@ import type { Alcance, EmpresaPublica, Yo } from "./comun";
 
 export type Vista = "standup" | "capacidad" | "compras" | "equipo" | "proyectos" | "admins";
 
-const VISTAS: { clave: Vista; titulo: string; icono: typeof Users; conAlcance?: boolean }[] = [
-  { clave: "standup", titulo: "Standup", icono: LayoutList, conAlcance: true },
-  { clave: "capacidad", titulo: "Disponibilidad 14 días", icono: CalendarRange, conAlcance: true },
-  { clave: "compras", titulo: "Compras", icono: Receipt, conAlcance: true },
-  { clave: "equipo", titulo: "Equipo", icono: Users },
-  { clave: "proyectos", titulo: "Proyectos", icono: FolderKanban },
-  { clave: "admins", titulo: "Administradores", icono: ShieldCheck },
+const VISTAS: { clave: Vista; titulo: string; corto: string; icono: typeof Users; conAlcance?: boolean }[] = [
+  { clave: "standup", titulo: "Standup", corto: "Standup", icono: LayoutList, conAlcance: true },
+  { clave: "capacidad", titulo: "Disponibilidad 14 días", corto: "Agenda", icono: CalendarRange, conAlcance: true },
+  { clave: "compras", titulo: "Compras", corto: "Compras", icono: Receipt, conAlcance: true },
+  { clave: "equipo", titulo: "Equipo", corto: "Equipo", icono: Users },
+  { clave: "proyectos", titulo: "Proyectos", corto: "Proyectos", icono: FolderKanban },
+  { clave: "admins", titulo: "Administradores", corto: "Admins", icono: ShieldCheck },
 ];
 
 export default function AdminPanel({
@@ -59,84 +61,126 @@ export default function AdminPanel({
 
   return (
     <div className="min-h-dvh">
-      <header className="border-b border-aether-border bg-aether-card/60">
-        <div className="mx-auto flex max-w-7xl items-center gap-6 px-6 py-4">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-aether-muted">Aether Ops · Jefatura</p>
-            <p className="text-base font-bold text-white">Centro de control</p>
-          </div>
-
-          <div role="tablist" aria-label="Empresa" className="flex items-center gap-1 rounded-xl border border-aether-border bg-aether-bg p-1">
-            <Building2 size={14} className="mx-1.5 text-slate-500" />
-            {empresas.map((e) => (
-              <button
-                key={e.clave}
-                role="tab"
-                aria-selected={e.clave === empresa}
-                onClick={() => setEmpresa(e.clave)}
-                className={cx(
-                  "rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors",
-                  e.clave === empresa ? "bg-aether-accent text-white" : "text-slate-400 hover:text-white",
-                )}
-              >
-                {e.nombre}
-              </button>
-            ))}
-          </div>
-
-          <nav className="ml-auto flex items-center gap-5 text-xs">
-            <Link href={`/exec?empresa=${empresa}`} className="flex items-center gap-1 text-slate-400 hover:text-white">
-              <TrendingUp size={13} /> Vista gerencia
-            </Link>
-            <Link href="/cambiar-pin" className="flex items-center gap-1 text-slate-400 hover:text-white">
-              <KeyRound size={13} /> Mi código
-            </Link>
-            <span className="text-slate-500">{yo.nombre}</span>
-            <BotonSalir />
-          </nav>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-6 py-6">
-        <div className="mb-5 flex items-center gap-1 border-b border-aether-border">
+      {/* Barra lateral (escritorio) */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-24 flex-col items-center gap-1 bg-superficie py-5 shadow-tarjeta lg:flex">
+        <Marca conTexto={false} className="mb-6" />
+        <nav aria-label="Secciones" className="flex flex-col items-center gap-1">
           {VISTAS.map((v) => (
             <button
               key={v.clave}
+              type="button"
               onClick={() => setVista(v.clave)}
+              aria-current={vista === v.clave ? "page" : undefined}
+              title={v.titulo}
               className={cx(
-                "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-semibold",
-                vista === v.clave ? "border-aether-accent-soft text-white" : "border-transparent text-slate-400 hover:text-slate-200",
+                "flex w-20 flex-col items-center gap-1 rounded-2xl py-2.5 text-[11px] font-semibold transition",
+                vista === v.clave ? "bg-indigo-suave text-indigo-tinta" : "text-tinta-3 hover:bg-suave hover:text-tinta",
               )}
             >
-              <v.icono size={14} /> {v.titulo}
+              <v.icono size={20} /> {v.corto}
             </button>
           ))}
-          {actual.conAlcance && (
-            <div className="ml-auto mb-1.5 flex items-center gap-1 rounded-lg border border-aether-border p-0.5 text-[11px]">
-              {(["mios", "todos"] as Alcance[]).map((a) => (
+        </nav>
+        <div className="mt-auto flex flex-col items-center gap-2">
+          <Link href={`/exec?empresa=${empresa}`} title="Vista gerencia" aria-label="Vista gerencia" className="boton-icono">
+            <TrendingUp size={18} />
+          </Link>
+          <Link href="/cambiar-pin" title="Mi código" aria-label="Mi código" className="boton-icono">
+            <KeyRound size={18} />
+          </Link>
+          <BotonSalir conTexto={false} />
+        </div>
+      </aside>
+
+      <div className="lg:pl-24">
+        <header className="sticky top-0 z-30 border-b border-linea/70 bg-fondo/85 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3 lg:px-8">
+            <div className="lg:hidden">
+              <Marca conTexto={false} />
+            </div>
+            <p className="hidden items-center gap-1.5 rounded-full bg-superficie px-4 py-2 text-sm shadow-tarjeta lg:flex">
+              <span className="text-tinta-3">Jefatura</span>
+              <ChevronRight size={14} className="text-tinta-3" />
+              <span className="font-semibold text-tinta">{actual.titulo}</span>
+            </p>
+
+            <div role="tablist" aria-label="Empresa" className="segmentos order-last flex w-full bg-superficie shadow-tarjeta sm:order-none sm:inline-flex sm:w-auto">
+              {empresas.map((e) => (
                 <button
-                  key={a}
-                  onClick={() => setAlcance(a)}
-                  className={cx("rounded-md px-2.5 py-1 font-semibold", alcance === a ? "bg-white/10 text-white" : "text-slate-400")}
+                  key={e.clave}
+                  role="tab"
+                  aria-selected={e.clave === empresa}
+                  onClick={() => setEmpresa(e.clave)}
+                  className={cx("segmento flex-1 sm:flex-none", e.clave === empresa && "bg-indigo text-white shadow-sm hover:text-white")}
                 >
-                  {a === "mios" ? "Mis supervisados" : "Todo el equipo"}
+                  {e.nombre}
                 </button>
               ))}
             </div>
-          )}
-        </div>
 
-        <p className="mb-4 text-[11px] uppercase tracking-wider text-slate-500">
-          {vista === "admins" ? "Todas las empresas" : `${emp.nombre} · ${emp.dominios.map((d) => "@" + d).join(", ")}`}
-        </p>
+            <div className="ml-auto flex items-center gap-2">
+              <div className="flex items-center gap-2 lg:hidden">
+                <Link href={`/exec?empresa=${empresa}`} title="Vista gerencia" aria-label="Vista gerencia" className="boton-icono bg-superficie">
+                  <TrendingUp size={18} />
+                </Link>
+                <Link href="/cambiar-pin" title="Mi código" aria-label="Mi código" className="boton-icono bg-superficie">
+                  <KeyRound size={18} />
+                </Link>
+                <BotonSalir conTexto={false} className="bg-superficie" />
+              </div>
+              <span className="hidden items-center gap-2 rounded-full bg-superficie py-1 pl-1 pr-4 shadow-tarjeta sm:flex">
+                <Avatar nombre={yo.nombre} tamano={34} />
+                <span className="text-sm font-semibold text-tinta">{yo.nombre}</span>
+              </span>
+            </div>
+          </div>
 
-        {vista === "standup" && <Standup key={empresa} empresa={empresa} alcance={alcance} />}
-        {vista === "capacidad" && <Capacidad key={empresa} empresa={empresa} alcance={alcance} />}
-        {vista === "compras" && <Compras key={empresa} empresa={empresa} alcance={alcance} />}
-        {vista === "equipo" && <Equipo key={empresa} empresa={emp} yo={yo} />}
-        {vista === "proyectos" && <Proyectos key={empresa} empresa={emp} hoy={hoy} />}
-        {vista === "admins" && <Administradores yo={yo} />}
-      </main>
+          {/* Secciones (móvil y tablet) */}
+          <nav aria-label="Secciones" className="flex gap-1 overflow-x-auto px-4 pb-3 lg:hidden">
+            {VISTAS.map((v) => (
+              <button
+                key={v.clave}
+                type="button"
+                onClick={() => setVista(v.clave)}
+                aria-current={vista === v.clave ? "page" : undefined}
+                className={cx(
+                  "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-semibold",
+                  vista === v.clave ? "bg-indigo text-white" : "bg-superficie text-tinta-2",
+                )}
+              >
+                <v.icono size={16} /> {v.titulo}
+              </button>
+            ))}
+          </nav>
+        </header>
+
+        <main className="mx-auto max-w-[1400px] px-4 py-6 lg:px-8">
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold text-tinta">{actual.titulo}</h1>
+              <p className="mt-0.5 text-sm text-tinta-3">
+                {vista === "admins" ? "Todas las empresas" : `${emp.nombre} · ${emp.dominios.map((d) => "@" + d).join(", ")}`}
+              </p>
+            </div>
+            {actual.conAlcance && (
+              <div className="segmentos bg-superficie shadow-tarjeta" role="tablist" aria-label="Alcance">
+                {(["mios", "todos"] as Alcance[]).map((a) => (
+                  <button key={a} role="tab" aria-selected={alcance === a} onClick={() => setAlcance(a)} className={cx("segmento", alcance === a && "segmento-activo bg-indigo-suave text-indigo-tinta")}>
+                    {a === "mios" ? "Mis supervisados" : "Todo el equipo"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {vista === "standup" && <Standup key={empresa} empresa={empresa} alcance={alcance} />}
+          {vista === "capacidad" && <Capacidad key={empresa} empresa={empresa} alcance={alcance} />}
+          {vista === "compras" && <Compras key={empresa} empresa={empresa} alcance={alcance} />}
+          {vista === "equipo" && <Equipo key={empresa} empresa={emp} yo={yo} />}
+          {vista === "proyectos" && <Proyectos key={empresa} empresa={emp} hoy={hoy} />}
+          {vista === "admins" && <Administradores yo={yo} />}
+        </main>
+      </div>
     </div>
   );
 }

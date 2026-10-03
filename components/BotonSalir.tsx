@@ -7,13 +7,15 @@ export default function BotonSalir({ className, conTexto = true }: { className?:
   return (
     <button
       type="button"
+      aria-label="Cerrar sesión"
+      title="Cerrar sesión"
       onClick={async () => {
         await api("/api/auth/logout", { method: "POST" }).catch(() => {});
         window.location.href = "/login";
       }}
-      className={cx("flex items-center gap-1.5 text-xs text-slate-400 hover:text-white", className)}
+      className={cx(conTexto ? "boton-texto" : "boton-icono", className)}
     >
-      <LogOut size={14} />
+      <LogOut size={18} />
       {conTexto && <span>Cerrar sesión</span>}
     </button>
   );

@@ -1,7 +1,7 @@
 # Aether Ops (`ops.aether.cl`) — English
 
 Goal-based work sessions ("jornadas": start with objectives → finish with results), unavailable days, purchases
-per project, streak, Say-Do and achievements, for two companies on one site. Built for a team that works by
+per project and Say-Do, for two companies on one site. Built for a team that works by
 goals with no fixed hours (freelancers on boleta de honorarios). Single container: Next.js 15 standalone + SQLite (WAL). UI in Spanish.
 
 The Spanish [`README.md`](README.md) is the maintained one; this file is a summary.
@@ -20,13 +20,13 @@ Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
 ## Team member's jornada (no schedule)
 
 - **Comenzar jornada** (button, any time, any day): 2–4 objectives, each with one or more projects.
-- Tick objectives as they're achieved (confetti, +10 XP). **Terminar jornada**: results, reasons for pending
+- Tick objectives as they're achieved. **Terminar jornada**: results, reasons for pending
   items, optional blocker.
 - One jornada per day. A forgotten one stays open (also past midnight) and must be finished before starting
   the next. Nothing is opened or required by the clock.
-- Streak = consecutive finished jornadas with ≥75 % achieved; days without a jornada don't break it.
-  XP: objective +10, finished jornada +5, perfect jornada +15. No time-based metrics or achievements.
-- Unavailable days (whole days) for planning; they don't affect the streak.
+- No gamification (no streak, XP, levels, achievements or confetti). The one measure is the share of
+  objectives achieved (Say-Do), the same number admins see. No time-based metrics.
+- Unavailable days (whole days) for planning; they don't count toward Say-Do.
 - Admins see each person's latest jornada (objectives and results), blockers and Say-Do — never start/finish
   times, and no alerts for days without work. Rationale: with boleta de honorarios, fixed hours, attendance
   control or punctuality metrics are indicators of an employment relationship (not legal advice).
@@ -36,6 +36,12 @@ amount (CLP) and projects; with several projects the amount is split equally (le
 
 Deleting a project (`/admin` → Proyectos) also deletes objectives and purchases that belong only to it; shared
 ones just lose it and the purchase amount is re-split. Irreversible.
+
+## Design
+
+Light lavender + indigo theme, rounded cards, Inter typeface (self-hosted via `@fontsource-variable/inter`, no
+Google Fonts). Team screens are phone-first; admin has a desktop sidebar and tabs on phones; the executive view
+works on both. Status is always icon + text, never color alone.
 
 ## Deploy on Railway
 
@@ -70,6 +76,9 @@ docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
 ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
+Upgrading from 0.5: no schema change. New UI; streak, XP, levels, achievements and confetti removed; same
+features and rules otherwise. New dependency `@fontsource-variable/inter` (`npm ci`; nothing to do with Docker).
+Upgrading from 0.4: adds the `metas` table (automatic migration); "Presupuesto" is relabeled "Costo estimado BOM".
 Upgrading from 0.3: no schema change; `VENTANA_MANANA`, `VENTANA_TARDE` and `JORNADA` are no longer used.
 Upgrading from 0.2: back up, then restart with the new code. Each company DB migrates on start (purchase amount
 becomes the total paid; document type, folio, RUT and shipping are kept in the description; existing
@@ -79,7 +88,7 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, goal-based streak, Say-Do, XP, schema + migration, availability, split, exec (27)
+npm run test:logica   # timezone, goal-based Say-Do, schema + migration, availability, split, exec (24)
 # end-to-end against a server with an EMPTY data dir (42)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```

@@ -2,15 +2,12 @@
 
 import { Check, LoaderCircle, RotateCcw, X } from "lucide-react";
 import { Fragment, useState } from "react";
+import { Avatar, Insignia, type Tono } from "@/components/ui";
 import type { FilaGasto } from "@/lib/tableros";
 import { api, clp, cx } from "@/lib/cliente";
-import { Aviso, Cargando, conEmpresa, fechaHora, useAccion, useDatos, type Alcance } from "./comun";
+import { Aviso, Cargando, Vacio, conEmpresa, fechaHora, useAccion, useDatos, type Alcance } from "./comun";
 
-const ESTADO = {
-  pendiente: "text-aether-warning bg-aether-warning/10",
-  aprobado: "text-aether-success bg-aether-success/10",
-  rechazado: "text-aether-danger bg-aether-danger/10",
-} as const;
+const ESTADO: Record<FilaGasto["estado"], Tono> = { pendiente: "alerta", aprobado: "ok", rechazado: "error" };
 
 export default function Compras({ empresa, alcance }: { empresa: string; alcance: Alcance }) {
   const [estado, setEstado] = useState<"pendiente" | "todos">("pendiente");
@@ -35,92 +32,101 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-2">
-        {(["pendiente", "todos"] as const).map((e) => (
-          <button key={e} onClick={() => setEstado(e)} className={cx("rounded-lg px-3 py-1.5 text-xs font-semibold", estado === e ? "bg-white/10 text-white" : "text-slate-400 hover:bg-white/5")}>
-            {e === "pendiente" ? "Por validar" : "Todas"}
-          </button>
-        ))}
-        <span className="ml-auto text-[11px] text-slate-500">
-          {gastos.length} compra(s) · {clp(total)}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="segmentos bg-superficie shadow-tarjeta">
+          {(["pendiente", "todos"] as const).map((e) => (
+            <button key={e} onClick={() => setEstado(e)} className={cx("segmento", estado === e && "segmento-activo bg-indigo-suave text-indigo-tinta")}>
+              {e === "pendiente" ? "Por validar" : "Todas"}
+            </button>
+          ))}
+        </div>
+        <span className="ml-auto rounded-full bg-superficie px-4 py-2 text-sm text-tinta-2 shadow-tarjeta">
+          {gastos.length} compra(s) · <b className="font-semibold text-tinta">{clp(total)}</b>
         </span>
       </div>
       <Aviso aviso={aviso} />
       <Cargando cargando={cargando && !datos} error={error} />
-      {datos && gastos.length === 0 && (
-        <p className="tarjeta px-4 py-6 text-center text-xs text-slate-500">{estado === "pendiente" ? "No hay compras por validar." : "Sin compras registradas."}</p>
-      )}
+      {datos && gastos.length === 0 && <Vacio>{estado === "pendiente" ? "No hay compras por validar." : "Sin compras registradas."}</Vacio>}
       {gastos.length > 0 && (
         <div className="tarjeta overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-aether-border text-[11px] uppercase tracking-wide text-slate-500">
+          <table className="tabla">
+            <thead>
               <tr>
-                <th className="px-3 py-3 font-medium">Persona</th>
-                <th className="px-3 py-3 font-medium">Compra</th>
-                <th className="px-3 py-3 font-medium">Proyecto(s)</th>
-                <th className="px-3 py-3 text-right font-medium">Monto</th>
-                <th className="px-3 py-3 font-medium">Estado</th>
-                <th className="px-3 py-3 text-right font-medium">Validar</th>
+                <th>Persona</th>
+                <th>Compra</th>
+                <th>Proyecto(s)</th>
+                <th className="text-right">Monto</th>
+                <th>Estado</th>
+                <th className="text-right">Validar</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-aether-border">
+            <tbody>
               {gastos.map((g) => (
                 <Fragment key={g.id}>
                   <tr>
-                    <td className="px-3 py-2.5 align-top">
-                      <p className="font-semibold text-white">{g.persona}</p>
-                      <p className="text-[10px] text-slate-500">{fechaHora(g.creado_en)}</p>
+                    <td>
+                      <span className="flex items-center gap-2.5">
+                        <Avatar nombre={g.persona} tamano={34} />
+                        <span>
+                          <span className="block font-semibold text-tinta">{g.persona}</span>
+                          <span className="block text-xs text-tinta-3">{fechaHora(g.creado_en)}</span>
+                        </span>
+                      </span>
                     </td>
-                    <td className="max-w-72 px-3 py-2.5 align-top">
-                      <p className="text-slate-100">{g.item}</p>
-                      {g.descripcion && <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{g.descripcion}</p>}
+                    <td className="max-w-72">
+                      <p className="font-medium text-tinta">{g.item}</p>
+                      {g.descripcion && <p className="mt-0.5 text-xs leading-snug text-tinta-3">{g.descripcion}</p>}
                     </td>
-                    <td className="px-3 py-2.5 align-top">
+                    <td>
                       {g.proyectos.map((p) => (
                         <p key={p.codigo} className="whitespace-nowrap" title={p.nombre}>
-                          <span className="font-mono text-[11px] text-aether-accent-soft">{p.codigo}</span>
-                          {g.proyectos.length > 1 && <span className="text-[10px] tabular-nums text-slate-500"> {clp(p.monto_clp)}</span>}
+                          <span className="font-mono text-xs font-semibold text-indigo-tinta">{p.codigo}</span>
+                          {g.proyectos.length > 1 && <span className="text-xs text-tinta-3"> {clp(p.monto_clp)}</span>}
                         </p>
                       ))}
                     </td>
-                    <td className="px-3 py-2.5 text-right align-top font-semibold tabular-nums text-white">{clp(g.monto_clp)}</td>
-                    <td className="px-3 py-2.5 align-top">
-                      <span className={cx("rounded px-1.5 py-0.5 text-[10px] font-semibold", ESTADO[g.estado])}>{g.estado}</span>
-                      {g.validado_por_nombre && <span className="mt-1 block text-[10px] text-slate-500">{g.validado_por_nombre}</span>}
-                      {g.observacion && <span className="mt-0.5 block max-w-40 text-[10px] text-slate-400" title={g.observacion}>{g.observacion}</span>}
+                    <td className="text-right font-semibold text-tinta">{clp(g.monto_clp)}</td>
+                    <td>
+                      <Insignia tono={ESTADO[g.estado]}>{g.estado}</Insignia>
+                      {g.validado_por_nombre && <span className="mt-1 block text-xs text-tinta-3">{g.validado_por_nombre}</span>}
+                      {g.observacion && (
+                        <span className="mt-0.5 block max-w-40 text-xs text-tinta-2" title={g.observacion}>
+                          {g.observacion}
+                        </span>
+                      )}
                     </td>
-                    <td className="px-3 py-2.5 align-top">
-                      <div className="flex items-center justify-end gap-1">
-                        {ocupado === g.id && <LoaderCircle size={14} className="mr-1 animate-spin text-slate-400" />}
+                    <td>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {ocupado === g.id && <LoaderCircle size={16} className="mr-1 animate-spin text-tinta-3" />}
                         {g.estado !== "aprobado" && (
-                          <button type="button" disabled={ocupado !== null} onClick={() => decidir(g, "aprobado")} className="flex items-center gap-1 rounded-md bg-aether-success/15 px-2 py-1 font-semibold text-aether-success hover:bg-aether-success/25 disabled:opacity-50">
-                            <Check size={13} /> Aprobar
+                          <button type="button" disabled={ocupado !== null} onClick={() => decidir(g, "aprobado")} className="inline-flex items-center gap-1 rounded-full bg-ok-fondo px-3 py-1.5 text-xs font-semibold text-ok-tinta hover:brightness-95 disabled:opacity-50">
+                            <Check size={14} /> Aprobar
                           </button>
                         )}
                         {g.estado !== "rechazado" && (
-                          <button type="button" disabled={ocupado !== null} onClick={() => setRechazando({ id: g.id, motivo: "" })} className="flex items-center gap-1 rounded-md bg-aether-danger/10 px-2 py-1 font-semibold text-aether-danger hover:bg-aether-danger/20 disabled:opacity-50">
-                            <X size={13} /> Rechazar
+                          <button type="button" disabled={ocupado !== null} onClick={() => setRechazando({ id: g.id, motivo: "" })} className="inline-flex items-center gap-1 rounded-full bg-error-fondo px-3 py-1.5 text-xs font-semibold text-error-tinta hover:brightness-95 disabled:opacity-50">
+                            <X size={14} /> Rechazar
                           </button>
                         )}
                         {g.estado !== "pendiente" && (
-                          <button type="button" title="Volver a pendiente" disabled={ocupado !== null} onClick={() => decidir(g, "pendiente")} className="rounded-md px-1.5 py-1 text-slate-400 hover:bg-white/5 disabled:opacity-50">
-                            <RotateCcw size={13} />
+                          <button type="button" title="Volver a pendiente" aria-label="Volver a pendiente" disabled={ocupado !== null} onClick={() => decidir(g, "pendiente")} className="rounded-full p-2 text-tinta-3 hover:bg-suave disabled:opacity-50">
+                            <RotateCcw size={14} />
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
                   {rechazando?.id === g.id && (
-                    <tr className="bg-aether-danger/5">
-                      <td colSpan={6} className="px-3 py-2.5">
+                    <tr className="bg-pastel-rosa/60">
+                      <td colSpan={6}>
                         <form
-                          className="flex items-center gap-2"
+                          className="flex flex-wrap items-center gap-2"
                           onSubmit={(e) => {
                             e.preventDefault();
                             decidir(g, "rechazado", rechazando.motivo);
                           }}
                         >
-                          <label htmlFor={`m-${g.id}`} className="shrink-0 text-[11px] text-slate-400">Motivo del rechazo</label>
+                          <label htmlFor={`m-${g.id}`} className="shrink-0 text-sm text-tinta-2">Motivo del rechazo</label>
                           <input
                             id={`m-${g.id}`}
                             autoFocus
@@ -129,12 +135,12 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                             value={rechazando.motivo}
                             onChange={(e) => setRechazando({ id: g.id, motivo: e.target.value })}
                             placeholder="Ej: no corresponde al proyecto"
-                            className="campo flex-1 py-1.5 text-sm"
+                            className="campo min-w-60 flex-1 bg-superficie py-2 text-sm"
                           />
-                          <button type="submit" disabled={ocupado !== null} className="rounded-md bg-aether-danger px-3 py-1.5 font-semibold text-white disabled:opacity-50">
+                          <button type="submit" disabled={ocupado !== null} className="rounded-full bg-error px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                             Rechazar
                           </button>
-                          <button type="button" onClick={() => setRechazando(null)} className="px-2 py-1.5 text-slate-400">Cancelar</button>
+                          <button type="button" onClick={() => setRechazando(null)} className="boton-texto">Cancelar</button>
                         </form>
                       </td>
                     </tr>

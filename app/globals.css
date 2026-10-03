@@ -1,25 +1,53 @@
 @import "tailwindcss";
 
-/* Tokens del sistema de diseño (Tailwind v4: CSS-first). Uso: bg-aether-bg, text-aether-success, etc. */
+/*
+ * Sistema de diseño claro: lavanda + índigo. Tokens (Tailwind v4, CSS-first):
+ *   superficies  bg-fondo · bg-superficie · bg-suave · border-linea
+ *   tinta        text-tinta · text-tinta-2 · text-tinta-3
+ *   marca        bg-indigo · bg-indigo-hondo · bg-indigo-suave · text-indigo-tinta
+ *   pasteles     bg-pastel-{azul,lila,durazno,rosa,menta}   (tarjetas de objetivos)
+ *   estado       {ok,alerta,error} + -tinta (texto) + -fondo (fondo)   — siempre con ícono y texto
+ */
 @theme {
-  --color-aether-bg: #090a0f;
-  --color-aether-card: #12141c;
-  --color-aether-border: #1f2433;
-  --color-aether-accent: #4f46e5;
-  --color-aether-accent-soft: #818cf8;
-  --color-aether-success: #10b981;
-  --color-aether-warning: #f59e0b;
-  --color-aether-danger: #ef4444;
-  --color-aether-muted: #64748b;
+  --color-fondo: #eeecfb;
+  --color-superficie: #ffffff;
+  --color-suave: #f5f4fd;
+  --color-linea: #e7e5f4;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-tinta: #17172b;
+  --color-tinta-2: #4a4d63;
+  --color-tinta-3: #7d8199;
+
+  --color-indigo: #615ef0;
+  --color-indigo-hondo: #4b47d6;
+  --color-indigo-suave: #e9e8fe;
+  --color-indigo-tinta: #4440c9;
+
+  --color-pastel-azul: #e6f2fd;
+  --color-pastel-lila: #efeefe;
+  --color-pastel-durazno: #fdf3e6;
+  --color-pastel-rosa: #fdecf2;
+  --color-pastel-menta: #e6f6ee;
+
+  --color-ok: #22a06b;
+  --color-ok-tinta: #146c46;
+  --color-ok-fondo: #e4f5ec;
+  --color-alerta: #f2a93b;
+  --color-alerta-tinta: #94540a;
+  --color-alerta-fondo: #fdf0db;
+  --color-error: #e5484d;
+  --color-error-tinta: #b0232a;
+  --color-error-fondo: #fdeaea;
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --shadow-tarjeta: 0 1px 2px rgb(23 23 43 / 0.04), 0 12px 32px -16px rgb(76 70 180 / 0.18);
+  --shadow-boton: 0 10px 24px -10px rgb(97 94 240 / 0.75);
 
   --animate-subir: subir 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-temblor: temblor 380ms ease-in-out;
   --animate-aparecer: aparecer 180ms ease-out;
-  --animate-caer: caer 420ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
-  --animate-latido: latido 600ms ease-out;
 
   @keyframes subir {
     from { transform: translateY(100%); }
@@ -36,15 +64,6 @@
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  @keyframes caer {
-    from { opacity: 0; transform: translateY(-24px) scale(0.96); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  @keyframes latido {
-    0% { transform: scale(1); }
-    35% { transform: scale(1.18); }
-    100% { transform: scale(1); }
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -53,43 +72,77 @@
 
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
     -webkit-tap-highlight-color: transparent;
   }
   body {
-    background: var(--color-aether-bg);
-    color: #e2e8f0;
+    background: var(--color-fondo);
+    color: var(--color-tinta);
+    font-feature-settings: "cv11", "ss01";
   }
   /* iOS Safari hace zoom al enfocar campos < 16px */
   input, select, textarea {
     font-size: 16px;
   }
-  input[type="date"]::-webkit-calendar-picker-indicator,
-  input[type="time"]::-webkit-calendar-picker-indicator {
-    filter: invert(0.7);
+  :focus-visible {
+    outline: 2px solid var(--color-indigo);
+    outline-offset: 2px;
   }
 }
 
 @layer components {
+  .tarjeta {
+    @apply rounded-3xl bg-superficie shadow-tarjeta;
+  }
   .campo {
-    @apply w-full rounded-lg border border-aether-border bg-aether-bg px-3 py-2.5 text-white placeholder-slate-600 outline-none transition-colors focus:border-aether-accent-soft;
+    @apply w-full rounded-2xl border border-transparent bg-suave px-4 py-3 text-tinta outline-none transition placeholder:text-tinta-3 focus:border-indigo focus:bg-superficie focus:ring-4 focus:ring-indigo/10;
   }
   .etiqueta {
-    @apply mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-400;
-  }
-  .tarjeta {
-    @apply rounded-2xl border border-aether-border bg-aether-card;
+    @apply mb-1.5 block text-sm text-tinta-3;
   }
   .boton-primario {
-    @apply flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-aether-accent to-[#4338ca] py-3.5 text-sm font-bold text-white shadow-lg transition-all active:scale-[0.99] disabled:opacity-50;
+    @apply flex w-full items-center justify-center gap-2 rounded-full bg-indigo px-6 py-4 text-base font-semibold text-white shadow-boton transition hover:bg-indigo-hondo active:scale-[0.99] disabled:opacity-50 disabled:shadow-none;
+  }
+  .boton {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-indigo px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-hondo disabled:opacity-50;
+  }
+  .boton-suave {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full bg-indigo-suave px-4 py-2 text-sm font-semibold text-indigo-tinta transition hover:bg-indigo/15 disabled:opacity-50;
+  }
+  .boton-texto {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-tinta-2 transition hover:bg-suave hover:text-tinta disabled:opacity-50;
+  }
+  .boton-icono {
+    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-suave text-tinta transition hover:bg-indigo-suave hover:text-indigo-tinta;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .segmentos {
+    @apply inline-flex items-center gap-1 rounded-full bg-suave p-1;
   }
   .segmento {
-    @apply flex-1 rounded-lg border py-2 text-xs font-semibold transition-colors;
+    @apply rounded-full px-4 py-1.5 text-sm font-semibold text-tinta-3 transition hover:text-tinta;
   }
   .segmento-activo {
-    @apply border-aether-accent bg-aether-accent text-white;
+    @apply bg-superficie text-tinta shadow-sm;
   }
-  .segmento-inactivo {
-    @apply border-aether-border text-slate-400;
+  .titulo-seccion {
+    @apply text-lg font-semibold text-tinta;
+  }
+  .tabla {
+    @apply w-full text-left text-sm;
+  }
+  .tabla thead {
+    @apply text-xs text-tinta-3;
+  }
+  .tabla th {
+    @apply px-4 py-3 font-medium;
+  }
+  .tabla td {
+    @apply px-4 py-3 align-middle;
+  }
+  .tabla tbody tr {
+    @apply border-t border-linea;
   }
 }

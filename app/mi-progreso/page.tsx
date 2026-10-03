@@ -1,12 +1,15 @@
-import { ArrowLeft, CalendarOff, CircleCheck, Flame, KeyRound } from "lucide-react";
+import { ArrowLeft, CalendarOff, KeyRound, Receipt } from "lucide-react";
 import Link from "next/link";
 import Anillo from "@/components/Anillo";
 import BotonSalir from "@/components/BotonSalir";
+import { CodigosProyecto } from "@/components/SelectorProyectos";
+import { Insignia, type Tono } from "@/components/ui";
 import { empresaDe, requirePagina } from "@/lib/auth";
 import { getDbEmpresa } from "@/lib/db";
 import { ausenciasDesde, gastosRecientes } from "@/lib/dominio";
 import { calcularProgreso, type DiaResumen } from "@/lib/metricas";
-import { UMBRAL_RACHA, fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
+import { fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
+import { cx } from "@/lib/cliente";
 
 export const dynamic = "force-dynamic";
 
@@ -14,40 +17,32 @@ const clp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP",
 
 function Dia({ d, hoy }: { d: DiaResumen; hoy: string }) {
   let detalle: string;
-  let color = "text-slate-600";
+  let horario: string | null = null;
+  let activo = false;
   if (d.registro === "cerrado") {
-    detalle = `${d.completadas}/${d.comprometidas} · ${d.inicio_local}–${d.cierre_local}`;
-    color = "text-slate-400";
+    detalle = `${d.completadas} de ${d.comprometidas} logrados`;
+    horario = `${d.inicio_local}–${d.cierre_local}`;
+    activo = true;
   } else if (d.registro === "abierto") {
     detalle = d.fecha === hoy ? `En curso desde las ${d.inicio_local}` : "Sin terminar";
-    color = "text-aether-accent-soft";
+    activo = true;
   } else if (d.tipo === "ooo") detalle = "No disponible";
   else if (d.tipo === "feriado") detalle = "Feriado";
   else if (d.tipo === "fin_de_semana") detalle = "Fin de semana";
   else detalle = "Sin jornada";
   return (
-    <li className="flex items-center justify-between py-2.5 text-xs">
-      <div className="flex items-center gap-2">
-        <span className="w-20 capitalize text-slate-300">{fechaCorta(d.fecha)}</span>
-        <span className={color}>{detalle}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        {d.cuenta_racha && <Flame size={13} className="fill-aether-success text-aether-success" />}
-        {d.saydo !== null && d.registro === "cerrado" && (
-          <span className={d.saydo >= 75 ? "font-semibold text-aether-success" : "font-semibold text-aether-warning"}>
-            {d.saydo}%
-          </span>
-        )}
-      </div>
+    <li className={cx("flex items-center gap-3 rounded-2xl px-4 py-3", activo ? "bg-suave" : "")}>
+      <span className={cx("w-24 shrink-0 text-sm capitalize", activo ? "font-semibold text-tinta" : "text-tinta-3")}>{fechaCorta(d.fecha)}</span>
+      <span className={cx("min-w-0 flex-1 text-sm", d.registro === "abierto" ? "text-indigo-tinta" : activo ? "text-tinta-2" : "text-tinta-3")}>
+        {detalle}
+        {horario && <span className="block text-xs tabular-nums text-tinta-3">{horario}</span>}
+      </span>
+      {d.saydo !== null && d.registro === "cerrado" && <span className="shrink-0 text-sm font-semibold text-tinta">{d.saydo}%</span>}
     </li>
   );
 }
 
-const ESTADO_GASTO = {
-  pendiente: "text-aether-warning bg-aether-warning/10",
-  aprobado: "text-aether-success bg-aether-success/10",
-  rechazado: "text-aether-danger bg-aether-danger/10",
-} as const;
+const ESTADO_GASTO: Record<string, Tono> = { pendiente: "alerta", aprobado: "ok", rechazado: "error" };
 
 export default async function MiProgreso() {
   const u = await requirePagina(["team"]);
@@ -59,40 +54,33 @@ export default async function MiProgreso() {
   const ausencias = ausenciasDesde(db, u.id, hoy);
 
   return (
-    <main className="mx-auto min-h-dvh max-w-md border-x border-aether-border px-4 pb-16 pt-[env(safe-area-inset-top)]">
-      <header className="mb-5 flex items-center justify-between border-b border-aether-border py-4">
-        <Link href="/checkin" className="flex items-center gap-1.5 text-xs text-slate-400">
-          <ArrowLeft size={14} /> Mi jornada
+    <main className="mx-auto min-h-dvh max-w-lg space-y-4 px-4 pb-16 pt-[max(env(safe-area-inset-top),1rem)]">
+      <header className="tarjeta flex items-center gap-3 px-4 py-3">
+        <Link href="/checkin" aria-label="Volver a mi jornada" className="boton-icono">
+          <ArrowLeft size={20} />
         </Link>
-        <div className="text-center">
-          <p className="text-sm font-bold text-white">Mi Progreso</p>
-          <p className="text-[10px] uppercase tracking-wider text-aether-muted">{empresa.nombre}</p>
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-semibold text-tinta">Mi progreso</p>
+          <p className="text-xs text-tinta-3">{empresa.nombre}</p>
         </div>
-        <BotonSalir conTexto={false} className="p-1.5" />
+        <BotonSalir conTexto={false} />
       </header>
 
-      <section className="mb-5 grid grid-cols-2 gap-3">
-        <div className="tarjeta flex flex-col items-center justify-center p-4">
-          <Flame size={26} className={p.racha > 0 ? "fill-aether-success text-aether-success" : "text-slate-600"} />
-          <p className="mt-1 text-3xl font-bold tabular-nums text-white">{p.racha}</p>
-          <p className="text-[11px] text-slate-400">{p.racha === 1 ? "jornada de racha" : "jornadas de racha"}</p>
-        </div>
-        <div className="tarjeta flex flex-col items-center justify-center p-4">
-          <Anillo valor={p.saydo_14d} tamano={72} etiqueta="14 días" />
-          <p className="mt-2 text-[11px] text-slate-400">
-            {p.completadas_14d} de {p.comprometidas_14d} objetivos
+      <section className="tarjeta flex items-center gap-5 p-5">
+        <Anillo valor={p.saydo_14d} tamano={112} grosor={14} />
+        <div>
+          <p className="text-base font-semibold text-tinta">Objetivos logrados</p>
+          <p className="text-sm text-tinta-3">últimos 14 días</p>
+          <p className="mt-2 text-sm text-tinta-2">
+            {p.completadas_14d} de {p.comprometidas_14d} objetivos · {p.jornadas_14d} jornada{p.jornadas_14d === 1 ? "" : "s"}
           </p>
+          <p className="mt-1 text-xs text-tinta-3">La jornada en curso cuenta al terminarla.</p>
         </div>
       </section>
 
-      <p className="mb-5 text-[11px] leading-relaxed text-slate-500">
-        La racha suma cada jornada terminada con al menos {UMBRAL_RACHA}% de sus objetivos logrados. Los días sin jornada
-        no la cortan; una jornada bajo {UMBRAL_RACHA}% la reinicia.
-      </p>
-
-      <section className="tarjeta mb-5 px-4 py-2">
-        <h2 className="pt-2 text-xs font-bold uppercase tracking-wider text-slate-400">Últimos 14 días</h2>
-        <ul className="divide-y divide-aether-border">
+      <section className="tarjeta p-5">
+        <h2 className="titulo-seccion mb-3">Últimos 14 días</h2>
+        <ul className="space-y-1">
           {p.historial.map((d) => (
             <Dia key={d.fecha} d={d} hoy={hoy} />
           ))}
@@ -100,38 +88,40 @@ export default async function MiProgreso() {
       </section>
 
       {ausencias.length > 0 && (
-        <section className="tarjeta mb-5 px-4 py-3">
-          <h2 className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
-            <CalendarOff size={13} /> Próximos días no disponibles
+        <section className="tarjeta p-5">
+          <h2 className="titulo-seccion mb-3 flex items-center gap-2">
+            <CalendarOff size={18} className="text-indigo" /> Próximos días no disponibles
           </h2>
-          <ul className="divide-y divide-aether-border text-xs">
+          <ul className="space-y-2">
             {ausencias.map((a) => (
-              <li key={a.id} className="flex justify-between py-2">
-                <span className="capitalize text-slate-300">{a.fecha === hoy ? "Hoy" : fechaCorta(a.fecha)}</span>
-                <span className="text-slate-500">{a.motivo ?? ""}</span>
+              <li key={a.id} className="flex justify-between rounded-2xl bg-pastel-azul px-4 py-2.5 text-sm">
+                <span className="font-semibold capitalize text-tinta">{a.fecha === hoy ? "Hoy" : fechaCorta(a.fecha)}</span>
+                <span className="text-tinta-2">{a.motivo ?? ""}</span>
               </li>
             ))}
           </ul>
         </section>
       )}
 
-      <section className="tarjeta mb-5 px-4 py-3">
-        <h2 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Mis compras</h2>
+      <section className="tarjeta p-5">
+        <h2 className="titulo-seccion mb-3">Mis compras</h2>
         {gastos.length === 0 ? (
-          <p className="py-2 text-xs text-slate-500">Aún no registras compras.</p>
+          <p className="text-sm text-tinta-3">Aún no registras compras.</p>
         ) : (
-          <ul className="divide-y divide-aether-border">
+          <ul className="space-y-2">
             {gastos.map((g) => (
-              <li key={g.id} className="flex items-center justify-between gap-2 py-2.5 text-xs">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-white">{g.item}</p>
-                  <p className="text-slate-500">
-                    <span className="font-mono">{g.proyectos.join(" · ")}</span> · {fechaCorta(fechaLocal(g.creado_en))}
-                  </p>
+              <li key={g.id} className="flex items-start gap-3 rounded-2xl bg-suave p-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-superficie text-indigo">
+                  <Receipt size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="line-clamp-2 font-medium leading-snug text-tinta">{g.item}</p>
+                  <p className="text-xs capitalize text-tinta-3">{fechaCorta(fechaLocal(g.creado_en))}</p>
+                  <CodigosProyecto codigos={g.proyectos} className="mt-1.5" />
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="tabular-nums text-slate-200">{clp.format(g.monto_clp)}</span>
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${ESTADO_GASTO[g.estado]}`}>{g.estado}</span>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="font-semibold text-tinta">{clp.format(g.monto_clp)}</span>
+                  <Insignia tono={ESTADO_GASTO[g.estado]}>{g.estado}</Insignia>
                 </div>
               </li>
             ))}
@@ -139,12 +129,13 @@ export default async function MiProgreso() {
         )}
       </section>
 
-      <Link href="/cambiar-pin" className="tarjeta flex items-center gap-2 px-4 py-3 text-xs font-semibold text-slate-300">
-        <KeyRound size={15} /> Cambiar mi código de acceso
+      <Link href="/cambiar-pin" className="tarjeta flex items-center gap-3 px-5 py-4 text-sm font-semibold text-tinta hover:bg-suave">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-suave text-indigo-tinta">
+          <KeyRound size={18} />
+        </span>
+        Cambiar mi código de acceso
       </Link>
-      <p className="mt-6 flex items-center justify-center gap-1 text-[10px] text-slate-600">
-        <CircleCheck size={11} /> {u.email}
-      </p>
+      <p className="text-center text-xs text-tinta-3">{u.email}</p>
     </main>
   );
 }

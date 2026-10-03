@@ -68,11 +68,11 @@ export default function PinPad({ titulo, subtitulo, onCompleto, ocupado, error, 
 
   return (
     <div className="flex flex-col items-center">
-      <p className="text-base font-semibold text-white">{titulo}</p>
-      {subtitulo && <p className="mt-1 text-center text-xs text-slate-400">{subtitulo}</p>}
+      <p className="text-xl font-semibold text-tinta">{titulo}</p>
+      {subtitulo && <p className="mt-1 text-center text-sm text-tinta-3">{subtitulo}</p>}
 
       <div
-        className={cx("mt-6 flex gap-4", temblor && "animate-temblor")}
+        className={cx("mt-7 flex gap-3.5", temblor && "animate-temblor")}
         role="status"
         aria-label={`${pin.length} de 6 dígitos ingresados`}
       >
@@ -80,22 +80,16 @@ export default function PinPad({ titulo, subtitulo, onCompleto, ocupado, error, 
           <span
             key={i}
             className={cx(
-              "h-3.5 w-3.5 rounded-full border-2 transition-all duration-150",
-              i < pin.length
-                ? error && temblor
-                  ? "scale-110 border-aether-danger bg-aether-danger"
-                  : "scale-110 border-aether-accent-soft bg-aether-accent-soft"
-                : "border-slate-600",
+              "h-3.5 w-3.5 rounded-full transition-all duration-150",
+              i < pin.length ? (error && temblor ? "scale-110 bg-error" : "scale-110 bg-indigo") : "bg-linea",
             )}
           />
         ))}
       </div>
 
-      <p className={cx("mt-4 h-5 text-center text-xs", error ? "text-aether-danger" : "text-transparent")}>
-        {error || "·"}
-      </p>
+      <p className={cx("mt-4 min-h-5 text-center text-sm", error ? "text-error-tinta" : "text-transparent")}>{error || "·"}</p>
 
-      <div className="mt-3 grid grid-cols-3 gap-x-6 gap-y-4">
+      <div className="mt-4 grid grid-cols-3 gap-x-6 gap-y-4">
         {TECLAS.map((t, i) =>
           t === "" ? (
             <span key={i} />
@@ -107,8 +101,10 @@ export default function PinPad({ titulo, subtitulo, onCompleto, ocupado, error, 
               onClick={() => pulsar(t)}
               aria-label={t === "borrar" ? "Borrar" : t}
               className={cx(
-                "flex h-[72px] w-[72px] select-none items-center justify-center rounded-full text-2xl font-light text-white transition-all active:scale-95 disabled:opacity-40",
-                t === "borrar" ? "text-slate-400 active:bg-white/5" : "bg-white/[0.07] active:bg-white/20",
+                "flex h-[72px] w-[72px] select-none items-center justify-center rounded-full text-2xl font-medium transition active:scale-95 disabled:opacity-40",
+                t === "borrar"
+                  ? "text-tinta-3 hover:bg-superficie/60"
+                  : "bg-superficie text-tinta shadow-tarjeta hover:bg-indigo-suave active:bg-indigo-suave",
               )}
             >
               {t === "borrar" ? <Delete size={24} /> : t}

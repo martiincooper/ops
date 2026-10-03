@@ -40,18 +40,21 @@ export default function EditorMetas({ empresa, metas, defecto }: { empresa: stri
   }
 
   return (
-    <section className="tarjeta mb-4 p-4">
-      <button type="button" onClick={() => setAbierto((a) => !a)} aria-expanded={abierto} className="flex w-full items-center justify-between text-left">
-        <span className="flex items-center gap-1.5 text-xs font-bold text-white">
-          <Target size={14} className="text-aether-accent-soft" /> Metas de los indicadores
+    <section className="tarjeta p-6">
+      <button type="button" onClick={() => setAbierto((a) => !a)} aria-expanded={abierto} className="flex w-full items-center gap-3 text-left">
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-suave text-indigo-tinta">
+          <Target size={20} />
         </span>
-        <span className="text-[11px] text-slate-400">{abierto ? "Cerrar" : "Editar"}</span>
+        <span className="flex-1">
+          <span className="block text-base font-semibold text-tinta">Metas de los indicadores</span>
+          <span className="block text-sm text-tinta-3">Las define la jefatura para esta empresa; gerencia las ve en cada indicador.</span>
+        </span>
+        <span className="boton-suave">{abierto ? "Cerrar" : "Editar"}</span>
       </button>
-      <p className="mt-1 text-[11px] text-slate-500">Las define la jefatura para esta empresa; gerencia las ve en cada indicador.</p>
       {abierto && (
-        <div className="mt-3 space-y-3">
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
           {CAMPOS.map((c) => (
-            <div key={c.clave}>
+            <div key={c.clave} className="rounded-2xl bg-suave p-4">
               <label htmlFor={`meta-${c.clave}`} className="etiqueta">
                 {c.etiqueta}
               </label>
@@ -64,22 +67,22 @@ export default function EditorMetas({ empresa, metas, defecto }: { empresa: stri
                   max={c.max}
                   value={valores[c.clave]}
                   onChange={(e) => setValores((v) => ({ ...v, [c.clave]: e.target.value }))}
-                  className="campo w-28 text-sm"
+                  className="campo w-28 bg-superficie"
                 />
-                <span className="text-xs text-slate-400">
+                <span className="text-sm text-tinta-3">
                   {c.sufijo} · por defecto {defecto[c.clave]}
                 </span>
               </div>
             </div>
           ))}
-          {aviso && (
-            <p className={`rounded-lg px-3 py-2 text-xs ${aviso.ok ? "bg-aether-success/10 text-aether-success" : "bg-aether-danger/10 text-aether-danger"}`}>
-              {aviso.texto}
-            </p>
-          )}
-          <button type="button" onClick={guardar} disabled={ocupado} className="flex items-center gap-2 rounded-lg bg-aether-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
-            {ocupado && <LoaderCircle size={14} className="animate-spin" />} Guardar metas
-          </button>
+          <div className="flex flex-wrap items-center gap-3 md:col-span-3">
+            <button type="button" onClick={guardar} disabled={ocupado} className="boton px-6 py-2.5">
+              {ocupado && <LoaderCircle size={16} className="animate-spin" />} Guardar metas
+            </button>
+            {aviso && (
+              <p className={`rounded-full px-4 py-2 text-sm ${aviso.ok ? "bg-ok-fondo text-ok-tinta" : "bg-error-fondo text-error-tinta"}`}>{aviso.texto}</p>
+            )}
+          </div>
         </div>
       )}
     </section>
