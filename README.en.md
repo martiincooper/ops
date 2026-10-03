@@ -61,7 +61,9 @@ Repo: [github.com/martiincooper/ops](https://github.com/martiincooper/ops). Rail
 
 ## Executive view (`/exec`)
 
-Three focus areas; **delivered projects are excluded** from them and listed at the bottom.
+Three focus areas; **delivered projects are excluded** from them and listed at the bottom. Built to be read at a
+glance: three big numbers, cost bars, a per-project timeline (actual stages over the plan to the estimated delivery,
+with a "Hoy" marker) and the pipeline as columns; definitions sit in a collapsed "¿Cómo se calcula?".
 1) **Accumulated cost vs BOM estimate** (target ≤ 100 %, up to +10 % = at risk; the tolerance is the only editable
 target), projects not yet delivered. 2) **Concept-to-customer time**: days from project start to delivery and per
 stage, measured against the **estimated delivery date** entered when the project is created (no other target).

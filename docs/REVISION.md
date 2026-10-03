@@ -250,3 +250,16 @@ development pipeline so upper management does not keep adding projects while man
   Status always icon + text. No horizontal overflow at 390 px.
 - Tests: logic 28 (stage history, same-day correction, pipeline threshold, delivered KPIs, v4→v5 migration),
   e2e 45 (history recorded via API, date-correction rules and permissions, pipeline warning, delivered exclusion).
+
+## 14. Pass 9 — executive view, visual first
+
+Feedback: too much text, explained too deeply. The view now leads with visuals and keeps prose out of the way:
+three big-number tiles (the pipeline tile carries a mini stacked bar of projects per stage); cost as bullet bars
+(spend vs a 100 %-of-BOM marker) in two columns; concept-to-customer as a shared-axis timeline per project —
+the plan from start to estimated delivery as a light track, the actual stages (from the stage history, in
+chronological order) filled over it up to a "Hoy" line, and a red marker when the estimated date has passed;
+the pipeline as three columns with a big count and compact cards (days in stage, late icon); delivered projects
+as one-line rows with chips that expand into a stage bar and two numbers. A one-line warning replaces the
+paragraph; all definitions moved into one collapsed "¿Cómo se calcula?". Same data and API
+(`ProyectoEnCurso.tramos` added for the timeline). Hover titles on every mark, legends kept, labels inside
+fills switch to dark ink on the lightest stage color; no horizontal overflow at 360/390 px.

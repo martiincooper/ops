@@ -69,6 +69,9 @@ rechazadas no cuentan).
 ## Vista de gerencia (`/exec`)
 
 Tres focos, en este orden. Los proyectos **entregados no entran** en los indicadores: se listan al final.
+Pensada para entenderse de un vistazo: tres números grandes arriba, barras de costo, una línea de tiempo por
+proyecto (etapas reales sobre el plan hasta la entrega estimada, con la marca de «Hoy») y el pipeline en columnas.
+Las definiciones quedan en «¿Cómo se calcula?», al final.
 
 | # | Indicador | Meta | Alcance |
 |---|---|---|---|

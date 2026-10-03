@@ -272,6 +272,8 @@ export interface ProyectoEnCurso {
   etapa_desde: string;
   dias_en_etapa: number;
   dias_por_etapa: DiasPorEtapa;
+  /** Etapas en orden cronológico, la última hasta hoy (para la línea de tiempo). */
+  tramos: { estado: EstadoProyecto; desde: string; hasta: string; dias: number }[];
   estimado_clp: number;
   costo_clp: number;
   pct_costo: number | null;
@@ -410,6 +412,7 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
         etapa_desde: actual.desde,
         dias_en_etapa: actual.dias,
         dias_por_etapa: diasPorEtapa(t),
+        tramos: t.map((x) => ({ estado: x.estado, desde: x.desde, hasta: x.hasta ?? hoy, dias: x.dias })),
         estimado_clp: p.estimado_clp,
         costo_clp: p.total_clp,
         pct_costo: pct,

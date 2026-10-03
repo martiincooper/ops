@@ -41,16 +41,14 @@ export default function EditorMetas({ empresa, metas, defecto }: { empresa: stri
   }
 
   return (
-    <section className="tarjeta p-6">
+    <section className="tarjeta px-5 py-4">
       <button type="button" onClick={() => setAbierto((a) => !a)} aria-expanded={abierto} className="flex w-full items-center gap-3 text-left">
         <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-suave text-indigo-tinta">
           <Target size={20} />
         </span>
         <span className="flex-1">
           <span className="block text-base font-semibold text-tinta">Tolerancia de costo</span>
-          <span className="block text-sm text-tinta-3">
-            Cuánto puede pasarse un proyecto de su estimación BOM antes de quedar «fuera de meta». La define la jefatura para esta empresa.
-          </span>
+          <span className="block text-sm text-tinta-3">+{metas.tolerancia_costo_pct}% sobre el BOM · solo jefatura</span>
         </span>
         <span className="boton-suave">{abierto ? "Cerrar" : "Editar"}</span>
       </button>
