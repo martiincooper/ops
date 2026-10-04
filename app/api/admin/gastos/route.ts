@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { manejar } from "@/lib/http";
+import { idsHeredados } from "@/lib/registros";
 import { supervisadosDe } from "@/lib/supervision";
 import { gastosEmpresa } from "@/lib/tableros";
 
@@ -13,7 +14,8 @@ export const GET = manejar(async (req: NextRequest) => {
   const mios = q.get("alcance") !== "todos";
   const gastos = gastosEmpresa(db, {
     estado: q.get("estado") === "todos" ? "todos" : "pendiente",
-    ids: mios ? supervisadosDe(u.id, empresa.clave) : null,
+    // Mis supervisados + los registros que heredé al eliminar cuentas
+    ids: mios ? new Set([...supervisadosDe(u.id, empresa.clave), ...idsHeredados(db, u.id)]) : null,
   });
   return NextResponse.json({ empresa, alcance: mios ? "mios" : "todos", gastos });
 });

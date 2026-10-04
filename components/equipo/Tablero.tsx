@@ -1,21 +1,22 @@
 "use client";
 
-import { AlertTriangle, CalendarOff, Check, Flag, ListChecks, LoaderCircle, Play, Plus, Receipt } from "lucide-react";
+import { AlertTriangle, CalendarOff, Flag, ListChecks, LoaderCircle, Play, Plus, Receipt } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import Anillo from "@/components/Anillo";
 import FormGasto from "@/components/FormGasto";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
-import { PASTELES } from "@/components/ui";
 import type { EstadoDia, TareaDia } from "@/lib/dominio";
 import { ErrorApi, api, clp, cx, horaDe } from "@/lib/cliente";
+import Objetivos from "./Objetivos";
 
 const DIA = ["D", "L", "M", "M", "J", "V", "S"];
 
 interface Props {
   estado: EstadoDia;
   onCambio: (e: EstadoDia) => void;
-  onAbrir: (cual: "comenzar" | "terminar") => void;
+  onTerminar: () => void;
+  onAviso: (texto: string) => void;
   onNoDisponible: () => void;
 }
 
@@ -33,22 +34,23 @@ function conteo(tareas: TareaDia[]) {
   return { comp, total, pct: total > 0 ? Math.round((comp / total) * 100) : null };
 }
 
-export default function Tablero({ estado, onCambio, onAbrir, onNoDisponible }: Props) {
+export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDisponible }: Props) {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formGasto, setFormGasto] = useState(false);
-  const cuenta = conteo(estado.tareas);
   const j = estado.jornada;
   const enCurso = estado.fase === "en_curso";
   const conJornada = enCurso || estado.fase === "terminada";
+  const cuenta = conteo(conJornada ? estado.tareas : []);
   const deOtroDia = enCurso && j !== null && j.fecha !== estado.hoy;
 
-  async function alternar(t: TareaDia) {
-    if (!enCurso || t.estado === "postergado_ooo") return;
-    setOcupado(t.id);
+  // Comenzar es solo el evento: un toque. Los objetivos se agregan después, aquí mismo.
+  async function comenzar() {
+    setOcupado("comenzar");
     setError(null);
     try {
-      onCambio(await api<EstadoDia>(`/api/jornada/objetivos/${t.id}`, { method: "PATCH", json: { completada: t.estado !== "completado" } }));
+      onCambio(await api<EstadoDia>("/api/jornada/comenzar", { method: "POST", json: {} }));
+      onAviso("Jornada comenzada. Agrega tus objetivos.");
     } catch (e) {
       setError((e as ErrorApi).message);
     } finally {
@@ -97,10 +99,10 @@ export default function Tablero({ estado, onCambio, onAbrir, onNoDisponible }: P
 
         {estado.fase === "sin_iniciar" && (
           <div className="mt-5">
-            <p className="mb-3 text-center text-sm text-tinta-3">Comienza cuando quieras: define tus objetivos y termina la jornada cuando cierres por hoy.</p>
-            <button type="button" onClick={() => onAbrir("comenzar")} disabled={estado.proyectos.length === 0} className="boton-primario">
-              <Play size={18} className="fill-white" /> Comenzar jornada
+            <button type="button" onClick={comenzar} disabled={estado.proyectos.length === 0 || ocupado !== null} className="boton-primario">
+              {ocupado === "comenzar" ? <LoaderCircle size={18} className="animate-spin" /> : <Play size={18} className="fill-white" />} Comenzar jornada
             </button>
+            <p className="mt-2 text-center text-xs text-tinta-3">Marca el comienzo; tus objetivos los agregas después.</p>
             {estado.proyectos.length === 0 && (
               <p className="mt-2 text-center text-sm text-alerta-tinta">No hay proyectos activos. Pide a tu jefatura que cree uno.</p>
             )}
@@ -125,9 +127,10 @@ export default function Tablero({ estado, onCambio, onAbrir, onNoDisponible }: P
                 <AlertTriangle size={16} className="mt-0.5 shrink-0" /> Esta jornada sigue abierta. Termínala para comenzar la de hoy.
               </p>
             )}
-            <button type="button" onClick={() => onAbrir("terminar")} className="boton-primario">
+            <button type="button" onClick={onTerminar} disabled={estado.tareas.length === 0} className="boton-primario">
               <Flag size={18} /> Terminar jornada
             </button>
+            {estado.tareas.length === 0 && <p className="text-center text-xs text-tinta-3">Agrega al menos un objetivo para terminar.</p>}
           </div>
         )}
 
@@ -136,52 +139,14 @@ export default function Tablero({ estado, onCambio, onAbrir, onNoDisponible }: P
             <p className="font-semibold">
               Jornada terminada · {cuenta.comp}/{cuenta.total} logrados · {duracion(j.checkin_manana, j.checkout_tarde)}
             </p>
-            <p className="text-xs opacity-80">Mañana puedes comenzar otra.</p>
+            <p className="text-xs opacity-80">Puedes seguir editando tus objetivos hasta que comiences la próxima jornada.</p>
           </div>
         )}
       </section>
 
-      {/* Objetivos de la jornada */}
-      {conJornada && estado.tareas.length > 0 && (
-        <section className="tarjeta p-5">
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="titulo-seccion">Objetivos</h2>
-            {enCurso && <span className="text-sm text-tinta-3">Toca uno cuando lo logres</span>}
-          </div>
-          <ul className="space-y-3">
-            {estado.tareas.map((t, i) => {
-              const hecho = t.estado === "completado";
-              const editable = enCurso && t.estado !== "postergado_ooo";
-              return (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    disabled={!editable || ocupado !== null}
-                    aria-pressed={hecho}
-                    onClick={() => alternar(t)}
-                    className={cx("flex w-full items-start gap-3 rounded-3xl p-4 text-left transition", PASTELES[i % PASTELES.length], editable && "hover:brightness-[0.98] active:scale-[0.99]")}
-                  >
-                    <span
-                      className={cx(
-                        "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition",
-                        hecho ? "bg-tinta text-white" : "bg-superficie text-transparent ring-2 ring-tinta/15",
-                      )}
-                    >
-                      {ocupado === t.id ? <LoaderCircle size={15} className="animate-spin text-tinta" /> : <Check size={15} strokeWidth={3} />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className={cx("block font-medium leading-snug text-tinta", hecho && "text-tinta-2 line-through decoration-tinta-3")}>{t.descripcion}</span>
-                      <CodigosProyecto codigos={t.proyectos.map((p) => p.codigo)} className="mt-2" />
-                      {t.motivo_pendiente && <span className="mt-2 block text-sm text-alerta-tinta">Pendiente: {t.motivo_pendiente}</span>}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          {error && <p className="mt-3 rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
-        </section>
-      )}
+      {/* Objetivos de la jornada editable (en curso o la última terminada, hasta comenzar la próxima) */}
+      {j && <Objetivos key={j.id} estado={estado} onCambio={onCambio} />}
+      {error && <p role="alert" className="rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
 
       {/* Semana */}
       <section className="tarjeta p-5">

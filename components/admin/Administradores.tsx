@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Lock, RotateCcw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { Ban, LoaderCircle, Lock, RotateCcw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "@/components/ui";
 import { api, cx } from "@/lib/cliente";
@@ -132,10 +132,11 @@ export default function Administradores({ yo }: { yo: Yo }) {
                               <button
                                 type="button"
                                 disabled={ocupado !== null}
-                                onClick={() => patch(a, { activo: false }, `${a.email} desactivado.`)}
+                                onClick={() => patch(a, { activo: false }, `${a.email} desactivado: ya no puede ingresar.`)}
+                                title="Sin acceso; se puede reactivar"
                                 className="boton-texto px-2.5 py-1 text-xs"
                               >
-                                Desactivar
+                                <Ban size={13} /> Desactivar
                               </button>
                             </>
                           ) : (
@@ -156,12 +157,12 @@ export default function Administradores({ yo }: { yo: Yo }) {
                                   await api(`/api/admin/administradores/${a.id}`, { method: "DELETE" });
                                   setConfirmar(null);
                                   await recargar();
-                                  return `${a.email} eliminado; sus supervisiones se quitaron.`;
+                                  return `${a.email} eliminado definitivamente; sus supervisiones se quitaron (las validaciones que hizo conservan su nombre).`;
                                 })
                               }
                               className="rounded-full bg-error px-3 py-1 text-xs font-semibold text-white"
                             >
-                              ¿Eliminar?
+                              ¿Eliminar definitivamente?
                             </button>
                           ) : (
                             <button
@@ -170,7 +171,7 @@ export default function Administradores({ yo }: { yo: Yo }) {
                               onClick={() => setConfirmar(a.id)}
                               className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-tinta-2 hover:bg-error-fondo hover:text-error-tinta"
                             >
-                              <Trash2 size={13} /> Quitar
+                              <Trash2 size={13} /> Eliminar
                             </button>
                           )}
                         </div>

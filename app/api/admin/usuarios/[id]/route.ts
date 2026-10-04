@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { esquemaUsuarioCambio } from "@/lib/esquemas";
+import { getDbControl } from "@/lib/db";
 import { HttpError, leerJson, manejar } from "@/lib/http";
+import { eliminarCuenta, registrosDe } from "@/lib/registros";
 import { borrarSupervisionDe, fijarSupervisores } from "@/lib/supervision";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -10,7 +12,7 @@ export const PATCH = manejar<Ctx>(async (req, { params }) => {
   const { empresa, db } = await contexto(req, ["admin"]);
   const { id } = await params;
   const c = await leerJson(req, esquemaUsuarioCambio);
-  const u = db.prepare("SELECT id, rol, activo FROM usuarios WHERE id = ?").get(id) as
+  const u = db.prepare("SELECT id, rol, activo FROM usuarios WHERE id = ? AND admin_id IS NULL").get(id) as
     | { id: string; rol: string; activo: number }
     | undefined;
   if (!u) throw new HttpError(404, "Cuenta no encontrada");
@@ -39,23 +41,27 @@ export const PATCH = manejar<Ctx>(async (req, { params }) => {
   return NextResponse.json({ ok: true });
 });
 
-/** Sin historial → se elimina. Con bitácoras o compras → se desactiva (los registros financieros conservan su autor). */
+/**
+ * Elimina la cuenta definitivamente (equipo o gerencia). Si tiene jornadas o compras, pasan al administrador
+ * indicado en ?asignar_a= (por defecto, en la interfaz, quien la supervisa), así los proyectos conservan su costo.
+ * Para conservar la cuenta sin acceso, se usa PATCH { activo: false } (desactivar).
+ */
 export const DELETE = manejar<Ctx>(async (req, { params }) => {
   const { empresa, db } = await contexto(req, ["admin"]);
   const { id } = await params;
-  if (!db.prepare("SELECT 1 FROM usuarios WHERE id = ?").get(id)) throw new HttpError(404, "Cuenta no encontrada");
-  const { historial } = db
-    .prepare(
-      `SELECT EXISTS (SELECT 1 FROM bitacoras WHERE usuario_id = ?)
-           OR EXISTS (SELECT 1 FROM gastos WHERE usuario_id = ?) AS historial`,
-    )
-    .get(id, id) as { historial: number };
-
-  if (historial) {
-    db.prepare("UPDATE usuarios SET activo = 0, version_sesion = version_sesion + 1 WHERE id = ?").run(id);
-    return NextResponse.json({ accion: "desactivado" });
+  const u = db.prepare("SELECT id FROM usuarios WHERE id = ? AND admin_id IS NULL").get(id);
+  if (!u) throw new HttpError(404, "Cuenta no encontrada");
+  const r = registrosDe(db, id);
+  type Admin = { id: string; nombre: string };
+  let admin: Admin | null = null;
+  if (r.jornadas + r.compras > 0) {
+    const asignarA = req.nextUrl.searchParams.get("asignar_a");
+    if (!asignarA) throw new HttpError(400, "Elige a qué administrador pasan sus registros");
+    const fila = getDbControl().prepare("SELECT id, nombre FROM usuarios WHERE id = ? AND activo = 1").get(asignarA) as Admin | undefined;
+    if (!fila) throw new HttpError(400, "Administrador inexistente o desactivado");
+    admin = fila;
   }
-  db.prepare("DELETE FROM usuarios WHERE id = ?").run(id);
+  const resumen = eliminarCuenta(db, id, admin);
   borrarSupervisionDe(empresa.clave, id);
-  return NextResponse.json({ accion: "eliminado" });
+  return NextResponse.json({ accion: "eliminado", ...resumen, asignado_a: admin?.nombre ?? null });
 });

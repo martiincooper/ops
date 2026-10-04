@@ -1,27 +1,42 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { contexto } from "@/lib/auth";
-import { estadoDia, jornadaEnCurso } from "@/lib/dominio";
+import { estadoDia } from "@/lib/dominio";
+import { esquemaObjetivoCambio } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
+import { ErrorObjetivo, cambiarObjetivo, quitarObjetivo } from "@/lib/objetivos";
 import { ahoraIso } from "@/lib/tiempo";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-const esquema = z.object({ completada: z.boolean() });
+function traducir(e: unknown): never {
+  if (e instanceof ErrorObjetivo) throw new HttpError(e.status, e.message);
+  throw e;
+}
 
-/** Marca un objetivo de la jornada en curso como logrado (o lo desmarca) antes de terminarla. */
+/**
+ * Edita un objetivo de la jornada editable: logrado / pendiente, descripción, proyectos y motivo pendiente.
+ * Vale durante la jornada y después de terminarla, hasta comenzar la próxima.
+ */
 export const PATCH = manejar<Ctx>(async (req, { params }) => {
   const { u, db, empresa } = await contexto(req, ["team"]);
   const { id } = await params;
-  const { completada } = await leerJson(req, esquema);
-  const j = jornadaEnCurso(db, u.id);
-  if (!j) throw new HttpError(409, "No tienes una jornada en curso");
-  const r = db
-    .prepare(
-      `UPDATE tareas_diarias SET estado = ?, motivo_pendiente = NULL, actualizado_en = ?
-        WHERE id = ? AND bitacora_id = ? AND estado <> 'postergado_ooo'`,
-    )
-    .run(completada ? "completado" : "pendiente", ahoraIso(), id, j.id);
-  if (r.changes !== 1) throw new HttpError(404, "Objetivo no encontrado en tu jornada en curso");
+  const c = await leerJson(req, esquemaObjetivoCambio);
+  try {
+    cambiarObjetivo(db, u.id, id, c, ahoraIso());
+  } catch (e) {
+    traducir(e);
+  }
+  return NextResponse.json(estadoDia(db, u, empresa));
+});
+
+/** Quita un objetivo de la jornada editable (una jornada terminada conserva al menos uno). */
+export const DELETE = manejar<Ctx>(async (req, { params }) => {
+  const { u, db, empresa } = await contexto(req, ["team"]);
+  const { id } = await params;
+  try {
+    quitarObjetivo(db, u.id, id);
+  } catch (e) {
+    traducir(e);
+  }
   return NextResponse.json(estadoDia(db, u, empresa));
 });

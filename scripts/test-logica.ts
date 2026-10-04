@@ -6,6 +6,8 @@ import { empresaPorEmail } from "../lib/empresas";
 import { esquemaGasto } from "../lib/esquemas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
+import { ErrorObjetivo, agregarObjetivo, bitacoraEditable, cambiarBloqueo, cambiarObjetivo, quitarObjetivo } from "../lib/objetivos";
+import { eliminarCuenta, idsHeredados } from "../lib/registros";
 import { repartirMonto } from "../lib/reparto";
 import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
@@ -369,6 +371,61 @@ async function main() {
     assert.deepEqual(h.get("c")!.map((f) => [f.estado, f.desde]), [["concepto", "2027-01-15"], ["prototipado", "2027-01-15"]]);
     d.prepare("DELETE FROM proyectos WHERE id = 'a'").run(); // en cascada
     assert.equal((d.prepare("SELECT COUNT(*) n FROM proyecto_etapas WHERE proyecto_id = 'a'").get() as { n: number }).n, 0);
+  });
+
+  console.log("Objetivos editables");
+  await prueba("solo la jornada más reciente es editable; al comenzar otra, la anterior queda fija", () => {
+    const d = dbNueva();
+    bitacora(d, "2026-09-29", "cp", "2026-09-29T20:00:00Z");
+    const ahora = "2026-09-30T12:00:00Z";
+    const ant = d.prepare("SELECT id FROM tareas_diarias ORDER BY orden LIMIT 1").get() as { id: string };
+    cambiarObjetivo(d, "u1", ant.id, { completada: false }, ahora); // la última, aunque terminada: editable
+    const nuevo = agregarObjetivo(d, "u1", { descripcion: "Extra", proyecto_ids: ["p1"] }, 4, ahora);
+    assert.ok(nuevo);
+    assert.throws(() => agregarObjetivo(d, "u1", { descripcion: "x", proyecto_ids: ["p1"] }, 3, ahora), /Máximo 3/);
+    bitacora(d, "2026-09-30", "", null); // comienza la siguiente
+    assert.throws(() => cambiarObjetivo(d, "u1", ant.id, { completada: true }, ahora), (e: unknown) => e instanceof ErrorObjetivo && e.status === 409);
+    assert.throws(() => quitarObjetivo(d, "u1", nuevo), (e: unknown) => e instanceof ErrorObjetivo && e.status === 409);
+    assert.throws(() => cambiarBloqueo(d, "u1", "x"), (e: unknown) => e instanceof ErrorObjetivo && e.status === 409); // en curso
+    const otro = agregarObjetivo(d, "u1", { descripcion: "Hoy", proyecto_ids: ["p1"] }, 4, ahora);
+    assert.equal(bitacoraEditable(d, "u1")!.checkout_tarde, null);
+    quitarObjetivo(d, "u1", otro); // en curso: puede quedar sin objetivos
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM tareas_diarias WHERE id = ?").get(otro) as { n: number }).n, 0);
+  });
+
+  console.log("Eliminar cuentas");
+  await prueba("eliminar con registros: pasan al administrador; jornadas del mismo día se fusionan; días no disponibles se borran", () => {
+    const d = dbNueva();
+    const usr = d.prepare("INSERT INTO usuarios (id, nombre, email, rol) VALUES (?, ?, ?, 'team')");
+    usr.run("u2", "Beto", "beto@aether.cl");
+    usr.run("u3", "Carla", "carla@aether.cl");
+    const bit = d.prepare("INSERT INTO bitacoras (id, usuario_id, fecha, checkin_manana, checkout_tarde, bloqueos) VALUES (?, ?, ?, 'x', ?, ?)");
+    const tar = d.prepare("INSERT INTO tareas_diarias (id, bitacora_id, descripcion, estado) VALUES (?, ?, ?, 'completado')");
+    bit.run("bB", "u2", "2026-09-30", "2026-09-30T20:00:00Z", "Falta stock"); tar.run("tB", "bB", "De Beto");
+    bit.run("bC1", "u3", "2026-09-30", "2026-09-30T21:00:00Z", "Aduana"); tar.run("tC1", "bC1", "De Carla");
+    bit.run("bC2", "u3", "2026-09-29", null, null); tar.run("tC2", "bC2", "De Carla 2");
+    d.prepare("INSERT INTO gastos (id, usuario_id, bitacora_id, item, monto_clp) VALUES ('g1','u3','bC1','x',1000)").run();
+    d.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo) VALUES ('o1','u3','2026-10-05',1)").run();
+    const admin = { id: "a1", nombre: "Martin" };
+    assert.throws(() => eliminarCuenta(d, "u2", null));
+    assert.deepEqual(eliminarCuenta(d, "u2", admin), { jornadas: 1, compras: 0 });
+    assert.deepEqual(eliminarCuenta(d, "u3", admin), { jornadas: 2, compras: 1 });
+    const fila = d.prepare("SELECT id, nombre, activo, admin_id FROM usuarios WHERE admin_id = 'a1'").get() as { id: string; nombre: string; activo: number };
+    assert.deepEqual([fila.nombre, fila.activo], ["Martin", 0]);
+    assert.deepEqual(idsHeredados(d, "a1"), [fila.id]);
+    const bits = d.prepare("SELECT id, fecha, checkout_tarde, bloqueos FROM bitacoras WHERE usuario_id = ? ORDER BY fecha").all(fila.id) as { id: string; fecha: string; checkout_tarde: string | null; bloqueos: string | null }[];
+    assert.deepEqual(bits.map((b) => [b.fecha, b.checkout_tarde, b.bloqueos]), [
+      ["2026-09-29", null, null],
+      ["2026-09-30", "2026-09-30T21:00:00Z", "Falta stock / Aduana"],
+    ]);
+    const deLa30 = (d.prepare("SELECT descripcion FROM tareas_diarias WHERE bitacora_id = ? ORDER BY descripcion").all(bits[1].id) as { descripcion: string }[]).map((t) => t.descripcion);
+    assert.deepEqual(deLa30, ["De Beto", "De Carla"]);
+    assert.deepEqual(d.prepare("SELECT usuario_id, bitacora_id FROM gastos").all(), [{ usuario_id: fila.id, bitacora_id: bits[1].id }]);
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM ausencias_ooo").get() as { n: number }).n, 0);
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM usuarios WHERE id IN ('u2','u3')").get() as { n: number }).n, 0);
+    assert.ok(!equipoActivo(d).some((p) => p.id === fila.id), "la fila de registros heredados no es parte del equipo");
+    assert.deepEqual(eliminarCuenta(d, "u1", null), { jornadas: 0, compras: 0 }); // sin registros
+    assert.deepEqual(d.prepare("PRAGMA foreign_key_check").all(), []);
   });
 
   console.log("Códigos");

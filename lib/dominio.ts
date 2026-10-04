@@ -8,7 +8,7 @@ import { TZ_NEGOCIO, fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
 /**
  * Estado de la jornada del integrante (sin horario: se comienza y se termina cuando la persona quiere).
  *  - en_curso:       hay una jornada comenzada y sin terminar (puede ser de un día anterior).
- *  - terminada:      la jornada de hoy ya se terminó (una por día).
+ *  - terminada:      la jornada de hoy ya se terminó (una por día); sigue editable hasta comenzar la próxima.
  *  - no_disponible:  hoy está marcado como no disponible.
  *  - sin_iniciar:    puede comenzar la jornada de hoy.
  */
@@ -69,7 +69,10 @@ export interface EstadoDia {
   hoy_texto: string;
   tz: string;
   fase: Fase;
-  /** Jornada en curso (de cualquier fecha) o, si no hay, la de hoy ya terminada. */
+  /**
+   * Jornada editable: la en curso (de cualquier fecha) o, si no hay, la última terminada (de hoy o de antes).
+   * Se puede editar hasta comenzar la siguiente.
+   */
   jornada: Jornada | null;
   tareas: TareaDia[];
   no_disponible_hoy: Ausencia | null;
@@ -113,6 +116,18 @@ export function jornadaEnCurso(db: DB, usuarioId: string): Jornada | null {
     .prepare(`SELECT ${COLUMNAS} FROM bitacoras WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 1`)
     .get(usuarioId) as FilaJornada | undefined;
   return j && !j.checkout_tarde ? conTexto(j) : null;
+}
+
+/**
+ * Jornada editable: la más reciente de la persona, terminada o no. Sus objetivos (y, si ya terminó, el balance y el
+ * bloqueo) se pueden cambiar hasta que comience la siguiente, para que el standup vea la información final.
+ */
+export function jornadaEditable(db: DB, usuarioId: string): Jornada | null {
+  return conTexto(
+    db.prepare(`SELECT ${COLUMNAS} FROM bitacoras WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 1`).get(usuarioId) as
+      | FilaJornada
+      | undefined,
+  );
 }
 
 export function tareasDe(db: DB, bitacoraId: string): TareaDia[] {
@@ -167,8 +182,9 @@ export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoRe
 export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
   const hoy = hoyLocal();
   const enCurso = jornadaEnCurso(db, u.id);
-  const deHoy = enCurso ? null : jornadaDelDia(db, u.id, hoy);
-  const jornada = enCurso ?? deHoy;
+  const ultima = enCurso ?? jornadaEditable(db, u.id);
+  const deHoy = !enCurso && ultima?.fecha === hoy ? ultima : null;
+  const jornada = ultima;
   const ausencias = ausenciasDesde(db, u.id, hoy);
   const no_disponible_hoy = ausencias.find((a) => a.fecha === hoy) ?? null;
   const inicio = fechaLocal(u.creado_en);

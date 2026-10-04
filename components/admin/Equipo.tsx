@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, LoaderCircle, Lock, Pencil, RotateCcw, Trash2, UserPlus } from "lucide-react";
-import { useState } from "react";
+import { Ban, Check, LoaderCircle, Lock, Pencil, RotateCcw, Trash2, UserPlus } from "lucide-react";
+import { Fragment, useState } from "react";
 import { Avatar } from "@/components/ui";
 import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, fechaHora, useAccion, useDatos, type EmpresaPublica, type Yo } from "./comun";
@@ -15,7 +15,8 @@ interface Cuenta {
   debe_cambiar_pin: number;
   ultimo_acceso: string | null;
   bloqueado_hasta: string | null;
-  tiene_historial: number;
+  jornadas: number;
+  compras: number;
   supervisores: { id: string; nombre: string }[];
 }
 
@@ -65,6 +66,70 @@ function SelectorSupervisores({
             </button>
           );
         })}
+    </div>
+  );
+}
+
+/** Confirmación de eliminación definitiva; si hay registros, elige a qué administrador pasan. */
+function ConfirmarEliminacion({
+  u,
+  admins,
+  yo,
+  ocupado,
+  onEliminar,
+  onCancelar,
+}: {
+  u: Cuenta;
+  admins: AdminLista[];
+  yo: Yo;
+  ocupado: boolean;
+  onEliminar: (asignarA: string | null) => void;
+  onCancelar: () => void;
+}) {
+  const activos = admins.filter((a) => a.activo);
+  const supervisor = u.supervisores.find((s) => activos.some((a) => a.id === s.id));
+  const [destino, setDestino] = useState(supervisor?.id ?? yo.id);
+  const conRegistros = u.jornadas + u.compras > 0;
+  const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? "" : "s"}`;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-error-fondo/70 p-4 text-sm">
+      <Trash2 size={18} className="shrink-0 text-error-tinta" aria-hidden />
+      <p className="min-w-0 flex-1 basis-64 text-tinta">
+        <b className="font-semibold">Eliminar a {u.nombre} definitivamente.</b> No se puede deshacer.
+        {conRegistros ? (
+          <span className="mt-1 flex flex-wrap items-center gap-2 text-tinta-2">
+            <label htmlFor={`dest-${u.id}`}>
+              Sus {[u.jornadas ? plural(u.jornadas, "jornada") : null, u.compras ? plural(u.compras, "compra") : null].filter(Boolean).join(" y ")} pasan a
+            </label>
+            <select
+              id={`dest-${u.id}`}
+              value={destino}
+              onChange={(e) => setDestino(e.target.value)}
+              className="rounded-full border-0 bg-superficie px-3 py-1.5 text-sm text-tinta"
+            >
+              {activos.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nombre}
+                  {u.supervisores.some((s) => s.id === a.id) ? " (supervisa)" : a.id === yo.id ? " (tú)" : ""}
+                </option>
+              ))}
+            </select>
+          </span>
+        ) : (
+          <span className="block text-tinta-2">No tiene jornadas ni compras.</span>
+        )}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={ocupado}
+          onClick={() => onEliminar(conRegistros ? destino : null)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-error px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {ocupado && <LoaderCircle size={14} className="animate-spin" />} Eliminar definitivamente
+        </button>
+        <button type="button" onClick={onCancelar} className="boton-texto">Cancelar</button>
+      </div>
     </div>
   );
 }
@@ -162,7 +227,8 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                 const est = estadoCuenta(u);
                 const enEdicion = editando?.id === u.id;
                 return (
-                  <tr key={u.id} className={cx(!u.activo && "opacity-60")}>
+                  <Fragment key={u.id}>
+                  <tr className={cx(!u.activo && confirmar !== u.id && "opacity-60")}>
                     <td>
                       <span className="flex items-center gap-2.5">
                         <Avatar nombre={u.nombre} tamano={36} />
@@ -245,47 +311,68 @@ export default function Equipo({ empresa, yo }: { empresa: EmpresaPublica; yo: Y
                             >
                               <RotateCcw size={13} /> Resetear código
                             </button>
-                            {confirmar === u.id ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  ejecutar(u.id, async () => {
-                                    const r = await api<{ accion: string }>(url(u.id), { method: "DELETE" });
-                                    setConfirmar(null);
-                                    await recargar();
-                                    return r.accion === "eliminado"
-                                      ? `${u.email} eliminado.`
-                                      : `${u.email} tiene registros: se desactivó (sin acceso) para conservar su historial.`;
-                                  })
-                                }
-                                className="rounded-full bg-error px-3 py-1 text-xs font-semibold text-white"
-                              >
-                                ¿{u.tiene_historial ? "Desactivar" : "Eliminar"}?
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={ocupado !== null}
-                                onClick={() => setConfirmar(u.id)}
-                                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-tinta-2 hover:bg-error-fondo hover:text-error-tinta"
-                              >
-                                <Trash2 size={13} /> Quitar
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              title="Sin acceso, conserva todo; se puede reactivar"
+                              disabled={ocupado !== null}
+                              onClick={() => patch(u, { activo: false }, `${u.email} desactivada: ya no puede ingresar. Sus registros se conservan.`)}
+                              className="boton-texto px-2.5 py-1 text-xs"
+                            >
+                              <Ban size={13} /> Desactivar
+                            </button>
                           </>
                         ) : (
                           <button
                             type="button"
                             disabled={ocupado !== null}
-                            onClick={() => patch(u, { activo: true, resetear_pin: true }, `${u.email} reactivado con código inicial.`)}
+                            onClick={() => patch(u, { activo: true, resetear_pin: true }, `${u.email} reactivada con código inicial.`)}
                             className="rounded-full px-3 py-1 text-xs font-semibold text-indigo-tinta hover:bg-indigo-suave"
                           >
                             Reactivar
                           </button>
                         )}
+                        <button
+                          type="button"
+                          disabled={ocupado !== null}
+                          aria-expanded={confirmar === u.id}
+                          onClick={() => setConfirmar(confirmar === u.id ? null : u.id)}
+                          className={cx(
+                            "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                            confirmar === u.id ? "bg-error-fondo text-error-tinta" : "text-tinta-2 hover:bg-error-fondo hover:text-error-tinta",
+                          )}
+                        >
+                          <Trash2 size={13} /> Eliminar
+                        </button>
                       </div>
                     </td>
                   </tr>
+                  {confirmar === u.id && (
+                    <tr>
+                      <td colSpan={6}>
+                        <ConfirmarEliminacion
+                          u={u}
+                          admins={admins}
+                          yo={yo}
+                          ocupado={ocupado === u.id}
+                          onCancelar={() => setConfirmar(null)}
+                          onEliminar={(asignarA) =>
+                            ejecutar(u.id, async () => {
+                              const r = await api<{ jornadas: number; compras: number; asignado_a: string | null }>(
+                                conEmpresa(`/api/admin/usuarios/${u.id}`, empresa.clave, asignarA ? { asignar_a: asignarA } : {}),
+                                { method: "DELETE" },
+                              );
+                              setConfirmar(null);
+                              await recargar();
+                              return r.asignado_a
+                                ? `${u.email} eliminada. Sus registros (${r.jornadas} jornada(s), ${r.compras} compra(s)) quedaron a nombre de ${r.asignado_a}.`
+                                : `${u.email} eliminada.`;
+                            })
+                          }
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

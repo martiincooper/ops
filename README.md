@@ -19,6 +19,11 @@ una con su propia base de datos. Pensado para un equipo que trabaja **por objeti
   `@datasheq.cl` → Datasheq (configurable con `EMPRESAS`). Un email de otro dominio solo puede ser administrador.
 - El primer administrador es `ADMIN_EMAIL`. Desde `/admin` → **Administradores** se agregan otros, con el mismo
   tablero y los mismos permisos.
+- **Desactivar, reactivar y eliminar** (Equipo y Administradores): desactivar quita el acceso y conserva todo;
+  reactivar vuelve al código inicial. **Eliminar** es definitivo: si la persona tiene jornadas o compras, pasan al
+  administrador que se elija (por defecto, quien la supervisa) y aparecen a su nombre con la marca «heredada», así
+  los proyectos conservan su costo; sus días no disponibles se borran. Un administrador no puede desactivarse ni
+  eliminarse a sí mismo y siempre queda al menos uno activo.
 - **Supervisión**: al crear a un integrante se elige qué administradores lo supervisan (por defecto, quien lo
   crea). Puede ser compartida o exclusiva y se cambia en **Equipo**. Standup, disponibilidad y compras se filtran por
   «Mis supervisados» o «Todo el equipo».
@@ -27,10 +32,15 @@ una con su propia base de datos. Pensado para un equipo que trabaja **por objeti
 
 El equipo trabaja por objetivos (boleta de honorarios), así que la aplicación no impone horas:
 
-1. **Comenzar jornada** (botón en `/checkin`, a cualquier hora y cualquier día): define de 2 a 4 objetivos,
-   cada uno con uno o más proyectos. Queda registrada la hora de comienzo.
-2. Mientras trabaja, toca cada objetivo cuando lo logra.
-3. **Terminar jornada**: confirma lo logrado, explica lo pendiente y, si quiere, avisa un bloqueo.
+1. **Comenzar jornada** (botón en `/checkin`, un toque, a cualquier hora y cualquier día): marca el comienzo.
+2. En el mismo tablero agrega sus objetivos (hasta 4, cada uno con uno o más proyectos), los edita o quita y
+   toca cada uno cuando lo logra.
+3. **Terminar jornada**: confirma lo logrado, explica lo pendiente y, si quiere, avisa un bloqueo (necesita al
+   menos un objetivo).
+
+Comenzar y terminar son eventos que le dan a la jefatura la información final antes del standup. Después de
+terminar, todo sigue **editable hasta comenzar la próxima jornada**: agregar, editar, quitar o marcar objetivos,
+el motivo de lo pendiente y el bloqueo (si el texto del bloqueo cambia, vuelve a quedar sin resolver).
 
 - Una jornada por día. Si alguien olvida terminarla, **queda abierta** (también pasada la medianoche): al
   volver a la app se le pide terminarla antes de comenzar la siguiente.
@@ -105,7 +115,8 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | Incluido | Próxima etapa |
 |---|---|
 | Ingreso con email + código de 6 dígitos (inicial `000000`, cambio obligatorio, bloqueo por intentos) | Editor de feriados (vienen cargados los de Chile 2026) |
-| `/checkin`: comenzar / terminar jornada sin horario, tablero con objetivos del día, % logrado y semana | |
+| `/checkin`: comenzar / terminar jornada (eventos, sin horario); objetivos editables en el tablero hasta la próxima jornada | |
+| Cuentas: desactivar, reactivar y eliminar (los registros pasan a un administrador) | |
 | Objetivos (2 a 4 por día) y compras con uno o más proyectos | |
 | Días no disponibles (días completos) para la planificación | |
 | `/mi-progreso`: objetivos logrados en 14 días, historial, mis compras, cambio de código | |
@@ -224,7 +235,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 46 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 49 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -326,6 +337,12 @@ Estructura de datos:
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 
+### Actualizar desde la versión 0.8
+
+Migración automática: se agrega `usuarios.admin_id` (registros heredados al eliminar cuentas). Cambia la jornada:
+comenzar es un toque y los objetivos se agregan y editan en el tablero, también después de terminar. El botón
+«Quitar» del Equipo se reemplaza por **Desactivar** y **Eliminar**.
+
 ### Actualizar desde la versión 0.7
 
 Se agrega la tabla `proyecto_etapas` (migración automática). Cada proyecto existente queda en «concepto» desde su
@@ -395,10 +412,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, gerencia (28 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia (30 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, etapas, pipeline, editar y eliminar proyectos, tableros (46 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros (49 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
@@ -423,6 +440,8 @@ lib/metricas.ts     Say-Do e historial (por objetivos, sin horario)
 lib/tableros.ts     cálculos de standup, disponibilidad, compras e indicadores de gerencia
 lib/metas.ts        tolerancia de costo de gerencia (por empresa)
 lib/etapas.ts       historial de etapas de cada proyecto y umbral del aviso del pipeline
+lib/objetivos.ts    objetivos de la jornada editable (agregar, editar, quitar, bloqueo)
+lib/registros.ts    eliminar cuentas y traspasar sus registros a un administrador
 lib/supervision.ts  administradores ↔ integrantes supervisados
 lib/tiempo.ts       fechas de negocio en America/Santiago
 lib/reparto.ts      reparto del monto de una compra entre proyectos

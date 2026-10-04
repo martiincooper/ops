@@ -196,6 +196,8 @@ export interface FilaGasto {
   id: string;
   usuario_id: string;
   persona: string;
+  /** La persona que la registró fue eliminada: la compra quedó a nombre de un administrador. */
+  heredado: boolean;
   proyectos: { codigo: string; nombre: string; monto_clp: number }[];
   item: string;
   descripcion: string | null;
@@ -217,7 +219,7 @@ export function gastosEmpresa(
   const filas = (
     db
       .prepare(
-        `SELECT g.id, g.usuario_id, u.nombre AS persona, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.estado,
+        `SELECT g.id, g.usuario_id, u.nombre AS persona, u.admin_id IS NOT NULL AS heredado, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.estado,
                 g.validado_por_nombre, g.validado_en, g.observacion, g.creado_en
            FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
           WHERE (? = 'todos' OR g.estado = 'pendiente')
@@ -230,7 +232,7 @@ export function gastosEmpresa(
     `SELECT p.codigo, p.nombre, gp.monto_clp FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
       WHERE gp.gasto_id = ? ORDER BY p.codigo`,
   );
-  return filas.map((f) => ({ ...f, proyectos: qProyectos.all(f.id) as FilaGasto["proyectos"] }));
+  return filas.map((f) => ({ ...f, heredado: Boolean(f.heredado), proyectos: qProyectos.all(f.id) as FilaGasto["proyectos"] }));
 }
 
 // ───────────────────────── Gerencia ─────────────────────────

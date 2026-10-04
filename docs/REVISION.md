@@ -271,3 +271,26 @@ fields change). Rules: estimated delivery ≥ start (checked against the merged 
 (409), and a new start date may not pass the start of the second stage; the first stage row moves with it in the
 same transaction so `fecha_inicio` and the stage history never disagree. UI: an "Editar" button per project
 opens an inline form that sends only the changed fields. e2e 46.
+
+## 16. Pass 11 — deactivate and delete accounts
+
+Equipo (team and executives) gets explicit **Desactivar** (no access, data kept, reversible), **Reactivar** (back to
+the initial code) and **Eliminar** (permanent). Deleting a person with jornadas or purchases moves those records to
+an admin chosen in the confirmation (default: an active supervisor), as the owner asked. Because admins live in
+`control.db`, each admin gets one inactive row per company DB (`usuarios.admin_id`, schema v6; internal email, no
+access) that owns inherited records; it is excluded from Equipo, standup, availability and executive counts.
+Jornadas on the same date merge (objectives and purchases move, blockers concatenate). Unavailable days are
+deleted with the person. Inherited purchases show "heredada" and fall in the admin's "Mis supervisados". Project
+costs are unchanged. `DELETE /api/admin/usuarios/:id?asignar_a=<adminId>` (required when there are records).
+Admins already had deactivate/delete (not self, keep ≥ 1 active); wording aligned.
+
+## 17. Pass 12 — jornada start/finish as events; objectives editable afterwards
+
+Start is a one-tap event (`POST /api/jornada/comenzar` with no body; up to 4 objectives still accepted for
+compatibility). Objectives are added/edited/removed on the dashboard (`POST /api/jornada/objetivos`,
+`PATCH|DELETE /api/jornada/objetivos/:id`, max 4). Finish keeps its form (done/pending with reason, optional
+blocker) and now requires at least one objective. The **editable jornada** is the person's most recent one, open or
+finished, until the next one starts: objectives, done/pending, pending reasons and the blocker
+(`PATCH /api/jornada`, only once finished; a changed text clears its "resolved" mark) stay editable, so the
+standup always shows the final information. A finished jornada keeps at least one objective. Still one jornada per
+day and no clock-based rules. Tests: logic 30, e2e 49.

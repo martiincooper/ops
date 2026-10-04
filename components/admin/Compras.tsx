@@ -69,7 +69,10 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                         <Avatar nombre={g.persona} tamano={34} />
                         <span>
                           <span className="block font-semibold text-tinta">{g.persona}</span>
-                          <span className="block text-xs text-tinta-3">{fechaHora(g.creado_en)}</span>
+                          <span className="block text-xs text-tinta-3">
+                            {fechaHora(g.creado_en)}
+                            {g.heredado && <span className="ml-1.5 rounded-full bg-suave px-2 py-0.5 font-medium text-tinta-2" title="Registrada por una persona eliminada; quedó a nombre de este administrador">heredada</span>}
+                          </span>
                         </span>
                       </span>
                     </td>

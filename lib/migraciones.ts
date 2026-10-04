@@ -279,4 +279,12 @@ export const MIGRACIONES_EMPRESA: string[] = [
   INSERT INTO proyecto_etapas (proyecto_id, estado, desde)
     SELECT id, estado, MAX(fecha_inicio, date('now', '-4 hours')) FROM proyectos WHERE estado <> 'concepto' ORDER BY creado_en;
   `,
+
+  // v6 — registros heredados: al eliminar definitivamente a una persona con jornadas o compras, sus registros pasan a
+  //      un administrador. Como los administradores viven en control.db, cada uno tiene aquí una fila propia (sin acceso:
+  //      inactiva y con email interno) marcada con admin_id, que es la dueña de esos registros.
+  `
+  ALTER TABLE usuarios ADD COLUMN admin_id TEXT;
+  CREATE UNIQUE INDEX ux_usuarios_admin ON usuarios (admin_id) WHERE admin_id IS NOT NULL;
+  `,
 ];

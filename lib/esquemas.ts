@@ -31,20 +31,35 @@ const conProyectoUnico = (v: unknown) => {
   return v;
 };
 
+export const MAX_OBJETIVOS = 4;
+
+const objetivoNuevo = z.preprocess(
+  conProyectoUnico,
+  z.object({
+    proyecto_ids: proyectosDe(5),
+    descripcion: texto(280),
+  }),
+);
+
+/** Comenzar jornada: es solo el evento. Se aceptan objetivos opcionales (hasta 4); se agregan después en el tablero. */
 export const esquemaComienzo = z.object({
-  tareas: z
-    .array(
-      z.preprocess(
-        conProyectoUnico,
-        z.object({
-          proyecto_ids: proyectosDe(5),
-          descripcion: texto(280),
-        }),
-      ),
-    )
-    .min(2, "Define al menos 2 objetivos")
-    .max(4, "Máximo 4 objetivos"),
+  tareas: z.array(objetivoNuevo).max(MAX_OBJETIVOS, `Máximo ${MAX_OBJETIVOS} objetivos`).default([]),
 });
+
+export const esquemaObjetivoNuevo = objetivoNuevo;
+
+/** Edición de un objetivo de la jornada editable: solo cambian los campos enviados. */
+export const esquemaObjetivoCambio = z
+  .object({
+    completada: z.boolean().optional(),
+    descripcion: texto(280).optional(),
+    proyecto_ids: proyectosDe(5).optional(),
+    motivo_pendiente: z.string().trim().max(280).optional().nullable(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), "Nada que cambiar");
+
+/** Bloqueo de la última jornada terminada (editable hasta comenzar la siguiente). */
+export const esquemaBloqueo = z.object({ bloqueo: z.string().trim().max(500).nullable() });
 
 export const esquemaTermino = z.object({
   tareas: z
@@ -55,7 +70,7 @@ export const esquemaTermino = z.object({
         motivo_pendiente: z.string().trim().max(280).optional().nullable(),
       }),
     )
-    .min(1),
+    .max(20),
   bloqueo: z.string().trim().max(500).optional().nullable(),
 });
 

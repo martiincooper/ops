@@ -8,6 +8,7 @@ import { ahoraIso } from "@/lib/tiempo";
 /**
  * Terminar jornada: balance de cada objetivo (logrado / pendiente con motivo) y bloqueo opcional.
  * Actúa sobre la jornada en curso de la sesión, aunque sea de un día anterior; nunca sobre un id del cliente.
+ * Después sigue editable en el tablero hasta comenzar la próxima jornada.
  */
 export const POST = manejar(async (req: NextRequest) => {
   const { u, db, empresa } = await contexto(req, ["team"]);
@@ -17,6 +18,7 @@ export const POST = manejar(async (req: NextRequest) => {
   if (!j) throw new HttpError(404, "No tienes una jornada en curso");
 
   const propias = new Map(tareasDe(db, j.id).map((t) => [t.id, t]));
+  if (propias.size === 0) throw new HttpError(400, "Agrega al menos un objetivo antes de terminar la jornada");
   const enviadas = new Set(tareas.map((t) => t.id));
   if (enviadas.size !== tareas.length) throw new HttpError(400, "Objetivos duplicados");
   for (const t of tareas) {

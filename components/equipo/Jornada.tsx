@@ -6,17 +6,17 @@ import ModalNoDisponible from "@/components/ModalNoDisponible";
 import type { EstadoDia } from "@/lib/dominio";
 import { api } from "@/lib/cliente";
 import Cabecera from "./Cabecera";
-import FormComienzo from "./FormComienzo";
 import FormTermino from "./FormTermino";
 import Tablero from "./Tablero";
 
 /**
- * Inicio del integrante. Sin horario: siempre ve su tablero; la jornada se comienza y se termina con un botón
- * cuando la persona quiere (una por día). Nada se abre solo por la hora.
+ * Inicio del integrante. Sin horario: siempre ve su tablero. Comenzar y terminar la jornada son eventos (botones,
+ * una por día); los objetivos se agregan y editan en el tablero, también después de terminar, hasta comenzar la
+ * próxima jornada. Nada se abre solo por la hora.
  */
 export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombre: string }) {
   const [estado, setEstado] = useState(inicial);
-  const [abierto, setAbierto] = useState<"comenzar" | "terminar" | null>(null);
+  const [terminando, setTerminando] = useState(false);
   const [modal, setModal] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
 
@@ -41,16 +41,11 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
     return () => clearTimeout(t);
   }, [aviso]);
 
-  const vista =
-    abierto === "comenzar" && estado.fase === "sin_iniciar"
-      ? "comenzar"
-      : abierto === "terminar" && estado.fase === "en_curso"
-        ? "terminar"
-        : "tablero";
+  const vista = terminando && estado.fase === "en_curso" ? "terminar" : "tablero";
 
   const cerrarModal = useCallback(() => setModal(false), []);
   const volver = () => {
-    setAbierto(null);
+    setTerminando(false);
     window.scrollTo({ top: 0 });
   };
 
@@ -66,18 +61,6 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
             <X size={14} />
           </button>
         </div>
-      )}
-
-      {vista === "comenzar" && (
-        <FormComienzo
-          estado={estado}
-          onCancelar={volver}
-          onListo={(e) => {
-            setEstado(e);
-            volver();
-            setAviso(`Jornada comenzada con ${e.tareas.length} objetivos.`);
-          }}
-        />
       )}
 
       {vista === "terminar" && (
@@ -98,11 +81,12 @@ export default function Jornada({ inicial, nombre }: { inicial: EstadoDia; nombr
         <Tablero
           estado={estado}
           onCambio={setEstado}
-          onAbrir={(cual) => {
+          onTerminar={() => {
             setAviso(null);
-            setAbierto(cual);
+            setTerminando(true);
             window.scrollTo({ top: 0 });
           }}
+          onAviso={setAviso}
           onNoDisponible={() => setModal(true)}
         />
       )}

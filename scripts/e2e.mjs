@@ -210,12 +210,12 @@ async function main() {
   });
 
   console.log("Jornada: comenzar y terminar cuando la persona quiera (sin horario)");
-  await prueba("comenzar: 1 objetivo → 400; sin proyecto → 400; proyecto de la otra empresa → 400", async () => {
+  await prueba("comenzar con objetivos opcionales: sin proyecto, de la otra empresa o más de 4 → 400", async () => {
     const enviar = (tareas) => ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } });
     const t = { proyecto_ids: [pA], descripcion: "x" };
-    assert.equal((await enviar([t])).status, 400);
     assert.equal((await enviar([t, { proyecto_ids: [], descripcion: "x" }])).status, 400);
     assert.equal((await enviar([t, { proyecto_ids: [pA, pD], descripcion: "x" }])).status, 400);
+    assert.equal((await enviar([t, t, t, t, t])).status, 400);
   });
   await prueba("comenzar: 3 objetivos (uno de 2 proyectos) → 201 a cualquier hora; reenvío idempotente", async () => {
     const tareas = [
@@ -271,7 +271,11 @@ async function main() {
     assert.equal(r.datos.fase, "terminada");
     assert.ok(r.datos.jornada.checkout_tarde);
     assert.equal((await enviar(json)).status, 404); // ya no hay jornada en curso
-    assert.equal((await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: false } })).status, 409);
+    // terminada sigue editable hasta comenzar la próxima
+    const ed = await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: false } });
+    assert.equal(ed.status, 200, JSON.stringify(ed.datos));
+    assert.equal(ed.datos.fase, "terminada");
+    assert.equal((await ana.cliente.pedir(`/api/jornada/objetivos/${a.id}`, { metodo: "PATCH", json: { completada: true } })).status, 200);
     const otra = await ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas: [{ proyecto_ids: [pA], descripcion: "x" }, { proyecto_ids: [pA], descripcion: "y" }] } });
     assert.equal(otra.status, 409);
     assert.match(otra.datos.error, /Ya terminaste tu jornada de hoy/);
@@ -306,6 +310,61 @@ async function main() {
     assert.deepEqual(mios, ["ana@aether-tech.dev", "beto@aether-tech.dev"]);
     r = await admin.pedir(q(`/api/admin/usuarios/${beto.id}`, A), { metodo: "PATCH", json: { supervisores: ["no-existe"] } });
     assert.equal(r.status, 400);
+  });
+
+  console.log("Jornada como eventos: objetivos editables en curso y después de terminar");
+  let ines;
+  await prueba("comenzar es un toque; los objetivos se agregan, editan y quitan después (máx. 4)", async () => {
+    ines = await cuenta(admin, A, "ines@aether-tech.dev", "Inés Mora", "team", "936184");
+    let r = await ines.cliente.pedir("/api/jornada/comenzar", { metodo: "POST" });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.deepEqual([r.datos.fase, r.datos.tareas.length], ["en_curso", 0]);
+    r = await ines.cliente.pedir("/api/jornada/terminar", { metodo: "POST", json: { tareas: [] } });
+    assert.equal(r.status, 400);
+    assert.match(r.datos.error, /al menos un objetivo/);
+    const agregar = (descripcion, proyecto_ids = [pA]) => ines.cliente.pedir("/api/jornada/objetivos", { metodo: "POST", json: { descripcion, proyecto_ids } });
+    for (const d of ["Medir ruido", "Ajustar ganancia", "Documentar", "Revisar BOM"]) assert.equal((await agregar(d)).status, 201);
+    assert.equal((await agregar("Quinto")).status, 400);
+    assert.equal((await agregar("Otra empresa", [pD])).status, 400);
+    let t = (await ines.cliente.pedir("/api/jornada")).datos.tareas;
+    r = await ines.cliente.pedir(`/api/jornada/objetivos/${t[0].id}`, { metodo: "PATCH", json: { descripcion: "Medir ruido en ADC", proyecto_ids: [pA, pA2] } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.deepEqual([r.datos.tareas[0].descripcion, r.datos.tareas[0].proyectos.length], ["Medir ruido en ADC", 2]);
+    assert.equal((await ana.cliente.pedir(`/api/jornada/objetivos/${t[0].id}`, { metodo: "PATCH", json: { completada: true } })).status, 404); // ajeno
+    assert.equal((await ana.cliente.pedir(`/api/jornada/objetivos/${t[0].id}`, { metodo: "DELETE" })).status, 404);
+    r = await ines.cliente.pedir(`/api/jornada/objetivos/${t[3].id}`, { metodo: "DELETE" });
+    assert.equal(r.datos.tareas.length, 3);
+    assert.equal((await ines.cliente.pedir("/api/jornada", { metodo: "PATCH", json: { bloqueo: "x" } })).status, 409); // en curso: se informa al terminar
+  });
+  await prueba("después de terminar: agregar, marcar, motivo y bloqueo siguen editables; el standup ve lo último", async () => {
+    let t = (await ines.cliente.pedir("/api/jornada")).datos.tareas;
+    let r = await ines.cliente.pedir("/api/jornada/terminar", {
+      metodo: "POST",
+      json: { tareas: [{ id: t[0].id, estado: "completado" }, { id: t[1].id, estado: "pendiente", motivo_pendiente: "Falta el osciloscopio" }, { id: t[2].id, estado: "completado" }] },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    r = await ines.cliente.pedir("/api/jornada/objetivos", { metodo: "POST", json: { descripcion: "Subir informe", proyecto_ids: [pA] } });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.equal(r.datos.fase, "terminada");
+    t = r.datos.tareas;
+    assert.equal((await ines.cliente.pedir(`/api/jornada/objetivos/${t[3].id}`, { metodo: "PATCH", json: { completada: true } })).status, 200);
+    r = await ines.cliente.pedir(`/api/jornada/objetivos/${t[1].id}`, { metodo: "PATCH", json: { motivo_pendiente: "Llega el lunes" } });
+    assert.equal(r.datos.tareas[1].motivo_pendiente, "Llega el lunes");
+    r = await ines.cliente.pedir("/api/jornada", { metodo: "PATCH", json: { bloqueo: "Sin osciloscopio" } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    const fila = async () => (await admin.pedir(q("/api/admin/standup", A, "&alcance=todos"))).datos.filas.find((f) => f.email === "ines@aether-tech.dev");
+    let f = await fila();
+    assert.deepEqual([f.ultima.completadas, f.ultima.comprometidas, f.bloqueos.length], [3, 4, 1]);
+    assert.ok(f.ultima.tareas.some((x) => x.descripcion === "Medir ruido en ADC"), "el standup ve la edición");
+    assert.equal((await admin.pedir(q(`/api/admin/bloqueos/${f.bloqueos[0].bitacora_id}`, A), { metodo: "POST" })).status, 200);
+    await ines.cliente.pedir("/api/jornada", { metodo: "PATCH", json: { bloqueo: "Sin osciloscopio" } }); // mismo texto: sigue resuelto
+    assert.equal((await fila()).bloqueos.length, 0);
+    await ines.cliente.pedir("/api/jornada", { metodo: "PATCH", json: { bloqueo: "Ahora falta la fuente" } }); // nuevo: sin resolver
+    assert.equal((await fila()).bloqueos.length, 1);
+    // una jornada terminada conserva al menos un objetivo
+    for (const x of t.slice(1)) assert.equal((await ines.cliente.pedir(`/api/jornada/objetivos/${x.id}`, { metodo: "DELETE" })).status, 200);
+    assert.equal((await ines.cliente.pedir(`/api/jornada/objetivos/${t[0].id}`, { metodo: "DELETE" })).status, 400);
+    assert.equal((await ines.cliente.pedir("/api/jornada/comenzar", { metodo: "POST" })).status, 409); // una por día
   });
 
   console.log("Días no disponibles y disponibilidad");
@@ -546,9 +605,53 @@ async function main() {
     const u = (await admin.pedir(q("/api/admin/usuarios", D))).datos.usuarios.find((x) => x.email === "dora@datasheq.cl");
     assert.deepEqual(u.supervisores.map((s) => s.id), [adminId]);
   });
-  await prueba("quitar cuenta con historial → desactivada y sin sesión", async () => {
-    assert.equal((await admin.pedir(q(`/api/admin/usuarios/${beto.id}`, A), { metodo: "DELETE" })).datos.accion, "desactivado");
+  await prueba("desactivar y reactivar una cuenta: sin acceso mientras está desactivada", async () => {
+    assert.equal((await admin.pedir(q(`/api/admin/usuarios/${beto.id}`, A), { metodo: "PATCH", json: { activo: false } })).status, 200);
     assert.equal((await beto.cliente.pedir("/api/jornada")).status, 401);
+    assert.equal((await new Cliente("b2").login("beto@aether-tech.dev", "618273")).status, 401);
+    let u = (await admin.pedir(q("/api/admin/usuarios", A))).datos.usuarios.find((x) => x.id === beto.id);
+    assert.equal(u.activo, 0);
+    assert.ok(u.jornadas > 0, "conserva sus registros");
+    assert.equal((await admin.pedir(q(`/api/admin/usuarios/${beto.id}`, A), { metodo: "PATCH", json: { activo: true, resetear_pin: true } })).status, 200);
+    u = (await admin.pedir(q("/api/admin/usuarios", A))).datos.usuarios.find((x) => x.id === beto.id);
+    assert.equal(u.activo, 1);
+  });
+  await prueba("eliminar definitivamente: sus jornadas y compras pasan al administrador elegido; los costos no cambian", async () => {
+    const fer = await cuenta(admin, A, "fer@aether-tech.dev", "Fer Soto", "team", "740286", [adminId]);
+    const gus = await cuenta(admin, A, "gus@aether-tech.dev", "Gus Lara", "team", "852397", [adminId]);
+    for (const c of [fer, gus]) {
+      const r = await c.cliente.pedir("/api/jornada/comenzar", {
+        metodo: "POST",
+        json: { tareas: [{ proyecto_ids: [pA], descripcion: "Medir consumo" }, { proyecto_ids: [pA2], descripcion: "Revisar firmware" }] },
+      });
+      assert.equal(r.status, 201, JSON.stringify(r.datos));
+      assert.equal((await c.cliente.pedir("/api/gastos", { metodo: "POST", json: { proyecto_ids: [pA], item: "Cable", monto_clp: 5000 } })).status, 201);
+    }
+    const costoAntes = (await ggA.cliente.pedir("/api/exec")).datos.costo.total_clp;
+    const del = (id, extra = "") => admin.pedir(q(`/api/admin/usuarios/${id}`, A, extra), { metodo: "DELETE" });
+    assert.equal((await ggA.cliente.pedir(q(`/api/admin/usuarios/${fer.id}`, A, `&asignar_a=${adminId}`), { metodo: "DELETE" })).status, 403);
+    assert.equal((await del(fer.id)).status, 400); // con registros: hay que elegir administrador
+    assert.equal((await del(fer.id, `&asignar_a=${admin2Id}`)).status, 400); // administrador eliminado
+    let r = await del(fer.id, `&asignar_a=${adminId}`);
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.deepEqual([r.datos.accion, r.datos.jornadas, r.datos.compras], ["eliminado", 1, 1]);
+    assert.ok(r.datos.asignado_a);
+    r = await del(gus.id, `&asignar_a=${adminId}`); // misma fecha que la jornada heredada de Fer: se fusionan
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.equal((await fer.cliente.pedir("/api/jornada")).status, 401);
+    assert.equal((await new Cliente("f2").login("fer@aether-tech.dev", "740286")).status, 401);
+    const lista = (await admin.pedir(q("/api/admin/usuarios", A))).datos.usuarios;
+    assert.ok(!lista.some((x) => [fer.id, gus.id].includes(x.id) || x.email.includes("aether-ops.interno")));
+    const heredadas = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=mios&estado=todos"))).datos.gastos.filter((g) => g.heredado);
+    assert.equal(heredadas.length, 2);
+    assert.ok(heredadas.every((g) => g.persona === r.datos.asignado_a));
+    assert.equal((await ggA.cliente.pedir("/api/exec")).datos.costo.total_clp, costoAntes);
+    // sin registros: se elimina sin elegir administrador (también gerencia)
+    const hugo = await cuenta(admin, A, "hugo@aether-tech.dev", "Hugo Vera", "executive");
+    r = await del(hugo.id);
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.equal(r.datos.asignado_a, null);
+    assert.equal((await del(hugo.id)).status, 404);
   });
 
   await prueba("eliminar proyecto: borra lo exclusivo, reparte lo compartido y libera la bitácora vacía", async () => {

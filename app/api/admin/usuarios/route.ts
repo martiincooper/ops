@@ -16,9 +16,10 @@ export const GET = manejar(async (req: NextRequest) => {
     db
       .prepare(
         `SELECT u.id, u.nombre, u.email, u.rol, u.activo, u.debe_cambiar_pin, u.ultimo_acceso, u.bloqueado_hasta,
-                EXISTS (SELECT 1 FROM bitacoras b WHERE b.usuario_id = u.id)
-                  OR EXISTS (SELECT 1 FROM gastos g WHERE g.usuario_id = u.id) AS tiene_historial
-           FROM usuarios u ORDER BY u.activo DESC, u.rol DESC, u.nombre COLLATE NOCASE`,
+                (SELECT COUNT(*) FROM bitacoras b WHERE b.usuario_id = u.id) AS jornadas,
+                (SELECT COUNT(*) FROM gastos g WHERE g.usuario_id = u.id) AS compras
+           FROM usuarios u WHERE u.admin_id IS NULL
+          ORDER BY u.activo DESC, u.rol DESC, u.nombre COLLATE NOCASE`,
       )
       .all() as { id: string }[]
   ).map((u) => ({ ...u, supervisores: sup.get(u.id) ?? [] }));

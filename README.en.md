@@ -14,14 +14,19 @@ Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
 - Admins (middle management) live in `control.db`, can have any email domain, and switch companies with a
   selector in `/admin` (standup, 14-day capacity, purchase validation, team with supervisors, projects, admins)
   and `/exec`. The first admin is `ADMIN_EMAIL`; admins add other admins.
+- Accounts can be deactivated (no access, data kept), reactivated, or deleted permanently. Deleting a team member
+  with jornadas or purchases moves those records to an admin (default: their supervisor), shown as "heredada",
+  so project costs are unchanged. Admins cannot deactivate/delete themselves; at least one stays active.
 - Supervision is many-to-many (admin ↔ team member, per company), set when creating an account and editable later.
 - Data: `/data/control.db` and `/data/empresas/<clave>/app.db`.
 
 ## Team member's jornada (no schedule)
 
-- **Comenzar jornada** (button, any time, any day): 2–4 objectives, each with one or more projects.
-- Tick objectives as they're achieved. **Terminar jornada**: results, reasons for pending
-  items, optional blocker.
+- **Comenzar jornada** (button, one tap, any time, any day) marks the start. Objectives (up to 4, each with one
+  or more projects) are added, edited, removed and ticked on the dashboard. **Terminar jornada**: results, reasons
+  for pending items, optional blocker (needs at least one objective).
+- Start and finish are events that give admins the final picture before the standup. After finishing, everything
+  (objectives, done/pending, reasons, blocker) stays editable until the next jornada starts.
 - One jornada per day. A forgotten one stays open (also past midnight) and must be finished before starting
   the next. Nothing is opened or required by the clock.
 - No gamification (no streak, XP, levels, achievements or confetti). The one measure is the share of
@@ -88,6 +93,8 @@ docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
 ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
+Upgrading from 0.8: automatic migration (`usuarios.admin_id` for inherited records); one-tap start with objectives
+edited on the dashboard; Equipo's "Quitar" becomes Desactivar / Eliminar.
 Upgrading from 0.7: adds `proyecto_etapas` (automatic migration): existing projects get "concepto" from their start
 date and, if further along, their current stage from the upgrade date — correct those dates in Proyectos → Etapas
 (especially real delivery dates).
@@ -104,8 +111,8 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, exec (28)
-# end-to-end against a server with an EMPTY data dir (46)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec (30)
+# end-to-end against a server with an EMPTY data dir (49)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 
