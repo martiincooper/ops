@@ -58,6 +58,8 @@ export interface FilaStandup {
   no_disponible_hoy: { motivo: string | null } | null;
   bloqueos: { bitacora_id: string; fecha: string; texto: string }[];
   saydo_14d: number | null;
+  /** Tareas asignadas abiertas (no son objetivos del día; no cuentan para el Say-Do). */
+  tareas_abiertas: { id: string; descripcion: string; creado_por_nombre: string; creado_en: string }[];
 }
 
 export const UMBRAL_SAYDO_ALERTA = 70;
@@ -85,6 +87,11 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
     `SELECT id AS bitacora_id, fecha, bloqueos AS texto FROM bitacoras
       WHERE usuario_id = ? AND bloqueos IS NOT NULL AND bloqueo_resuelto_en IS NULL AND fecha >= ?
       ORDER BY fecha DESC`,
+  );
+
+  const qTareasAbiertas = db.prepare(
+    `SELECT id, descripcion, creado_por_nombre, creado_en FROM tareas_asignadas
+      WHERE usuario_id = ? AND completada_en IS NULL ORDER BY creado_en`,
   );
 
   const filas = personas.map((p): FilaStandup => {
@@ -132,6 +139,7 @@ export function standup(db: DB, hoy: string, personas: Persona[]): FilaStandup[]
       no_disponible_hoy,
       bloqueos,
       saydo_14d: prog.saydo_14d,
+      tareas_abiertas: qTareasAbiertas.all(p.id) as FilaStandup["tareas_abiertas"],
     };
   });
   return filas.sort((a, b) => a.prioridad - b.prioridad || a.nombre.localeCompare(b.nombre, "es"));
@@ -198,13 +206,20 @@ export interface FilaGasto {
   persona: string;
   /** La persona que la registró fue eliminada: la compra quedó a nombre de un administrador. */
   heredado: boolean;
-  proyectos: { codigo: string; nombre: string; monto_clp: number }[];
+  /** La registró la jefatura (aprobada de inmediato, a nombre de su fila de registros). */
+  de_jefatura: boolean;
+  proyectos: { id: string; codigo: string; nombre: string; monto_clp: number }[];
   item: string;
   descripcion: string | null;
-  /** Total pagado (compra + envío). */
+  /** Total pagado (compra + envío + impuesto). */
   monto_clp: number;
   /** Parte del total que fue envío (0 = sin envío). */
   envio_clp: number;
+  /** Parte del total que fue impuesto extra, p. ej. aduana (0 = sin impuesto). */
+  impuesto_clp: number;
+  tipo_costo: "unico" | "diario" | "mensual" | "anual";
+  editado_en: string | null;
+  editado_por_nombre: string | null;
   estado: "pendiente" | "aprobado" | "rechazado";
   validado_por_nombre: string | null;
   validado_en: string | null;
@@ -219,8 +234,9 @@ export function gastosEmpresa(
   const filas = (
     db
       .prepare(
-        `SELECT g.id, g.usuario_id, u.nombre AS persona, u.admin_id IS NOT NULL AS heredado, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.estado,
-                g.validado_por_nombre, g.validado_en, g.observacion, g.creado_en
+        `SELECT g.id, g.usuario_id, u.nombre AS persona, u.admin_id IS NOT NULL AS heredado, g.de_jefatura, g.item, g.descripcion,
+                g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado, g.validado_por_nombre, g.validado_en,
+                g.observacion, g.creado_en, g.editado_en, g.editado_por_nombre
            FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
           WHERE (? = 'todos' OR g.estado = 'pendiente')
           ORDER BY g.estado = 'pendiente' DESC, g.creado_en DESC
@@ -229,10 +245,16 @@ export function gastosEmpresa(
       .all(op.estado ?? "pendiente", op.limite ?? 500) as Omit<FilaGasto, "proyectos">[]
   ).filter((f) => !op.ids || op.ids.has(f.usuario_id));
   const qProyectos = db.prepare(
-    `SELECT p.codigo, p.nombre, gp.monto_clp FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
+    `SELECT p.id, p.codigo, p.nombre, gp.monto_clp FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
       WHERE gp.gasto_id = ? ORDER BY p.codigo`,
   );
-  return filas.map((f) => ({ ...f, heredado: Boolean(f.heredado), proyectos: qProyectos.all(f.id) as FilaGasto["proyectos"] }));
+  return filas.map((f) => ({
+    ...f,
+    // Las que registró la jefatura también están a nombre de su fila de registros, pero no son heredadas.
+    heredado: Boolean(f.heredado) && !f.de_jefatura,
+    de_jefatura: Boolean(f.de_jefatura),
+    proyectos: qProyectos.all(f.id) as FilaGasto["proyectos"],
+  }));
 }
 
 // ───────────────────────── Gerencia ─────────────────────────

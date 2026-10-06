@@ -1,14 +1,15 @@
 "use client";
 
-import { AlertTriangle, CalendarOff, Flag, ListChecks, LoaderCircle, Play, Plus, Receipt } from "lucide-react";
+import { AlertTriangle, CalendarOff, Flag, ListChecks, LoaderCircle, Play, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import Anillo from "@/components/Anillo";
 import FormGasto from "@/components/FormGasto";
-import { CodigosProyecto } from "@/components/SelectorProyectos";
 import type { EstadoDia, TareaDia } from "@/lib/dominio";
-import { ErrorApi, api, clp, cx, horaDe } from "@/lib/cliente";
+import { ErrorApi, api, cx, horaDe } from "@/lib/cliente";
+import ListaCompras from "./ListaCompras";
 import Objetivos from "./Objetivos";
+import Tareas from "./Tareas";
 
 const DIA = ["D", "L", "M", "M", "J", "V", "S"];
 
@@ -85,6 +86,7 @@ export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDis
                     <span className={cx("truncate", t.estado === "completado" && "text-tinta-3 line-through")}>{t.descripcion}</span>
                   </li>
                 ))}
+                {estado.tareas.length > 4 && <li className="pl-3 text-xs font-semibold text-tinta-3">+{estado.tareas.length - 4} más</li>}
               </ul>
             ) : (
               <p className="text-sm text-tinta-3">objetivos de hoy</p>
@@ -146,6 +148,9 @@ export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDis
 
       {/* Objetivos de la jornada editable (en curso o la última terminada, hasta comenzar la próxima) */}
       {j && <Objetivos key={j.id} estado={estado} onCambio={onCambio} />}
+
+      {/* Tareas pendientes: no son objetivos del día; quedan hasta marcarlas hechas */}
+      <Tareas estado={estado} onCambio={onCambio} />
       {error && <p role="alert" className="rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
 
       {/* Semana */}
@@ -201,25 +206,7 @@ export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDis
           )}
         </div>
         {estado.gastos_hoy.length === 0 && !formGasto && <p className="text-sm text-tinta-3">Sin compras registradas hoy.</p>}
-        <ul className="space-y-2">
-          {estado.gastos_hoy.map((g) => (
-            <li key={g.id} className="flex items-start gap-3 rounded-2xl bg-suave p-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-superficie text-indigo">
-                <Receipt size={18} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="line-clamp-2 font-medium leading-snug text-tinta">{g.item}</p>
-                {g.descripcion && <p className="line-clamp-2 text-sm text-tinta-3">{g.descripcion}</p>}
-                <CodigosProyecto codigos={g.proyectos} className="mt-1.5" />
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="font-semibold tabular-nums text-tinta">{clp(g.monto_clp)}</p>
-                {g.envio_clp > 0 && <p className="whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp(g.envio_clp)}</p>}
-                <p className="text-xs capitalize text-tinta-3">{g.estado}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <ListaCompras gastos={estado.gastos_hoy} proyectos={estado.proyectos} onCambio={async () => onCambio(await api<EstadoDia>("/api/jornada"))} />
         {formGasto && (
           <div className="mt-3">
             <FormGasto

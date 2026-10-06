@@ -1,7 +1,10 @@
 "use client";
 
-import { AlertTriangle, CalendarOff, Check, LifeBuoy, LoaderCircle, PlayCircle, TrendingDown } from "lucide-react";
+import { AlertTriangle, CalendarOff, Check, ClipboardList, LifeBuoy, LoaderCircle, PlayCircle, Plus, Trash2, TrendingDown } from "lucide-react";
+import { useState } from "react";
+import SelectorProyectos from "@/components/SelectorProyectos";
 import { Avatar, Insignia, type Tono } from "@/components/ui";
+import type { ProyectoActivo } from "@/lib/dominio";
 import type { FilaStandup } from "@/lib/tableros";
 import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, conEmpresa, diaCorto, useAccion, useDatos, type Alcance } from "./comun";
@@ -27,12 +30,191 @@ function UltimaJornada({ f, hoy }: { f: FilaStandup; hoy: string }) {
   );
 }
 
+type Ejecutar = (clave: string, fn: () => Promise<string | void>) => Promise<boolean>;
+
+/**
+ * Objetivo del día agregado por la jefatura. Si la persona no ha comenzado la jornada de hoy, se le comienza con
+ * este objetivo.
+ */
+function NuevoObjetivo({
+  f,
+  hoy,
+  empresa,
+  proyectos,
+  ocupado,
+  ejecutar,
+  onListo,
+}: {
+  f: FilaStandup;
+  hoy: string;
+  empresa: string;
+  proyectos: ProyectoActivo[];
+  ocupado: string | null;
+  ejecutar: Ejecutar;
+  onListo: () => Promise<void>;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [descripcion, setDescripcion] = useState("");
+  const [ids, setIds] = useState<string[]>(proyectos[0] ? [proyectos[0].id] : []);
+  const clave = `obj:${f.id}`;
+  if (!abierto) {
+    return (
+      <button type="button" onClick={() => setAbierto(true)} disabled={proyectos.length === 0} className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-indigo-tinta hover:bg-superficie disabled:opacity-50">
+        <Plus size={13} /> Agregar objetivo del día
+      </button>
+    );
+  }
+  const listo = descripcion.trim().length > 0 && ids.length > 0;
+  return (
+    <form
+      className="mt-2 space-y-2 rounded-2xl bg-superficie p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!listo) return;
+        ejecutar(clave, async () => {
+          const r = await api<{ resultado: "agregado" | "jornada_creada" }>(conEmpresa(`/api/admin/standup/${f.id}/objetivos`, empresa), {
+            method: "POST",
+            json: { descripcion: descripcion.trim(), proyecto_ids: ids },
+          });
+          setDescripcion("");
+          setAbierto(false);
+          await onListo();
+          return r.resultado === "jornada_creada"
+            ? `Se comenzó la jornada de hoy de ${f.nombre} con ese objetivo.`
+            : `Objetivo agregado a la jornada de ${f.nombre}.`;
+        });
+      }}
+    >
+      <textarea
+        autoFocus
+        aria-label={`Nuevo objetivo para ${f.nombre}`}
+        rows={2}
+        maxLength={280}
+        value={descripcion}
+        onChange={(e) => setDescripcion(e.target.value)}
+        placeholder="Ej: Enviar el paquete a Valparaíso"
+        className="campo resize-none bg-suave text-sm"
+      />
+      <SelectorProyectos etiqueta={`Proyectos del objetivo de ${f.nombre}`} proyectos={proyectos} valor={ids} onCambio={setIds} />
+      {(!f.ultima || (f.ultima.fecha !== hoy && f.ultima.estado === "terminada")) && (
+        <p className="text-xs text-tinta-3">Aún no comienza la jornada de hoy: se le comenzará con este objetivo.</p>
+      )}
+      <div className="flex items-center gap-2">
+        <button type="submit" disabled={!listo || ocupado !== null} className="boton">
+          {ocupado === clave ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />} Agregar
+        </button>
+        <button type="button" onClick={() => setAbierto(false)} className="boton-texto">
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Tareas asignadas abiertas de la persona: no son objetivos del día; quedan hasta marcarlas hechas. */
+function TareasPersona({
+  f,
+  empresa,
+  ocupado,
+  ejecutar,
+  onListo,
+}: {
+  f: FilaStandup;
+  empresa: string;
+  ocupado: string | null;
+  ejecutar: Ejecutar;
+  onListo: () => Promise<void>;
+}) {
+  const [texto, setTexto] = useState("");
+  const clave = `tarea:${f.id}`;
+  return (
+    <div className="mt-3 rounded-2xl bg-pastel-lila/60 p-4 text-sm">
+      <p className="mb-2 flex items-center gap-1.5 font-medium text-tinta-2">
+        <ClipboardList size={14} className="text-indigo" /> Tareas pendientes
+        {f.tareas_abiertas.length > 0 && <span className="text-xs text-tinta-3">· {f.tareas_abiertas.length}</span>}
+      </p>
+      {f.tareas_abiertas.length > 0 && (
+        <ul className="mb-2 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+          {f.tareas_abiertas.map((t) => (
+            <li key={t.id} className="flex items-start gap-2">
+              <button
+                type="button"
+                disabled={ocupado !== null}
+                aria-label={`Marcar hecha: ${t.descripcion}`}
+                onClick={() =>
+                  ejecutar(t.id, async () => {
+                    await api(conEmpresa(`/api/admin/tareas/${t.id}`, empresa), { method: "PATCH", json: { completada: true } });
+                    await onListo();
+                    return `Tarea de ${f.nombre} marcada como hecha.`;
+                  })
+                }
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-superficie text-transparent ring-2 ring-tinta/15 hover:text-tinta-3 disabled:opacity-50"
+              >
+                {ocupado === t.id ? <LoaderCircle size={11} className="animate-spin text-tinta" /> : <Check size={11} strokeWidth={3} />}
+              </button>
+              <span className="min-w-0 flex-1 break-words text-tinta-2">
+                {t.descripcion}
+                <span className="block text-[11px] text-tinta-3">por {t.creado_por_nombre}</span>
+              </span>
+              <button
+                type="button"
+                disabled={ocupado !== null}
+                aria-label={`Quitar tarea: ${t.descripcion}`}
+                onClick={() =>
+                  ejecutar(t.id, async () => {
+                    await api(conEmpresa(`/api/admin/tareas/${t.id}`, empresa), { method: "DELETE" });
+                    await onListo();
+                    return `Tarea de ${f.nombre} quitada.`;
+                  })
+                }
+                className="shrink-0 rounded-full p-1 text-tinta-3 hover:bg-error-fondo hover:text-error-tinta disabled:opacity-50"
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!texto.trim()) return;
+          ejecutar(clave, async () => {
+            await api(conEmpresa("/api/admin/tareas", empresa), { method: "POST", json: { usuario_id: f.id, descripcion: texto.trim() } });
+            setTexto("");
+            await onListo();
+            return `Tarea asignada a ${f.nombre}.`;
+          });
+        }}
+      >
+        <input
+          aria-label={`Nueva tarea para ${f.nombre}`}
+          value={texto}
+          maxLength={280}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder="Asignar tarea (p. ej. pedirle a Carla la info)"
+          className="campo min-w-0 flex-1 bg-superficie py-2 text-sm"
+        />
+        <button type="submit" disabled={!texto.trim() || ocupado !== null} aria-label={`Asignar tarea a ${f.nombre}`} className="boton-icono h-9 w-9 shrink-0 bg-superficie">
+          {ocupado === clave ? <LoaderCircle size={15} className="animate-spin" /> : <Plus size={16} />}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function Standup({ empresa, alcance }: { empresa: string; alcance: Alcance }) {
   const { datos, error, cargando, recargar } = useDatos<{ filas: FilaStandup[]; hoy: string }>(
     conEmpresa("/api/admin/standup", empresa, { alcance }),
   );
   const { ocupado, aviso, ejecutar } = useAccion();
   const filas = datos?.filas ?? [];
+  // Proyectos activos, para los objetivos que agrega la jefatura
+  const { datos: datosProyectos } = useDatos<{ proyectos: (ProyectoActivo & { estado: string })[] }>(conEmpresa("/api/admin/proyectos", empresa));
+  const proyectos = (datosProyectos?.proyectos ?? [])
+    .filter((p) => ["concepto", "prototipado", "pruebas"].includes(p.estado))
+    .map(({ id, codigo, nombre }) => ({ id, codigo, nombre }));
 
   const resumen: [string, number, typeof LifeBuoy, string][] = [
     ["Con bloqueos", filas.filter((f) => f.bloqueos.length).length, LifeBuoy, "bg-pastel-rosa text-error-tinta"],
@@ -94,7 +276,7 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
                 <UltimaJornada f={f} hoy={datos?.hoy ?? ""} />
               </p>
               {f.ultima && f.ultima.tareas.length > 0 && (
-                <ul className="space-y-1.5">
+                <ul className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
                   {f.ultima.tareas.map((t, i) => (
                     <li key={i} className="flex items-start gap-2">
                       <span
@@ -119,7 +301,14 @@ export default function Standup({ empresa, alcance }: { empresa: string; alcance
                   {f.no_disponible_hoy.motivo && <span className="text-tinta-3">· {f.no_disponible_hoy.motivo}</span>}
                 </p>
               )}
+              {!f.no_disponible_hoy && (
+                <div className="mt-2">
+                  <NuevoObjetivo key={`${f.id}:${proyectos.length}`} f={f} hoy={datos?.hoy ?? ""} empresa={empresa} proyectos={proyectos} ocupado={ocupado} ejecutar={ejecutar} onListo={recargar} />
+                </div>
+              )}
             </div>
+
+            <TareasPersona f={f} empresa={empresa} ocupado={ocupado} ejecutar={ejecutar} onListo={recargar} />
 
             {f.bloqueos.length > 0 && (
               <div className="mt-3 space-y-2">

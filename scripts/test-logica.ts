@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
-import { esquemaGasto } from "../lib/esquemas";
+import { MAX_OBJETIVOS, esquemaGasto, esquemaGastoCambio } from "../lib/esquemas";
+import { ErrorGasto, crearGasto, editarGasto } from "../lib/gastos";
+import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
-import { ErrorObjetivo, agregarObjetivo, bitacoraEditable, cambiarBloqueo, cambiarObjetivo, quitarObjetivo } from "../lib/objetivos";
-import { eliminarCuenta, idsHeredados } from "../lib/registros";
+import { ErrorObjetivo, agregarObjetivo, agregarObjetivoJefatura, bitacoraEditable, comenzarJornada, cambiarBloqueo, cambiarObjetivo, quitarObjetivo } from "../lib/objetivos";
+import { cuentaDeRegistros, eliminarCuenta, idsHeredados } from "../lib/registros";
 import { repartirMonto } from "../lib/reparto";
 import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
@@ -426,6 +428,115 @@ async function main() {
     assert.ok(!equipoActivo(d).some((p) => p.id === fila.id), "la fila de registros heredados no es parte del equipo");
     assert.deepEqual(eliminarCuenta(d, "u1", null), { jornadas: 0, compras: 0 }); // sin registros
     assert.deepEqual(d.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  console.log("Compras: impuesto, tipo de costo, edición y costos de jefatura");
+  await prueba("migración v7/v8 sobre una base v6 con compras: impuesto 0, tipo único, total intacto", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_EMPRESA.slice(0, 6).forEach((m) => d.exec(m));
+    d.prepare("INSERT INTO usuarios (id, nombre, email, rol) VALUES ('u1','Ana','ana@aether.cl','team')").run();
+    d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, envio_clp) VALUES ('g0','u1','Viejo',12000,2000)").run();
+    MIGRACIONES_EMPRESA.slice(6).forEach((m) => d.exec(m));
+    assert.deepEqual(d.prepare("SELECT monto_clp, envio_clp, impuesto_clp, tipo_costo, de_jefatura, editado_en FROM gastos").get(), {
+      monto_clp: 12000, envio_clp: 2000, impuesto_clp: 0, tipo_costo: "unico", de_jefatura: 0, editado_en: null,
+    });
+    assert.deepEqual(d.prepare("SELECT COUNT(*) n FROM tareas_asignadas").get(), { n: 0 });
+  });
+  await prueba("esquema: impuesto opcional entero ≥ 0, tipo de costo válido, edición parcial", () => {
+    const base = { proyecto_ids: ["p1"], item: "Sensor", monto_clp: 10000 };
+    assert.equal(esquemaGasto.safeParse({ ...base, impuesto_clp: 3500, tipo_costo: "mensual" }).success, true);
+    assert.equal(esquemaGasto.safeParse({ ...base, impuesto_clp: -1 }).success, false);
+    assert.equal(esquemaGasto.safeParse({ ...base, tipo_costo: "semanal" }).success, false);
+    assert.equal(esquemaGasto.safeParse({ ...base, monto_clp: 999_999_999, impuesto_clp: 2 }).success, false);
+    assert.equal(esquemaGastoCambio.safeParse({ impuesto_clp: 5000 }).success, true);
+    assert.equal(esquemaGastoCambio.safeParse({}).success, false);
+  });
+  await prueba("editar una compra aprobada: suma el impuesto, conserva el estado y vuelve a repartir", () => {
+    const d = dbNueva();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p2','AETH-02','Gateway',1,'2026-09-01','2026-12-31')").run();
+    const id = crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos: { proyecto_ids: ["p1", "p2"], item: "Módulo", monto_clp: 10001, envio_clp: 999 }, ahora: "2026-10-01T12:00:00Z" });
+    assert.deepEqual(d.prepare("SELECT monto_clp, envio_clp, impuesto_clp, tipo_costo, estado FROM gastos").get(), { monto_clp: 11000, envio_clp: 999, impuesto_clp: 0, tipo_costo: "unico", estado: "pendiente" });
+    d.prepare("UPDATE gastos SET estado = 'aprobado', validado_por = 'a1', validado_por_nombre = 'Jefa' WHERE id = ?").run(id);
+    d.prepare("UPDATE proyectos SET estado = 'entregado' WHERE id = 'p2'").run(); // ya vinculado: se puede conservar
+    editarGasto(d, id, { impuesto_clp: 4001, tipo_costo: "anual" }, { nombre: "Ana", ahora: "2026-10-05T12:00:00Z", usuarioId: "u1" });
+    assert.deepEqual(d.prepare("SELECT monto_clp, envio_clp, impuesto_clp, tipo_costo, estado, validado_por_nombre, editado_por_nombre FROM gastos").get(), {
+      monto_clp: 15001, envio_clp: 999, impuesto_clp: 4001, tipo_costo: "anual", estado: "aprobado", validado_por_nombre: "Jefa", editado_por_nombre: "Ana",
+    });
+    assert.deepEqual(d.prepare("SELECT proyecto_id, monto_clp FROM gasto_proyectos ORDER BY proyecto_id").all(), [
+      { proyecto_id: "p1", monto_clp: 7501 }, { proyecto_id: "p2", monto_clp: 7500 },
+    ]);
+    // Precio final distinto: monto_clp es la compra sin envío ni impuesto
+    editarGasto(d, id, { monto_clp: 20000, envio_clp: null, proyecto_ids: ["p1"] }, { nombre: "Jefa", ahora: "2026-10-05T13:00:00Z" });
+    assert.deepEqual(d.prepare("SELECT monto_clp, envio_clp, impuesto_clp FROM gastos").get(), { monto_clp: 24001, envio_clp: 0, impuesto_clp: 4001 });
+    assert.deepEqual(d.prepare("SELECT proyecto_id, monto_clp FROM gasto_proyectos").all(), [{ proyecto_id: "p1", monto_clp: 24001 }]);
+    // p2 ya no está vinculado ni activo: no se puede volver a agregar
+    assert.throws(() => editarGasto(d, id, { proyecto_ids: ["p1", "p2"] }, { nombre: "Ana", ahora: "x", usuarioId: "u1" }), ErrorGasto);
+    // Otra persona del equipo no puede editarla
+    assert.throws(() => editarGasto(d, id, { item: "x" }, { nombre: "Beto", ahora: "x", usuarioId: "u2" }), /no encontrada/);
+    assert.deepEqual(d.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+  await prueba("costo de jefatura: a nombre de su fila de registros, aprobado y no marcado como heredado", () => {
+    const d = dbNueva();
+    const fila = cuentaDeRegistros(d, { id: "a1", nombre: "Jefa" });
+    crearGasto(d, { usuarioId: fila, bitacoraId: null, datos: { proyecto_ids: ["p1"], item: "Licencia CAD", monto_clp: 50000, tipo_costo: "mensual" }, aprobadaPor: { id: "a1", nombre: "Jefa" }, ahora: "2026-10-01T12:00:00Z" });
+    const [g] = gastosEmpresa(d, { estado: "todos" });
+    assert.deepEqual([g.estado, g.validado_por_nombre, g.de_jefatura, g.heredado, g.tipo_costo], ["aprobado", "Jefa", true, false, "mensual"]);
+    assert.equal(gastosEmpresa(d).length, 0, "no aparece en «Por validar»");
+    assert.equal(metricasExec(d, "2026-10-01").costo.proyectos[0].total_clp, 50000);
+  });
+
+  console.log("Objetivos sin tope de 4, objetivos de jefatura y tareas asignadas");
+  await prueba("más de 4 objetivos por jornada, hasta el tope de seguridad", () => {
+    const d = dbNueva();
+    assert.equal(comenzarJornada(d, "u1", "2026-10-01", [], "2026-10-01T12:00:00Z"), "creada");
+    for (let i = 0; i < MAX_OBJETIVOS; i++) agregarObjetivo(d, "u1", { descripcion: `o${i}`, proyecto_ids: ["p1"] }, MAX_OBJETIVOS, "2026-10-01T12:00:00Z");
+    assert.throws(() => agregarObjetivo(d, "u1", { descripcion: "x", proyecto_ids: ["p1"] }, MAX_OBJETIVOS, "2026-10-01T12:00:00Z"), new RegExp(`Máximo ${MAX_OBJETIVOS}`));
+  });
+  await prueba("comenzarJornada: idempotente, no permite dos el mismo día ni con otra abierta ni no disponible", () => {
+    const d = dbNueva();
+    assert.equal(comenzarJornada(d, "u1", "2026-10-01", [{ descripcion: "a", proyecto_ids: ["p1"] }], "2026-10-01T12:00:00Z"), "creada");
+    assert.equal(comenzarJornada(d, "u1", "2026-10-01", [], "2026-10-01T13:00:00Z"), "ya_existia");
+    assert.throws(() => comenzarJornada(d, "u1", "2026-10-02", [], "2026-10-02T12:00:00Z"), /sin terminar/);
+    d.prepare("UPDATE bitacoras SET checkout_tarde = '2026-10-01T20:00:00Z'").run();
+    assert.throws(() => comenzarJornada(d, "u1", "2026-10-01", [], "2026-10-01T21:00:00Z"), /Ya terminaste/);
+    d.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo) VALUES ('x','u1','2026-10-02',1)").run();
+    assert.throws(() => comenzarJornada(d, "u1", "2026-10-02", [], "2026-10-02T12:00:00Z"), /no disponible/);
+    assert.throws(() => comenzarJornada(d, "u1", "2026-10-03", [{ descripcion: "a", proyecto_ids: ["nada"] }], "2026-10-03T12:00:00Z"), /no activo/);
+  });
+  await prueba("objetivo de jefatura: comienza la jornada de hoy si no existe; si existe, lo agrega", () => {
+    const d = dbNueva();
+    bitacora(d, "2026-09-30", "c", "2026-09-30T20:00:00Z"); // la de ayer, terminada
+    const o = { descripcion: "Enviar el paquete", proyecto_ids: ["p1"] };
+    assert.equal(agregarObjetivoJefatura(d, "u1", o, MAX_OBJETIVOS, "2026-10-01", "2026-10-01T12:00:00Z"), "jornada_creada");
+    assert.equal(agregarObjetivoJefatura(d, "u1", { ...o, descripcion: "Otro" }, MAX_OBJETIVOS, "2026-10-01", "2026-10-01T13:00:00Z"), "agregado");
+    const hoy = d.prepare("SELECT id, checkout_tarde FROM bitacoras WHERE fecha = '2026-10-01'").get() as { id: string; checkout_tarde: string | null };
+    assert.equal(hoy.checkout_tarde, null);
+    assert.deepEqual((d.prepare("SELECT descripcion FROM tareas_diarias WHERE bitacora_id = ? ORDER BY orden").all(hoy.id) as { descripcion: string }[]).map((t) => t.descripcion), ["Enviar el paquete", "Otro"]);
+    d.prepare("INSERT INTO ausencias_ooo (id, usuario_id, fecha, dia_completo) VALUES ('x','u1','2026-10-02',1)").run();
+    d.prepare("UPDATE bitacoras SET checkout_tarde = '2026-10-01T20:00:00Z' WHERE id = ?").run(hoy.id);
+    assert.throws(() => agregarObjetivoJefatura(d, "u1", o, MAX_OBJETIVOS, "2026-10-02", "2026-10-02T12:00:00Z"), /no disponible/);
+  });
+  await prueba("tareas asignadas: quedan hasta hechas, no cuentan para el Say-Do, el standup las ve", () => {
+    const d = dbNueva();
+    d.prepare("INSERT INTO usuarios (id, nombre, email, rol) VALUES ('u2','Beto','beto@aether.cl','team')").run();
+    const propia = crearTarea(d, "u1", "Enviar paquete", { id: "u1", nombre: "Ana" }, "2026-10-01T12:00:00Z");
+    const asignada = crearTarea(d, "u1", "Pedirle a Beto la info", { id: "a1", nombre: "Jefa" }, "2026-10-01T12:05:00Z");
+    let t = tareasAbiertas(d, "u1", "2026-10-03T12:00:00Z");
+    assert.deepEqual(t.map((x) => [x.descripcion, x.asignada]), [["Enviar paquete", false], ["Pedirle a Beto la info", true]]);
+    assert.throws(() => marcarTarea(d, propia, true, "Beto", "x", "u2"), /no encontrada/); // ajena
+    marcarTarea(d, propia, true, "Ana", "2026-10-03T12:00:00Z", "u1");
+    t = tareasAbiertas(d, "u1", "2026-10-03T13:00:00Z");
+    assert.equal(t[1].completada_por_nombre, "Ana", "recién hecha: se ve tachada al final");
+    assert.equal(tareasAbiertas(d, "u1", "2026-10-04T13:00:00Z").length, 1, "después desaparece");
+    const [fila] = standup(d, "2026-10-03", equipoActivo(d, new Set(["u1"])));
+    assert.deepEqual(fila.tareas_abiertas.map((x) => x.descripcion), ["Pedirle a Beto la info"]);
+    assert.equal(fila.saydo_14d, null);
+    borrarTarea(d, asignada, null);
+    assert.equal(tareasAbiertas(d, "u1", "2026-10-04T13:00:00Z").length, 0);
+    crearTarea(d, "u2", "x", { id: "u2", nombre: "Beto" }, "2026-10-01T12:00:00Z");
+    eliminarCuenta(d, "u2", null); // las tareas se borran con la cuenta
+    assert.deepEqual(d.prepare("SELECT COUNT(*) n FROM tareas_asignadas WHERE usuario_id = 'u2'").get(), { n: 0 });
   });
 
   console.log("Códigos");

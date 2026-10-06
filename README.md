@@ -33,7 +33,7 @@ una con su propia base de datos. Pensado para un equipo que trabaja **por objeti
 El equipo trabaja por objetivos (boleta de honorarios), así que la aplicación no impone horas:
 
 1. **Comenzar jornada** (botón en `/checkin`, un toque, a cualquier hora y cualquier día): marca el comienzo.
-2. En el mismo tablero agrega sus objetivos (hasta 4, cada uno con uno o más proyectos), los edita o quita y
+2. En el mismo tablero agrega sus objetivos (sin tope práctico, cada uno con uno o más proyectos), los edita o quita y
    toca cada uno cuando lo logra.
 3. **Terminar jornada**: confirma lo logrado, explica lo pendiente y, si quiere, avisa un bloqueo (necesita al
    menos un objetivo).

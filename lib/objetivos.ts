@@ -1,6 +1,7 @@
 // Objetivos de la jornada editable (la más reciente de la persona). Sin "server-only" para probarlo con tsx.
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { fechaCorta } from "./tiempo";
 
 type DB = Database.Database;
 
@@ -52,7 +53,73 @@ function exigirObjetivo(db: DB, usuarioId: string, tareaId: string) {
   return { b, t };
 }
 
-export function agregarObjetivo(db: DB, usuarioId: string, o: { descripcion: string; proyecto_ids: string[] }, max: number, ahora: string): string {
+type ObjetivoNuevo = { descripcion: string; proyecto_ids: string[] };
+
+/**
+ * Comenzar la jornada de hoy, con objetivos opcionales. Sin horario: a cualquier hora, una jornada por día.
+ * Idempotente: si la de hoy ya está en curso, devuelve "ya_existia". Al comenzar, la jornada anterior deja de ser
+ * editable.
+ */
+export function comenzarJornada(db: DB, usuarioId: string, hoy: string, tareas: ObjetivoNuevo[], ahora: string): "creada" | "ya_existia" {
+  const ultima = db.prepare("SELECT fecha, checkout_tarde FROM bitacoras WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 1").get(usuarioId) as
+    | { fecha: string; checkout_tarde: string | null }
+    | undefined;
+  if (ultima && !ultima.checkout_tarde) {
+    if (ultima.fecha === hoy) return "ya_existia";
+    throw new ErrorObjetivo(409, `Tienes una jornada sin terminar del ${fechaCorta(ultima.fecha)}. Termínala antes de comenzar otra.`);
+  }
+  if (ultima?.fecha === hoy) throw new ErrorObjetivo(409, "Ya terminaste tu jornada de hoy. Mañana puedes comenzar otra.");
+  if (db.prepare("SELECT 1 FROM ausencias_ooo WHERE usuario_id = ? AND fecha = ? AND dia_completo = 1").get(usuarioId, hoy)) {
+    throw new ErrorObjetivo(409, "Marcaste hoy como no disponible. Quita esa marca para comenzar tu jornada.");
+  }
+  exigirProyectosActivos(db, tareas.flatMap((t) => t.proyecto_ids));
+
+  const jornadaId = randomUUID();
+  try {
+    db.transaction(() => {
+      db.prepare("INSERT INTO bitacoras (id, usuario_id, fecha, checkin_manana) VALUES (?, ?, ?, ?)").run(jornadaId, usuarioId, hoy, ahora);
+      const ins = db.prepare(
+        `INSERT INTO tareas_diarias (id, bitacora_id, orden, descripcion, estado, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, 'pendiente', ?, ?)`,
+      );
+      const insProyecto = db.prepare("INSERT INTO tarea_proyectos (tarea_id, proyecto_id) VALUES (?, ?)");
+      tareas.forEach((t, i) => {
+        const id = randomUUID();
+        ins.run(id, jornadaId, i, t.descripcion, ahora, ahora);
+        for (const p of t.proyecto_ids) insProyecto.run(id, p);
+      });
+    })();
+  } catch (e) {
+    // Doble envío simultáneo: la otra petición ganó la carrera (UNIQUE usuario + fecha).
+    if ((e as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE") return "ya_existia";
+    throw e;
+  }
+  return "creada";
+}
+
+/**
+ * Objetivo agregado por la jefatura desde el standup. Va a la jornada de hoy (en curso o terminada) o a la que la
+ * persona dejó abierta; si no tiene ninguna, se le comienza la de hoy con ese objetivo (luego la persona la edita).
+ */
+export function agregarObjetivoJefatura(db: DB, usuarioId: string, o: ObjetivoNuevo, max: number, hoy: string, ahora: string): "agregado" | "jornada_creada" {
+  const b = db.prepare("SELECT fecha, checkout_tarde FROM bitacoras WHERE usuario_id = ? ORDER BY fecha DESC LIMIT 1").get(usuarioId) as
+    | { fecha: string; checkout_tarde: string | null }
+    | undefined;
+  if (b && (b.fecha === hoy || !b.checkout_tarde)) {
+    agregarObjetivo(db, usuarioId, o, max, ahora);
+    return "agregado";
+  }
+  if (db.prepare("SELECT 1 FROM ausencias_ooo WHERE usuario_id = ? AND fecha = ? AND dia_completo = 1").get(usuarioId, hoy)) {
+    throw new ErrorObjetivo(409, "Esta persona marcó hoy como no disponible");
+  }
+  if (comenzarJornada(db, usuarioId, hoy, [o], ahora) === "ya_existia") {
+    agregarObjetivo(db, usuarioId, o, max, ahora); // otra petición la comenzó al mismo tiempo
+    return "agregado";
+  }
+  return "jornada_creada";
+}
+
+export function agregarObjetivo(db: DB, usuarioId: string, o: ObjetivoNuevo, max: number, ahora: string): string {
   const b = exigirEditable(db, usuarioId);
   exigirProyectosActivos(db, o.proyecto_ids);
   const n = (db.prepare("SELECT COUNT(*) AS n FROM tareas_diarias WHERE bitacora_id = ?").get(b.id) as { n: number }).n;

@@ -22,7 +22,7 @@ Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
 
 ## Team member's jornada (no schedule)
 
-- **Comenzar jornada** (button, one tap, any time, any day) marks the start. Objectives (up to 4, each with one
+- **Comenzar jornada** (button, one tap, any time, any day) marks the start. Objectives (no practical limit, each with one
   or more projects) are added, edited, removed and ticked on the dashboard. **Terminar jornada**: results, reasons
   for pending items, optional blocker (needs at least one objective).
 - Start and finish are events that give admins the final picture before the standup. After finishing, everything

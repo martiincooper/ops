@@ -287,4 +287,34 @@ export const MIGRACIONES_EMPRESA: string[] = [
   ALTER TABLE usuarios ADD COLUMN admin_id TEXT;
   CREATE UNIQUE INDEX ux_usuarios_admin ON usuarios (admin_id) WHERE admin_id IS NOT NULL;
   `,
+
+  // v7 — compras: impuesto extra opcional (p. ej. aduana), tipo de costo (único o recurrente diario/mensual/anual;
+  //      solo una etiqueta), quién la editó por última vez y si la registró la jefatura (a nombre de su fila de
+  //      registros, aprobada de inmediato). monto_clp sigue siendo el TOTAL pagado
+  //      (compra + envío + impuesto), así el costo por proyecto y los indicadores no cambian. Las compras
+  //      existentes quedan con impuesto 0 y tipo 'unico'.
+  `
+  ALTER TABLE gastos ADD COLUMN impuesto_clp INTEGER NOT NULL DEFAULT 0 CHECK (impuesto_clp >= 0);
+  ALTER TABLE gastos ADD COLUMN tipo_costo TEXT NOT NULL DEFAULT 'unico' CHECK (tipo_costo IN ('unico', 'diario', 'mensual', 'anual'));
+  ALTER TABLE gastos ADD COLUMN editado_en TEXT;
+  ALTER TABLE gastos ADD COLUMN editado_por_nombre TEXT;
+  ALTER TABLE gastos ADD COLUMN de_jefatura INTEGER NOT NULL DEFAULT 0;
+  `,
+
+  // v8 — tareas asignadas: pendientes que no son objetivos del día (p. ej. «pedirle a X la información»). No
+  //      dependen de una jornada: quedan en el tablero de la persona hasta marcarlas hechas. Las agrega la persona o
+  //      su jefatura (desde el standup). No cuentan para el Say-Do.
+  `
+  CREATE TABLE tareas_asignadas (
+    id TEXT PRIMARY KEY,
+    usuario_id TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    descripcion TEXT NOT NULL,
+    creado_por TEXT NOT NULL,
+    creado_por_nombre TEXT NOT NULL,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    completada_en TEXT,
+    completada_por_nombre TEXT
+  );
+  CREATE INDEX idx_tareas_asignadas ON tareas_asignadas (usuario_id, completada_en);
+  `,
 ];

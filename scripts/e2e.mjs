@@ -210,12 +210,12 @@ async function main() {
   });
 
   console.log("Jornada: comenzar y terminar cuando la persona quiera (sin horario)");
-  await prueba("comenzar con objetivos opcionales: sin proyecto, de la otra empresa o más de 4 → 400", async () => {
+  await prueba("comenzar con objetivos opcionales: sin proyecto, de la otra empresa o más de 50 → 400", async () => {
     const enviar = (tareas) => ana.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } });
     const t = { proyecto_ids: [pA], descripcion: "x" };
     assert.equal((await enviar([t, { proyecto_ids: [], descripcion: "x" }])).status, 400);
     assert.equal((await enviar([t, { proyecto_ids: [pA, pD], descripcion: "x" }])).status, 400);
-    assert.equal((await enviar([t, t, t, t, t])).status, 400);
+    assert.equal((await enviar(Array(51).fill(t))).status, 400);
   });
   await prueba("comenzar: 3 objetivos (uno de 2 proyectos) → 201 a cualquier hora; reenvío idempotente", async () => {
     const tareas = [
@@ -314,7 +314,7 @@ async function main() {
 
   console.log("Jornada como eventos: objetivos editables en curso y después de terminar");
   let ines;
-  await prueba("comenzar es un toque; los objetivos se agregan, editan y quitan después (máx. 4)", async () => {
+  await prueba("comenzar es un toque; los objetivos se agregan, editan y quitan después (más de 4)", async () => {
     ines = await cuenta(admin, A, "ines@aether-tech.dev", "Inés Mora", "team", "936184");
     let r = await ines.cliente.pedir("/api/jornada/comenzar", { metodo: "POST" });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
@@ -324,7 +324,10 @@ async function main() {
     assert.match(r.datos.error, /al menos un objetivo/);
     const agregar = (descripcion, proyecto_ids = [pA]) => ines.cliente.pedir("/api/jornada/objetivos", { metodo: "POST", json: { descripcion, proyecto_ids } });
     for (const d of ["Medir ruido", "Ajustar ganancia", "Documentar", "Revisar BOM"]) assert.equal((await agregar(d)).status, 201);
-    assert.equal((await agregar("Quinto")).status, 400);
+    const quinto = await agregar("Quinto"); // ya no hay tope de 4 objetivos
+    assert.equal(quinto.status, 201, JSON.stringify(quinto.datos));
+    assert.equal(quinto.datos.tareas.length, 5);
+    assert.equal((await ines.cliente.pedir(`/api/jornada/objetivos/${quinto.datos.tareas[4].id}`, { metodo: "DELETE" })).status, 200);
     assert.equal((await agregar("Otra empresa", [pD])).status, 400);
     let t = (await ines.cliente.pedir("/api/jornada")).datos.tareas;
     r = await ines.cliente.pedir(`/api/jornada/objetivos/${t[0].id}`, { metodo: "PATCH", json: { descripcion: "Medir ruido en ADC", proyecto_ids: [pA, pA2] } });
@@ -688,6 +691,81 @@ async function main() {
     assert.equal((await eli.cliente.pedir("/api/gastos")).datos.gastos.length, 0);
     const codigos = (await admin.pedir(q("/api/admin/proyectos", A))).datos.proyectos.map((p) => p.codigo);
     assert.ok(!codigos.includes("DEL-01") && !codigos.includes("DEL-02"));
+  });
+
+  console.log("Compras editables, impuesto, tipo de costo, costos de jefatura, objetivos y tareas de jefatura");
+  let fer;
+  await prueba("editar compra aprobada: el impuesto de aduana suma al costo y la compra sigue aprobada", async () => {
+    fer = await cuenta(admin, A, "fer@aether-tech.dev", "Fer Soto", "team", "640297");
+    const sen = async () => (await ggA.cliente.pedir("/api/exec")).datos.costo.proyectos.find((p) => p.codigo === "AETH-SEN-01").total_clp;
+    const antes = await sen();
+    let r = await fer.cliente.pedir("/api/gastos", { metodo: "POST", json: { proyecto_ids: [pA], item: "Módulo LoRa", monto_clp: 20000, envio_clp: 3000, impuesto_clp: 1000, tipo_costo: "unico" } });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    const id = r.datos.id;
+    let g = r.datos.gastos.find((x) => x.id === id);
+    assert.deepEqual([g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo], [24000, 3000, 1000, "unico"]);
+    assert.equal((await admin.pedir(q(`/api/admin/gastos/${id}`, A), { metodo: "PATCH", json: { estado: "aprobado" } })).status, 200);
+    r = await fer.cliente.pedir(`/api/gastos/${id}`, { metodo: "PATCH", json: { impuesto_clp: 7500 } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    g = r.datos.gastos.find((x) => x.id === id);
+    assert.deepEqual([g.monto_clp, g.impuesto_clp, g.estado, g.editado_por_nombre], [30500, 7500, "aprobado", "Fer Soto"]);
+    assert.equal(await sen(), antes + 30500);
+    // Ajena, gerencia y validaciones
+    assert.equal((await ana.cliente.pedir(`/api/gastos/${id}`, { metodo: "PATCH", json: { item: "x" } })).status, 404);
+    assert.equal((await ggA.cliente.pedir(`/api/gastos/${id}`, { metodo: "PATCH", json: { item: "x" } })).status, 403);
+    assert.equal((await ggA.cliente.pedir(q(`/api/admin/gastos/${id}/datos`, A), { metodo: "PATCH", json: { item: "x" } })).status, 403);
+    assert.equal((await fer.cliente.pedir(`/api/gastos/${id}`, { metodo: "PATCH", json: { impuesto_clp: -1 } })).status, 400);
+    assert.equal((await fer.cliente.pedir(`/api/gastos/${id}`, { metodo: "PATCH", json: { tipo_costo: "semanal" } })).status, 400);
+    // La jefatura corrige el precio final y el tipo
+    r = await admin.pedir(q(`/api/admin/gastos/${id}/datos`, A), { metodo: "PATCH", json: { monto_clp: 18000, tipo_costo: "mensual" } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    const fila = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((x) => x.id === id);
+    assert.deepEqual([fila.monto_clp, fila.tipo_costo, fila.estado], [28500, "mensual", "aprobado"]);
+  });
+  await prueba("la jefatura registra un costo de proyecto: queda aprobado y suma al proyecto; equipo y gerencia no pueden", async () => {
+    const sen = async () => (await ggA.cliente.pedir("/api/exec")).datos.costo.proyectos.find((p) => p.codigo === "AETH-SEN-01").total_clp;
+    const antes = await sen();
+    const costo = { proyecto_ids: [pA], item: "Licencia CAD", monto_clp: 120000, tipo_costo: "anual" };
+    assert.equal((await fer.cliente.pedir(q("/api/admin/gastos", A), { metodo: "POST", json: costo })).status, 403);
+    assert.equal((await ggA.cliente.pedir(q("/api/admin/gastos", A), { metodo: "POST", json: costo })).status, 403);
+    const r = await admin.pedir(q("/api/admin/gastos", A), { metodo: "POST", json: costo });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    const fila = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((x) => x.id === r.datos.id);
+    assert.deepEqual([fila.estado, fila.de_jefatura, fila.heredado, fila.tipo_costo], ["aprobado", true, false, "anual"]);
+    assert.equal(await sen(), antes + 120000);
+    assert.equal((await admin.pedir(q("/api/admin/gastos", A), { metodo: "POST", json: { ...costo, proyecto_ids: [pD] } })).status, 400);
+  });
+  await prueba("objetivo desde el standup: comienza la jornada de hoy si no existe; luego lo agrega", async () => {
+    const o = { descripcion: "Enviar el paquete", proyecto_ids: [pA] };
+    assert.equal((await fer.cliente.pedir(q(`/api/admin/standup/${fer.id}/objetivos`, A), { metodo: "POST", json: o })).status, 403);
+    let r = await admin.pedir(q(`/api/admin/standup/${fer.id}/objetivos`, A), { metodo: "POST", json: o });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.equal(r.datos.resultado, "jornada_creada");
+    r = await admin.pedir(q(`/api/admin/standup/${fer.id}/objetivos`, A), { metodo: "POST", json: { ...o, descripcion: "Revisar BOM" } });
+    assert.equal(r.datos.resultado, "agregado");
+    const e = (await fer.cliente.pedir("/api/jornada")).datos;
+    assert.equal(e.fase, "en_curso");
+    assert.deepEqual(e.tareas.map((t) => t.descripcion), ["Enviar el paquete", "Revisar BOM"]);
+    assert.equal((await admin.pedir(q("/api/admin/standup/no-existe/objetivos", A), { metodo: "POST", json: o })).status, 404);
+    assert.equal((await admin.pedir(q(`/api/admin/standup/${fer.id}/objetivos`, D), { metodo: "POST", json: o })).status, 404); // otra empresa
+  });
+  await prueba("tareas asignadas: la jefatura y la persona las agregan; quedan hasta hechas; el standup las ve", async () => {
+    let r = await admin.pedir(q("/api/admin/tareas", A), { metodo: "POST", json: { usuario_id: fer.id, descripcion: "Pedirle a Ana las medidas" } });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    const asignada = r.datos.id;
+    r = await fer.cliente.pedir("/api/tareas", { metodo: "POST", json: { descripcion: "Llamar al proveedor" } });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.deepEqual(r.datos.tareas_asignadas.map((t) => [t.descripcion, t.asignada]), [["Pedirle a Ana las medidas", true], ["Llamar al proveedor", false]]);
+    assert.equal((await ana.cliente.pedir(`/api/tareas/${asignada}`, { metodo: "PATCH", json: { completada: true } })).status, 404);
+    let fila = (await admin.pedir(q("/api/admin/standup", A, "&alcance=todos"))).datos.filas.find((f) => f.id === fer.id);
+    assert.equal(fila.tareas_abiertas.length, 2);
+    r = await fer.cliente.pedir(`/api/tareas/${asignada}`, { metodo: "PATCH", json: { completada: true } });
+    assert.equal(r.status, 200);
+    assert.ok(r.datos.tareas_asignadas.find((t) => t.id === asignada).completada_en);
+    fila = (await admin.pedir(q("/api/admin/standup", A, "&alcance=todos"))).datos.filas.find((f) => f.id === fer.id);
+    assert.deepEqual(fila.tareas_abiertas.map((t) => t.descripcion), ["Llamar al proveedor"]);
+    assert.equal((await admin.pedir(q(`/api/admin/tareas/${fila.tareas_abiertas[0].id}`, A), { metodo: "DELETE" })).status, 200);
+    assert.equal((await admin.pedir(q("/api/admin/tareas", A), { metodo: "POST", json: { usuario_id: "no-existe", descripcion: "x" } })).status, 404);
   });
 
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);

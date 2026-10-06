@@ -2,8 +2,10 @@ import "server-only";
 import type { DB } from "./db";
 import type { Usuario } from "./auth";
 import type { Empresa } from "./empresas";
+import type { TipoCosto } from "./esquemas";
 import { calcularProgreso, type DiaResumen } from "./metricas";
-import { TZ_NEGOCIO, fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
+import { type TareaAsignada, tareasAbiertas } from "./tareas";
+import { TZ_NEGOCIO, ahoraIso, fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
 
 /**
  * Estado de la jornada del integrante (sin horario: se comienza y se termina cuando la persona quiere).
@@ -55,12 +57,19 @@ export interface GastoResumen {
   item: string;
   descripcion: string | null;
   proyectos: string[]; // códigos
-  /** Total pagado (compra + envío). */
+  /** Proyectos con id (para editar la compra). */
+  proyecto_refs: ProyectoRef[];
+  /** Total pagado (compra + envío + impuesto). */
   monto_clp: number;
   /** Parte del total que fue envío (0 = sin envío). */
   envio_clp: number;
+  /** Parte del total que fue impuesto extra, p. ej. aduana (0 = sin impuesto). */
+  impuesto_clp: number;
+  tipo_costo: TipoCosto;
   estado: "pendiente" | "aprobado" | "rechazado";
   creado_en: string;
+  editado_en: string | null;
+  editado_por_nombre: string | null;
 }
 
 export interface EstadoDia {
@@ -82,6 +91,8 @@ export interface EstadoDia {
   /** Proyecto activo usado más recientemente: preselección en los formularios. */
   ultimo_proyecto_id: string | null;
   gastos_hoy: GastoResumen[];
+  /** Tareas asignadas abiertas (no son objetivos del día; quedan hasta marcarlas hechas). */
+  tareas_asignadas: TareaAsignada[];
   saydo_14d: number | null;
   /** Últimos 7 días, del más antiguo a hoy. */
   semana: DiaResumen[];
@@ -163,20 +174,24 @@ export function ausenciasDesde(db: DB, usuarioId: string, desde: string): Ausenc
 }
 
 export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoResumen[] {
-  return (
-    db
-      .prepare(
-        `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.estado, g.creado_en,
-                (SELECT group_concat(codigo, ',') FROM (
-                   SELECT p.codigo FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
-                    WHERE gp.gasto_id = g.id ORDER BY p.codigo)) AS codigos
-           FROM gastos g
-          WHERE g.usuario_id = ?
-          ORDER BY g.creado_en DESC
-          LIMIT ?`,
-      )
-      .all(usuarioId, limite) as (Omit<GastoResumen, "proyectos"> & { codigos: string | null })[]
-  ).map(({ codigos, ...g }) => ({ ...g, proyectos: codigos ? codigos.split(",") : [] }));
+  const filas = db
+    .prepare(
+      `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado, g.creado_en,
+              g.editado_en, g.editado_por_nombre
+         FROM gastos g
+        WHERE g.usuario_id = ?
+        ORDER BY g.creado_en DESC
+        LIMIT ?`,
+    )
+    .all(usuarioId, limite) as Omit<GastoResumen, "proyectos" | "proyecto_refs">[];
+  const qProyectos = db.prepare(
+    `SELECT p.id, p.codigo, p.nombre FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
+      WHERE gp.gasto_id = ? ORDER BY p.codigo`,
+  );
+  return filas.map((g) => {
+    const refs = qProyectos.all(g.id) as ProyectoRef[];
+    return { ...g, proyectos: refs.map((r) => r.codigo), proyecto_refs: refs };
+  });
 }
 
 export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
@@ -215,6 +230,7 @@ export function estadoDia(db: DB, u: Usuario, empresa: Empresa): EstadoDia {
     proyectos,
     ultimo_proyecto_id: recientes.find((r) => activos.has(r.proyecto_id))?.proyecto_id ?? null,
     gastos_hoy: gastosRecientes(db, u.id, 20).filter((g) => fechaLocal(g.creado_en) === hoy),
+    tareas_asignadas: tareasAbiertas(db, u.id, ahoraIso()),
     saydo_14d: progreso.saydo_14d,
     semana: progreso.historial.slice(0, 7).reverse(),
   };

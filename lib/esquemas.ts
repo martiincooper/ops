@@ -31,7 +31,8 @@ const conProyectoUnico = (v: unknown) => {
   return v;
 };
 
-export const MAX_OBJETIVOS = 4;
+/** Tope de seguridad de objetivos por jornada (en la práctica, sin límite). */
+export const MAX_OBJETIVOS = 50;
 
 const objetivoNuevo = z.preprocess(
   conProyectoUnico,
@@ -41,7 +42,7 @@ const objetivoNuevo = z.preprocess(
   }),
 );
 
-/** Comenzar jornada: es solo el evento. Se aceptan objetivos opcionales (hasta 4); se agregan después en el tablero. */
+/** Comenzar jornada: es solo el evento. Se aceptan objetivos opcionales; se agregan después en el tablero. */
 export const esquemaComienzo = z.object({
   tareas: z.array(objetivoNuevo).max(MAX_OBJETIVOS, `Máximo ${MAX_OBJETIVOS} objetivos`).default([]),
 });
@@ -70,7 +71,7 @@ export const esquemaTermino = z.object({
         motivo_pendiente: z.string().trim().max(280).optional().nullable(),
       }),
     )
-    .max(20),
+    .max(MAX_OBJETIVOS),
   bloqueo: z.string().trim().max(500).optional().nullable(),
 });
 
@@ -86,21 +87,44 @@ const montoClp = z.coerce
   .min(0, "Monto inválido")
   .max(1_000_000_000, "Monto fuera de rango");
 
+export const TIPOS_COSTO = ["unico", "diario", "mensual", "anual"] as const;
+export type TipoCosto = (typeof TIPOS_COSTO)[number];
+
+/** Campos de una compra. monto_clp es la compra; envío e impuesto son partes aparte que suman al total. */
+const camposGasto = {
+  proyecto_ids: proyectosDe(10),
+  item: texto(120),
+  descripcion: z.string().trim().max(500, "Máximo 500 caracteres").optional().nullable(),
+  monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0"),
+  envio_clp: montoClp.optional().nullable(),
+  impuesto_clp: montoClp.optional().nullable(),
+  tipo_costo: z.enum(TIPOS_COSTO, { error: "Tipo de costo inválido" }).optional(),
+};
+
+const totalEnRango = (g: { monto_clp?: number; envio_clp?: number | null; impuesto_clp?: number | null }) =>
+  (g.monto_clp ?? 0) + (g.envio_clp ?? 0) + (g.impuesto_clp ?? 0) <= 1_000_000_000;
+
 /**
- * Compra: uno o más proyectos, nombre, descripción (opcional), monto de la compra en CLP y, opcional, el costo
- * de envío en CLP. Se guarda el total (compra + envío) y el envío por separado.
+ * Compra: uno o más proyectos, nombre, descripción (opcional), monto de la compra en CLP y, opcionales, el costo
+ * de envío y un impuesto extra (p. ej. aduana) en CLP, más el tipo de costo (único o recurrente; solo etiqueta).
+ * Se guarda el total (compra + envío + impuesto) y el envío y el impuesto por separado.
  */
 export const esquemaGasto = z.preprocess(
   conProyectoUnico,
+  z.object(camposGasto).refine(totalEnRango, { message: "Monto fuera de rango", path: ["envio_clp"] }),
+);
+
+/**
+ * Edición de una compra (cualquier estado: el impuesto de aduana puede llegar después de aprobada). Solo cambian
+ * los campos enviados; monto_clp es el de la compra, sin envío ni impuesto.
+ */
+export const esquemaGastoCambio = z.preprocess(
+  conProyectoUnico,
   z
-    .object({
-      proyecto_ids: proyectosDe(10),
-      item: texto(120),
-      descripcion: z.string().trim().max(500, "Máximo 500 caracteres").optional().nullable(),
-      monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0"),
-      envio_clp: montoClp.optional().nullable(),
-    })
-    .refine((g) => g.monto_clp + (g.envio_clp ?? 0) <= 1_000_000_000, { message: "Monto fuera de rango", path: ["envio_clp"] }),
+    .object(camposGasto)
+    .partial()
+    .refine(totalEnRango, { message: "Monto fuera de rango", path: ["envio_clp"] })
+    .refine((v) => Object.values(v).some((x) => x !== undefined), "Nada que cambiar"),
 );
 
 const emailNormalizado = z.string().trim().toLowerCase().pipe(z.email("Email inválido"));
@@ -133,6 +157,11 @@ export const esquemaAdminCambio = z.object({
   activo: z.boolean().optional(),
   resetear_pin: z.literal(true).optional(),
 });
+
+/** Tarea asignada: pendiente que no es objetivo del día; queda hasta marcarla hecha. */
+export const esquemaTareaNueva = z.object({ descripcion: texto(280) });
+export const esquemaTareaAdmin = esquemaTareaNueva.extend({ usuario_id: z.string().min(1) });
+export const esquemaTareaCambio = z.object({ completada: z.boolean() });
 
 export const esquemaValidacionGasto = z
   .object({

@@ -1,8 +1,10 @@
 "use client";
 
-import { Check, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { Check, LoaderCircle, Pencil, Plus, Repeat, RotateCcw, X } from "lucide-react";
 import { Fragment, useState } from "react";
+import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
 import { Avatar, Insignia, type Tono } from "@/components/ui";
+import type { ProyectoActivo } from "@/lib/dominio";
 import type { FilaGasto } from "@/lib/tableros";
 import { api, clp, cx } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, conEmpresa, fechaHora, useAccion, useDatos, type Alcance } from "./comun";
@@ -14,7 +16,13 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
   const { datos, error, cargando, recargar } = useDatos<{ gastos: FilaGasto[] }>(
     conEmpresa("/api/admin/gastos", empresa, { alcance, estado }),
   );
-  const { ocupado, aviso, ejecutar } = useAccion();
+  const { ocupado, aviso, setAviso, ejecutar } = useAccion();
+  // Proyectos activos (para registrar o editar costos desde aquí)
+  const { datos: datosProyectos } = useDatos<{ proyectos: (ProyectoActivo & { estado: string })[] }>(conEmpresa("/api/admin/proyectos", empresa));
+  const activos = (datosProyectos?.proyectos ?? [])
+    .filter((p) => ["concepto", "prototipado", "pruebas"].includes(p.estado))
+    .map(({ id, codigo, nombre }) => ({ id, codigo, nombre }));
+  const [formulario, setFormulario] = useState<"nuevo" | string | null>(null);
   const [rechazando, setRechazando] = useState<{ id: string; motivo: string } | null>(null);
   const gastos = datos?.gastos ?? [];
   const total = gastos.reduce((s, g) => s + g.monto_clp, 0);
@@ -43,7 +51,27 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
         <span className="ml-auto rounded-full bg-superficie px-4 py-2 text-sm text-tinta-2 shadow-tarjeta">
           {gastos.length} compra(s) · <b className="font-semibold text-tinta">{clp(total)}</b>
         </span>
+        {formulario !== "nuevo" && (
+          <button type="button" onClick={() => setFormulario("nuevo")} disabled={activos.length === 0} className="boton shrink-0 whitespace-nowrap">
+            <Plus size={16} /> Registrar costo
+          </button>
+        )}
       </div>
+      {formulario === "nuevo" && (
+        <div className="mb-4 max-w-xl">
+          <FormGasto
+            titulo="Registrar costo de proyecto (queda aprobado)"
+            proyectos={activos}
+            url={conEmpresa("/api/admin/gastos", empresa)}
+            onCancelar={() => setFormulario(null)}
+            onGuardado={async () => {
+              setFormulario(null);
+              setAviso({ tipo: "ok", texto: "Costo registrado y aprobado." });
+              await recargar();
+            }}
+          />
+        </div>
+      )}
       <Aviso aviso={aviso} />
       <Cargando cargando={cargando && !datos} error={error} />
       {datos && gastos.length === 0 && <Vacio>{estado === "pendiente" ? "No hay compras por validar." : "Sin compras registradas."}</Vacio>}
@@ -71,6 +99,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                           <span className="block font-semibold text-tinta">{g.persona}</span>
                           <span className="block text-xs text-tinta-3">
                             {fechaHora(g.creado_en)}
+                            {g.de_jefatura && <span className="ml-1.5 rounded-full bg-indigo-suave px-2 py-0.5 font-medium text-indigo-tinta" title="Registrado por la jefatura">jefatura</span>}
                             {g.heredado && <span className="ml-1.5 rounded-full bg-suave px-2 py-0.5 font-medium text-tinta-2" title="Registrada por una persona eliminada; quedó a nombre de este administrador">heredada</span>}
                           </span>
                         </span>
@@ -79,6 +108,16 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                     <td className="max-w-72">
                       <p className="font-medium text-tinta">{g.item}</p>
                       {g.descripcion && <p className="mt-0.5 text-xs leading-snug text-tinta-3">{g.descripcion}</p>}
+                      {g.tipo_costo !== "unico" && (
+                        <p className="mt-1 flex items-center gap-1 text-xs font-medium text-indigo-tinta">
+                          <Repeat size={12} /> {NOMBRE_TIPO_COSTO[g.tipo_costo]}
+                        </p>
+                      )}
+                      {g.editado_por_nombre && (
+                        <p className="mt-0.5 text-[11px] text-tinta-3">
+                          Editada por {g.editado_por_nombre} · {fechaHora(g.editado_en)}
+                        </p>
+                      )}
                     </td>
                     <td>
                       {g.proyectos.map((p) => (
@@ -91,6 +130,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                     <td className="text-right">
                       <span className="block font-semibold tabular-nums text-tinta">{clp(g.monto_clp)}</span>
                       {g.envio_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp(g.envio_clp)}</span>}
+                      {g.impuesto_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. impuesto {clp(g.impuesto_clp)}</span>}
                     </td>
                     <td>
                       <Insignia tono={ESTADO[g.estado]}>{g.estado}</Insignia>
@@ -104,6 +144,9 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
                         {ocupado === g.id && <LoaderCircle size={16} className="mr-1 animate-spin text-tinta-3" />}
+                        <button type="button" title="Editar compra" aria-label={`Editar compra: ${g.item}`} disabled={ocupado !== null} onClick={() => setFormulario(formulario === g.id ? null : g.id)} className="rounded-full p-2 text-tinta-3 hover:bg-suave hover:text-tinta disabled:opacity-50">
+                          <Pencil size={14} />
+                        </button>
                         {g.estado !== "aprobado" && (
                           <button type="button" disabled={ocupado !== null} onClick={() => decidir(g, "aprobado")} className="inline-flex items-center gap-1 rounded-full bg-ok-fondo px-3 py-1.5 text-xs font-semibold text-ok-tinta hover:brightness-95 disabled:opacity-50">
                             <Check size={14} /> Aprobar
@@ -122,6 +165,25 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                       </div>
                     </td>
                   </tr>
+                  {formulario === g.id && (
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="max-w-xl">
+                          <FormGasto
+                            proyectos={activos}
+                            inicial={{ ...g, proyecto_refs: g.proyectos.map(({ id, codigo, nombre }) => ({ id, codigo, nombre })) }}
+                            urlEdicion={conEmpresa(`/api/admin/gastos/${g.id}/datos`, empresa)}
+                            onCancelar={() => setFormulario(null)}
+                            onGuardado={async () => {
+                              setFormulario(null);
+                              setAviso({ tipo: "ok", texto: `${g.item}: cambios guardados (estado ${g.estado}).` });
+                              await recargar();
+                            }}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {rechazando?.id === g.id && (
                     <tr className="bg-pastel-rosa/60">
                       <td colSpan={6}>

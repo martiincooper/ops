@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
-import { gastosRecientes, jornadaDelDia, jornadaEnCurso, proyectosActivos } from "@/lib/dominio";
+import { gastosRecientes, jornadaDelDia, jornadaEnCurso } from "@/lib/dominio";
 import { esquemaGasto } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
-import { repartirMonto } from "@/lib/reparto";
-import { hoyLocal } from "@/lib/tiempo";
+import { ErrorGasto, crearGasto } from "@/lib/gastos";
+import { ahoraIso, hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
@@ -15,27 +14,24 @@ export const GET = manejar(async (req: NextRequest) => {
 });
 
 /**
- * Compra: nombre, descripción (opcional), monto de la compra, envío opcional y uno o más proyectos (montos en CLP).
- * Se guarda monto_clp = compra + envío (total pagado) y envio_clp aparte. Con varios proyectos el total, envío
- * incluido, se reparte en partes iguales (la suma siempre cuadra con el total).
+ * Compra: nombre, descripción (opcional), monto de la compra, envío e impuesto opcionales, tipo de costo y uno o más
+ * proyectos (montos en CLP). Se guarda monto_clp = compra + envío + impuesto (total pagado) y el envío y el impuesto
+ * aparte. Con varios proyectos el total se reparte en partes iguales (la suma siempre cuadra con el total).
  */
 export const POST = manejar(async (req: NextRequest) => {
   const { u, db } = await contexto(req, ["team"]);
   const g = await leerJson(req, esquemaGasto);
-  const activos = new Set(proyectosActivos(db).map((p) => p.id));
-  if (g.proyecto_ids.some((id) => !activos.has(id))) throw new HttpError(400, "Proyecto inexistente o no activo");
-
-  const id = randomUUID();
-  const envio = g.envio_clp ?? 0;
-  const total = g.monto_clp + envio;
-  const partes = repartirMonto(total, g.proyecto_ids.length);
-  db.transaction(() => {
-    db.prepare(
-      `INSERT INTO gastos (id, usuario_id, bitacora_id, item, descripcion, monto_clp, envio_clp)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, u.id, (jornadaEnCurso(db, u.id) ?? jornadaDelDia(db, u.id, hoyLocal()))?.id ?? null, g.item, g.descripcion || null, total, envio);
-    const ins = db.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES (?, ?, ?)");
-    g.proyecto_ids.forEach((p, i) => ins.run(id, p, partes[i]));
-  })();
+  let id: string;
+  try {
+    id = crearGasto(db, {
+      usuarioId: u.id,
+      bitacoraId: (jornadaEnCurso(db, u.id) ?? jornadaDelDia(db, u.id, hoyLocal()))?.id ?? null,
+      datos: g,
+      ahora: ahoraIso(),
+    });
+  } catch (e) {
+    if (e instanceof ErrorGasto) throw new HttpError(e.status, e.message);
+    throw e;
+  }
   return NextResponse.json({ id, gastos: gastosRecientes(db, u.id) }, { status: 201 });
 });

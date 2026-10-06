@@ -5,9 +5,8 @@ import { useState } from "react";
 import SelectorProyectos, { CodigosProyecto } from "@/components/SelectorProyectos";
 import { PASTELES } from "@/components/ui";
 import type { EstadoDia, TareaDia } from "@/lib/dominio";
+import { MAX_OBJETIVOS } from "@/lib/esquemas";
 import { ErrorApi, api, cx } from "@/lib/cliente";
-
-const MAX = 4;
 
 interface Props {
   estado: EstadoDia;
@@ -103,7 +102,7 @@ export default function Objetivos({ estado, onCambio }: Props) {
     <section className="tarjeta p-5">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h2 className="titulo-seccion">{deAntes && terminada ? `Última jornada · ${j.fecha_texto.toLowerCase()}` : "Objetivos"}</h2>
-        <span className="text-xs text-tinta-3">{terminada ? "Editable hasta que comiences la próxima" : `${estado.tareas.length}/${MAX}`}</span>
+        <span className="text-xs text-tinta-3">{terminada ? "Editable hasta que comiences la próxima" : `${estado.tareas.length} objetivo${estado.tareas.length === 1 ? "" : "s"}`}</span>
       </div>
 
       <ul className="space-y-3">
@@ -218,13 +217,13 @@ export default function Objetivos({ estado, onCambio }: Props) {
           />
         </div>
       ) : (
-        estado.tareas.length < MAX && (
+        estado.tareas.length < MAX_OBJETIVOS && (
           <button
             type="button"
             onClick={() => setEditando("nuevo")}
             className="mt-3 flex w-full items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-indigo/25 py-3 text-sm font-semibold text-indigo-tinta hover:bg-indigo-suave/50"
           >
-            <Plus size={16} /> Agregar objetivo ({estado.tareas.length}/{MAX})
+            <Plus size={16} /> Agregar objetivo
           </button>
         )
       )}

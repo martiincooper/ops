@@ -1,19 +1,16 @@
-import { ArrowLeft, CalendarOff, KeyRound, Receipt } from "lucide-react";
+import { ArrowLeft, CalendarOff, KeyRound } from "lucide-react";
 import Link from "next/link";
 import Anillo from "@/components/Anillo";
 import BotonSalir from "@/components/BotonSalir";
-import { CodigosProyecto } from "@/components/SelectorProyectos";
-import { Insignia, type Tono } from "@/components/ui";
+import MisCompras from "@/components/equipo/MisCompras";
 import { empresaDe, requirePagina } from "@/lib/auth";
 import { getDbEmpresa } from "@/lib/db";
-import { ausenciasDesde, gastosRecientes } from "@/lib/dominio";
+import { ausenciasDesde, gastosRecientes, proyectosActivos } from "@/lib/dominio";
 import { calcularProgreso, type DiaResumen } from "@/lib/metricas";
 import { fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
 import { cx } from "@/lib/cliente";
 
 export const dynamic = "force-dynamic";
-
-const clp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 
 function Dia({ d, hoy }: { d: DiaResumen; hoy: string }) {
   let detalle: string;
@@ -41,8 +38,6 @@ function Dia({ d, hoy }: { d: DiaResumen; hoy: string }) {
     </li>
   );
 }
-
-const ESTADO_GASTO: Record<string, Tono> = { pendiente: "alerta", aprobado: "ok", rechazado: "error" };
 
 export default async function MiProgreso() {
   const u = await requirePagina(["team"]);
@@ -108,25 +103,7 @@ export default async function MiProgreso() {
         {gastos.length === 0 ? (
           <p className="text-sm text-tinta-3">Aún no registras compras.</p>
         ) : (
-          <ul className="space-y-2">
-            {gastos.map((g) => (
-              <li key={g.id} className="flex items-start gap-3 rounded-2xl bg-suave p-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-superficie text-indigo">
-                  <Receipt size={18} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 font-medium leading-snug text-tinta">{g.item}</p>
-                  <p className="text-xs capitalize text-tinta-3">{fechaCorta(fechaLocal(g.creado_en))}</p>
-                  <CodigosProyecto codigos={g.proyectos} className="mt-1.5" />
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className="font-semibold tabular-nums text-tinta">{clp.format(g.monto_clp)}</span>
-                  {g.envio_clp > 0 && <span className="whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp.format(g.envio_clp)}</span>}
-                  <Insignia tono={ESTADO_GASTO[g.estado]}>{g.estado}</Insignia>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <MisCompras gastos={gastos} proyectos={proyectosActivos(db)} />
         )}
       </section>
 
