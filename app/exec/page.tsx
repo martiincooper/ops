@@ -11,6 +11,7 @@ import {
   Minus,
   PackageCheck,
   PauseCircle,
+  Receipt,
   Repeat,
   Wallet,
   Workflow,
@@ -18,6 +19,7 @@ import {
 import Link from "next/link";
 import BotonSalir from "@/components/BotonSalir";
 import EditorMetas from "@/components/EditorMetas";
+import { ESTADO_PAGO } from "@/components/EstadoPago";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
 import { empresaDe, requirePagina } from "@/lib/auth";
@@ -271,7 +273,7 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
   }
   const hoy = hoyLocal();
   const m = metricasExec(getDbEmpresa(empresa.clave), hoy);
-  const { costo, tiempo, pipeline, entregados, metas, desglose } = m;
+  const { costo, tiempo, pipeline, entregados, metas, desglose, pagos } = m;
 
   // Costo recurrente por día, mes o año (?periodo=dia|mes|anio; por defecto, mes)
   const periodo: PeriodoCosto = PERIODOS_COSTO.find((p) => p === q.periodo) ?? "mes";
@@ -702,6 +704,69 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
           )}
         </Seccion>
 
+        {/* ── Estado de pago: por enviar, esperando pago y compradas */}
+        <Seccion id="pagos" icono={Receipt} tono="bg-pastel-menta text-ok-tinta" titulo="Estado de pago de las compras">
+          <div className="grid gap-4 lg:grid-cols-3">
+            {pagos.map((g) => {
+              const { nombre, ayuda, clase, Icono } = ESTADO_PAGO[g.estado_pago];
+              return (
+                <div key={g.estado_pago} className="flex min-w-0 flex-col rounded-3xl bg-suave p-4">
+                  <div className="flex items-center gap-3">
+                    <span className={cx("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", clase)}>
+                      <Icono size={18} aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-tinta">{nombre}</span>
+                      <span className="block text-xs text-tinta-3">{ayuda}</span>
+                    </span>
+                  </div>
+                  <p className="mt-3 flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-2xl font-bold tracking-tight text-tinta">{compacto(g.total_clp)}</span>
+                    <span className="text-sm text-tinta-3">
+                      {g.compras} {g.compras === 1 ? "compra" : "compras"}
+                    </span>
+                  </p>
+                  {g.por_validar_clp > 0 && <p className="text-xs text-tinta-3">Incluye {compacto(g.por_validar_clp)} por validar</p>}
+                  {g.items.length === 0 ? (
+                    <p className="mt-3 text-sm text-tinta-3">Sin compras.</p>
+                  ) : (
+                    <ul className="mt-3 max-h-96 divide-y divide-linea overflow-y-auto rounded-2xl bg-superficie">
+                      {g.items.map((c) => (
+                        <li key={c.id} className="flex items-start gap-3 px-3 py-2.5">
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5 text-sm font-medium text-tinta">
+                              <span className="truncate" title={c.item}>
+                                {c.item}
+                              </span>
+                              {c.tipo_costo !== "unico" && <Repeat size={12} className="shrink-0 text-recurrente-tinta" aria-label="Recurrente" />}
+                            </span>
+                            <span className="block text-xs text-tinta-3">
+                              {c.proyectos.map((p, j) => (
+                                <span key={p.codigo}>
+                                  {j > 0 && " · "}
+                                  <span className="whitespace-nowrap font-mono font-semibold text-indigo-tinta" title={p.nombre}>
+                                    {p.codigo}
+                                  </span>
+                                </span>
+                              ))}
+                              {" · "}
+                              {c.persona} · {fecha(c.fecha)}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-right">
+                            <b className="block text-sm font-semibold tabular-nums text-tinta">{clp(c.monto_clp)}</b>
+                            {c.por_validar && <span className="block text-[11px] text-alerta-tinta">por validar</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Seccion>
+
         {/* ── 3. Concepto → cliente: línea de tiempo */}
         <Seccion id="plazo" icono={Clock} tono="bg-pastel-azul text-indigo" titulo="Concepto → cliente" chip={<Chip e={tiempo.estado} />}>
           {proyectosT.length === 0 ? (
@@ -921,6 +986,11 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
               lleva a día, mes o año: diario × 365 y mensual × 12 dan el valor anual; mes = año ÷ 12 y día = año ÷ 365. Si el mismo
               costo recurrente (mismo nombre y proyectos) se registra varias veces, por ejemplo cada mes, para el costo por periodo
               cuenta solo el registro más reciente; todos los pagos suman al costo total.
+            </li>
+            <li>
+              <b className="text-tinta">Estado de pago:</b> compras aprobadas y por validar (sin rechazadas), separadas en por enviar a pago (se
+              enviarán a procesar más adelante), esperando pago (ya enviadas, falta pagarlas) y compradas (ya pagadas). Lo marca quien registra
+              la compra y lo actualiza la persona o la jefatura. Todas suman al costo, estén pagadas o no.
             </li>
             <li>
               <b className="text-tinta">Concepto → cliente:</b> días desde el inicio del proyecto hasta la entrega. La meta es la fecha estimada que la

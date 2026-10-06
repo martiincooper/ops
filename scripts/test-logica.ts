@@ -11,7 +11,7 @@ import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { ErrorObjetivo, agregarObjetivo, agregarObjetivoJefatura, bitacoraEditable, comenzarJornada, cambiarBloqueo, cambiarObjetivo, quitarObjetivo } from "../lib/objetivos";
 import { cuentaDeRegistros, eliminarCuenta, idsHeredados } from "../lib/registros";
 import { repartirMonto } from "../lib/reparto";
-import { capacidad, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
+import { capacidad, comprasPorPago, equipoActivo, gastosEmpresa, metricasExec, standup } from "../lib/tableros";
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
 import { METAS_DEFECTO, esquemaMetas, guardarMetas, leerMetas } from "../lib/metas";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
@@ -484,6 +484,66 @@ async function main() {
     assert.deepEqual([g.estado, g.validado_por_nombre, g.de_jefatura, g.heredado, g.tipo_costo], ["aprobado", "Jefa", true, false, "mensual"]);
     assert.equal(gastosEmpresa(d).length, 0, "no aparece en «Por validar»");
     assert.equal(metricasExec(d, "2026-10-01").costo.proyectos[0].total_clp, 50000);
+  });
+
+  console.log("Compras: estado de pago (por enviar, esperando pago, comprada)");
+  await prueba("migración v9 sobre una base v8: las compras existentes quedan como compradas", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_EMPRESA.slice(0, 8).forEach((m) => d.exec(m));
+    d.prepare("INSERT INTO usuarios (id, nombre, email, rol) VALUES ('u1','Ana','ana@aether.cl','team')").run();
+    d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp) VALUES ('g0','u1','Viejo',12000)").run();
+    MIGRACIONES_EMPRESA.slice(8).forEach((m) => d.exec(m));
+    assert.deepEqual(d.prepare("SELECT estado_pago FROM gastos").get(), { estado_pago: "comprada" });
+    assert.throws(() => d.prepare("UPDATE gastos SET estado_pago = 'pagada'").run());
+  });
+  await prueba("esquema: estado de pago opcional y solo los tres valores", () => {
+    const base = { proyecto_ids: ["p1"], item: "Sensor", monto_clp: 10000 };
+    for (const e of ["por_enviar", "esperando_pago", "comprada"]) assert.equal(esquemaGasto.safeParse({ ...base, estado_pago: e }).success, true, e);
+    assert.equal(esquemaGasto.safeParse({ ...base, estado_pago: "pagada" }).success, false);
+    assert.equal(esquemaGastoCambio.safeParse({ estado_pago: "esperando_pago" }).success, true);
+  });
+  await prueba("crear y editar: por defecto comprada; cambiar el estado de pago conserva la validación y el monto", () => {
+    const d = dbNueva();
+    const datos = { proyecto_ids: ["p1"], item: "Módulo", monto_clp: 10000 };
+    const a = crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos, ahora: "2026-10-01T12:00:00Z" });
+    const b = crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos: { ...datos, estado_pago: "por_enviar" }, ahora: "2026-10-01T12:01:00Z" });
+    const pago = (id: string) => (d.prepare("SELECT estado_pago, estado, monto_clp FROM gastos WHERE id = ?").get(id) as Record<string, unknown>);
+    assert.deepEqual(pago(a), { estado_pago: "comprada", estado: "pendiente", monto_clp: 10000 });
+    d.prepare("UPDATE gastos SET estado = 'aprobado' WHERE id = ?").run(b);
+    editarGasto(d, b, { estado_pago: "esperando_pago" }, { nombre: "Jefa", ahora: "2026-10-02T12:00:00Z" });
+    assert.deepEqual(pago(b), { estado_pago: "esperando_pago", estado: "aprobado", monto_clp: 10000 });
+    editarGasto(d, b, { impuesto_clp: 500 }, { nombre: "Ana", ahora: "2026-10-03T12:00:00Z", usuarioId: "u1" });
+    assert.equal(pago(b).estado_pago, "esperando_pago", "editar otro campo no cambia el estado de pago");
+  });
+  await prueba("jefatura filtra por estado de pago; gerencia ve los tres grupos sin rechazadas", () => {
+    const d = dbNueva();
+    const nueva = (item: string, monto: number, estado_pago: "por_enviar" | "esperando_pago" | "comprada", ahora: string) => {
+      const id = crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos: { proyecto_ids: ["p1"], item, monto_clp: monto, estado_pago }, ahora });
+      d.prepare("UPDATE gastos SET creado_en = ? WHERE id = ?").run(ahora, id); // fecha de registro fija para el orden
+      return id;
+    };
+    nueva("PCB", 30000, "por_enviar", "2026-10-01T12:00:00Z");
+    nueva("Stencil", 20000, "por_enviar", "2026-10-02T12:00:00Z");
+    const esp = nueva("Sensor", 15000, "esperando_pago", "2026-10-02T13:00:00Z");
+    const rech = nueva("Rechazada", 99000, "esperando_pago", "2026-10-02T14:00:00Z");
+    nueva("Cables", 5000, "comprada", "2026-10-03T12:00:00Z");
+    d.prepare("UPDATE gastos SET estado = 'aprobado' WHERE id = ?").run(esp);
+    d.prepare("UPDATE gastos SET estado = 'rechazado' WHERE id = ?").run(rech);
+    assert.deepEqual(gastosEmpresa(d, { estado: "todos", pago: "por_enviar" }).map((g) => g.item), ["Stencil", "PCB"]);
+    assert.deepEqual(gastosEmpresa(d, { estado: "todos", pago: "esperando_pago" }).map((g) => g.item), ["Rechazada", "Sensor"]);
+    assert.equal(gastosEmpresa(d, { estado: "todos" }).length, 5, "sin filtro de pago: todas");
+    assert.deepEqual(
+      comprasPorPago(d).map((g) => [g.estado_pago, g.compras, g.total_clp, g.por_validar_clp, g.items.map((i) => i.item)]),
+      [
+        ["por_enviar", 2, 50000, 50000, ["Stencil", "PCB"]],
+        ["esperando_pago", 1, 15000, 0, ["Sensor"]],
+        ["comprada", 1, 5000, 5000, ["Cables"]],
+      ],
+    );
+    const [g] = comprasPorPago(d);
+    assert.deepEqual([g.items[0].persona, g.items[0].fecha, g.items[0].proyectos], ["Ana", "2026-10-02", [{ codigo: "AETH-01", nombre: "Sensor" }]]);
+    assert.equal(metricasExec(d, "2026-10-03").pagos.length, 3);
   });
 
   console.log("Gerencia: desglose de costos (único, recurrente por periodo, por proyecto)");

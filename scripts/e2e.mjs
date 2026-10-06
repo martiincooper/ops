@@ -484,6 +484,28 @@ async function main() {
     assert.equal(fin.costo.total_clp - fin.costo.por_validar_clp, 43435); // aprobado
     assert.equal((await ggD.cliente.pedir("/api/exec")).datos.costo.total_clp, 43435); // la compra de Dora, separada
   });
+  await prueba("estado de pago: por defecto comprada; la persona y la jefatura lo cambian; filtro y grupos de gerencia", async () => {
+    const propias = (await ana.cliente.pedir("/api/gastos")).datos.gastos;
+    assert.ok(propias.every((g) => g.estado_pago === "comprada"));
+    assert.equal((await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ estado_pago: "pagada" }) })).status, 400);
+    const r = await ana.cliente.pedir(`/api/gastos/${gastoDobleId}`, { metodo: "PATCH", json: { estado_pago: "esperando_pago" } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.equal(r.datos.gastos.find((x) => x.id === gastoDobleId).estado_pago, "esperando_pago");
+    assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}/datos`, A), { metodo: "PATCH", json: { estado_pago: "por_enviar" } })).status, 200);
+    const filtro = async (pago) => (await admin.pedir(q("/api/admin/gastos", A, `&alcance=todos&estado=todos&pago=${pago}`))).datos.gastos.map((g) => g.id);
+    assert.deepEqual(await filtro("por_enviar"), [anaGastoId]);
+    assert.deepEqual(await filtro("esperando_pago"), [gastoDobleId]);
+    assert.equal((await filtro("comprada")).length, 1);
+    const g = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((x) => x.id === anaGastoId);
+    assert.equal(g.estado, "aprobado", "cambiar el pago no toca la validación");
+    const m = (await ggA.cliente.pedir("/api/exec")).datos;
+    assert.deepEqual(m.pagos.map((x) => [x.estado_pago, x.compras, x.total_clp]), [
+      ["por_enviar", 1, 43435],
+      ["esperando_pago", 1, 90001],
+      ["comprada", 1, 11900],
+    ]);
+    assert.equal(m.costo.total_clp, 43435 + 90001 + 11900, "el costo no cambia con el estado de pago");
+  });
   await prueba("tolerancia de costo: solo administradores la cambian; gerencia la ve", async () => {
     const metas = { tolerancia_costo_pct: 15 };
     assert.equal((await ggA.cliente.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: metas })).status, 403);

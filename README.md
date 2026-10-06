@@ -79,6 +79,13 @@ rechazadas no cuentan).
 Cada compra tiene un **tipo de costo**: único / fijo, o recurrente **diario**, **mensual** o **anual** (el monto
 registrado es el de un día, un mes o un año, según el tipo). Gerencia lo usa en el **Desglose de costos**.
 
+Cada compra tiene también un **estado de pago**, aparte de la validación: **por enviar a pago** (se enviará a
+procesar más adelante), **esperando pago** (ya enviada, falta pagarla) o **comprada** (ya pagada; es el valor por
+defecto y el de las compras anteriores a este cambio). Lo elige quien registra la compra y se cambia al editarla
+(equipo) o directamente en la columna **Pago** de `/admin` → **Compras**, que además filtra por estado de pago.
+Gerencia ve la sección **Estado de pago de las compras**: las tres listas con su cantidad y total (sin rechazadas).
+El estado de pago no cambia el costo: todas las compras aprobadas y por validar suman, estén pagadas o no.
+
 ## Vista de gerencia (`/exec`)
 
 Tres focos, en este orden. Los proyectos **entregados no entran** en los indicadores: se listan al final.
@@ -431,10 +438,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos (42 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago (46 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos (54 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago (55 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test

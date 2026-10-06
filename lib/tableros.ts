@@ -13,7 +13,7 @@ import {
   leerEtapas,
   tramos,
 } from "./etapas";
-import type { TipoCosto } from "./esquemas";
+import { ESTADOS_PAGO, type EstadoPago, type TipoCosto } from "./esquemas";
 import { calcularProgreso, porcentaje } from "./metricas";
 import { type Metas, leerMetas } from "./metas";
 import { esFinDeSemana, fechaLocal, sumarDias } from "./tiempo";
@@ -219,6 +219,8 @@ export interface FilaGasto {
   /** Parte del total que fue impuesto extra, p. ej. aduana (0 = sin impuesto). */
   impuesto_clp: number;
   tipo_costo: "unico" | "diario" | "mensual" | "anual";
+  /** Por enviar a pago, esperando pago o comprada (aparte de la validación). */
+  estado_pago: EstadoPago;
   editado_en: string | null;
   editado_por_nombre: string | null;
   estado: "pendiente" | "aprobado" | "rechazado";
@@ -230,20 +232,20 @@ export interface FilaGasto {
 
 export function gastosEmpresa(
   db: DB,
-  op: { estado?: "pendiente" | "todos"; ids?: Set<string> | null; limite?: number } = {},
+  op: { estado?: "pendiente" | "todos"; pago?: EstadoPago | null; ids?: Set<string> | null; limite?: number } = {},
 ): FilaGasto[] {
   const filas = (
     db
       .prepare(
         `SELECT g.id, g.usuario_id, u.nombre AS persona, u.admin_id IS NOT NULL AS heredado, g.de_jefatura, g.item, g.descripcion,
-                g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado, g.validado_por_nombre, g.validado_en,
-                g.observacion, g.creado_en, g.editado_en, g.editado_por_nombre
+                g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado_pago, g.estado, g.validado_por_nombre,
+                g.validado_en, g.observacion, g.creado_en, g.editado_en, g.editado_por_nombre
            FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
-          WHERE (? = 'todos' OR g.estado = 'pendiente')
+          WHERE (? = 'todos' OR g.estado = 'pendiente') AND (? IS NULL OR g.estado_pago = ?)
           ORDER BY g.estado = 'pendiente' DESC, g.creado_en DESC
           LIMIT ?`,
       )
-      .all(op.estado ?? "pendiente", op.limite ?? 500) as Omit<FilaGasto, "proyectos">[]
+      .all(op.estado ?? "pendiente", op.pago ?? null, op.pago ?? null, op.limite ?? 500) as Omit<FilaGasto, "proyectos">[]
   ).filter((f) => !op.ids || op.ids.has(f.usuario_id));
   const qProyectos = db.prepare(
     `SELECT p.id, p.codigo, p.nombre, gp.monto_clp FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
@@ -256,6 +258,68 @@ export function gastosEmpresa(
     de_jefatura: Boolean(f.de_jefatura),
     proyectos: qProyectos.all(f.id) as FilaGasto["proyectos"],
   }));
+}
+
+/** Compras de un estado de pago (gerencia), de la más reciente a la más antigua. */
+export interface GrupoPago {
+  estado_pago: EstadoPago;
+  compras: number;
+  total_clp: number;
+  /** Parte del total que aún está por validar. */
+  por_validar_clp: number;
+  items: {
+    id: string;
+    item: string;
+    persona: string;
+    monto_clp: number;
+    tipo_costo: TipoCosto;
+    por_validar: boolean;
+    /** Fecha local (YYYY-MM-DD) de registro. */
+    fecha: string;
+    proyectos: { codigo: string; nombre: string }[];
+  }[];
+}
+
+/**
+ * Compras agrupadas por estado de pago, en el orden del flujo (por enviar → esperando pago → comprada). Sin las
+ * rechazadas; las por validar sí cuentan (marcadas). Las de la jefatura y las heredadas van a nombre de la fila de
+ * registros del administrador.
+ */
+export function comprasPorPago(db: DB): GrupoPago[] {
+  const filas = db
+    .prepare(
+      `SELECT g.id, g.item, u.nombre AS persona, g.monto_clp, g.tipo_costo, g.estado_pago,
+              g.estado = 'pendiente' AS por_validar, g.creado_en
+         FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
+        WHERE g.estado <> 'rechazado'
+        ORDER BY g.creado_en DESC, g.id`,
+    )
+    .all() as { id: string; item: string; persona: string; monto_clp: number; tipo_costo: TipoCosto; estado_pago: EstadoPago; por_validar: number; creado_en: string }[];
+  const qProyectos = db.prepare(
+    `SELECT p.codigo, p.nombre FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
+      WHERE gp.gasto_id = ? ORDER BY p.codigo`,
+  );
+  return ESTADOS_PAGO.map((estado_pago) => {
+    const items = filas
+      .filter((f) => f.estado_pago === estado_pago)
+      .map((f) => ({
+        id: f.id,
+        item: f.item,
+        persona: f.persona,
+        monto_clp: f.monto_clp,
+        tipo_costo: f.tipo_costo,
+        por_validar: Boolean(f.por_validar),
+        fecha: fechaLocal(f.creado_en),
+        proyectos: qProyectos.all(f.id) as { codigo: string; nombre: string }[],
+      }));
+    return {
+      estado_pago,
+      compras: items.length,
+      total_clp: items.reduce((s, i) => s + i.monto_clp, 0),
+      por_validar_clp: items.reduce((s, i) => s + (i.por_validar ? i.monto_clp : 0), 0),
+      items,
+    };
+  });
 }
 
 // ───────────────────────── Gerencia ─────────────────────────
@@ -568,6 +632,8 @@ export interface MetricasExec {
   entregados: ProyectoEntregado[];
   /** Costo total, único vs recurrente, recurrente por periodo y por proyecto (todos los proyectos). */
   desglose: DesgloseCostos;
+  /** Compras por estado de pago: por enviar, esperando pago y compradas (sin rechazadas). */
+  pagos: GrupoPago[];
   personas_activas: number;
 }
 
@@ -762,6 +828,7 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
     },
     entregados,
     desglose: desgloseCostos(db),
+    pagos: comprasPorPago(db),
     personas_activas: equipoActivo(db).length,
   };
 }

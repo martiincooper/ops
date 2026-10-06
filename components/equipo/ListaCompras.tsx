@@ -3,6 +3,7 @@
 import { Pencil, Receipt, Repeat } from "lucide-react";
 import { useState } from "react";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
+import { ChipPago } from "@/components/EstadoPago";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
 import { Insignia, type Tono } from "@/components/ui";
 import type { GastoResumen, ProyectoActivo } from "@/lib/dominio";
@@ -13,8 +14,8 @@ const ESTADO: Record<GastoResumen["estado"], Tono> = { pendiente: "alerta", apro
 const fmtFecha = new Intl.DateTimeFormat("es-CL", { weekday: "short", day: "numeric", month: "short", timeZone: "America/Santiago" });
 
 /**
- * Compras propias con su estado. Cada una se puede editar en cualquier estado (precio final, envío, impuesto de
- * aduana que llega después de aprobada…); la validación se conserva.
+ * Compras propias con su estado de validación y de pago. Cada una se puede editar en cualquier estado (precio final,
+ * envío, impuesto de aduana que llega después de aprobada, estado de pago…); la validación se conserva.
  */
 export default function ListaCompras({
   gastos,
@@ -57,7 +58,10 @@ export default function ListaCompras({
                   <Repeat size={12} /> {NOMBRE_TIPO_COSTO[g.tipo_costo]}
                 </p>
               )}
-              <CodigosProyecto codigos={g.proyectos} className="mt-1.5" />
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <ChipPago estado={g.estado_pago} />
+                <CodigosProyecto codigos={g.proyectos} />
+              </div>
               {g.editado_por_nombre && <p className="mt-1 text-[11px] text-tinta-3">Editada por {g.editado_por_nombre}</p>}
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1">

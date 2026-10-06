@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
-import { esquemaGasto } from "@/lib/esquemas";
+import { ESTADOS_PAGO, esquemaGasto } from "@/lib/esquemas";
 import { ErrorGasto, crearGasto } from "@/lib/gastos";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { cuentaDeRegistros, idsHeredados } from "@/lib/registros";
@@ -10,13 +10,14 @@ import { ahoraIso } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
-// ?empresa=clave&alcance=mios|todos&estado=pendiente|todos
+// ?empresa=clave&alcance=mios|todos&estado=pendiente|todos&pago=por_enviar|esperando_pago|comprada (sin pago = todos)
 export const GET = manejar(async (req: NextRequest) => {
   const { u, empresa, db } = await contexto(req, ["admin"]);
   const q = req.nextUrl.searchParams;
   const mios = q.get("alcance") !== "todos";
   const gastos = gastosEmpresa(db, {
     estado: q.get("estado") === "todos" ? "todos" : "pendiente",
+    pago: ESTADOS_PAGO.find((e) => e === q.get("pago")) ?? null,
     // Mis supervisados + los registros que heredé al eliminar cuentas
     ids: mios ? new Set([...supervisadosDe(u.id, empresa.clave), ...idsHeredados(db, u.id)]) : null,
   });

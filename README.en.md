@@ -40,6 +40,12 @@ Objectives and purchases can belong to **one or more projects**. A purchase is n
 amount in Chilean pesos (CLP, no decimals), an optional shipping cost (CLP, behind an "Agregar envío" toggle) and
 projects. The total (purchase + shipping) is stored and the shipping part shown separately; with several projects
 the total, shipping included, is split equally (leftover pesos go to the first ones).
+Each purchase also has a **payment status**, separate from validation: "por enviar a pago" (to be sent for payment
+processing later), "esperando pago" (sent, awaiting payment) or "comprada" (already paid; the default, and what
+existing purchases get — `gastos.estado_pago`, automatic migration). It is set when registering and changed by
+editing (team) or straight from the **Pago** column in `/admin` → Compras, which also filters by it. The executive
+view lists the three groups with count and total ("Estado de pago de las compras", rejected excluded). Payment
+status does not change any cost figure.
 
 Editing a project (`/admin` → Proyectos → Editar) changes code, name, BOM estimate, start and estimated delivery
 dates; the start date also moves the first stage and cannot pass the next stage or the delivery date.

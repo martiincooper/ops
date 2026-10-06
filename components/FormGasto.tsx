@@ -2,9 +2,10 @@
 
 import { Landmark, LoaderCircle, Truck } from "lucide-react";
 import { useId, useState } from "react";
+import { SelectorPago } from "@/components/EstadoPago";
 import SelectorProyectos from "@/components/SelectorProyectos";
 import type { ProyectoActivo } from "@/lib/dominio";
-import type { TipoCosto } from "@/lib/esquemas";
+import type { EstadoPago, TipoCosto } from "@/lib/esquemas";
 import { ErrorApi, api, clp, cx, miles } from "@/lib/cliente";
 import { repartirMonto } from "@/lib/reparto";
 
@@ -17,6 +18,7 @@ export interface GastoEditable {
   envio_clp: number;
   impuesto_clp: number;
   tipo_costo: TipoCosto;
+  estado_pago: EstadoPago;
   proyecto_refs: ProyectoActivo[];
 }
 
@@ -101,7 +103,8 @@ function CampoClp({ id, valor, onCambio, describe }: { id: string; valor: string
 }
 
 /**
- * Compra: nombre, descripción, monto en CLP, envío e impuesto opcionales en CLP, tipo de costo y uno o más proyectos.
+ * Compra: nombre, descripción, monto en CLP, envío e impuesto opcionales en CLP, tipo de costo, estado de pago (por
+ * enviar a pago, esperando pago o comprada) y uno o más proyectos.
  * El total (compra + envío + impuesto) se reparte en partes iguales entre los proyectos. Con `inicial`, edita una
  * compra existente (en cualquier estado: p. ej. agregar el impuesto de aduana a una compra ya aprobada).
  */
@@ -131,6 +134,7 @@ export default function FormGasto({
   const [conImpuesto, setConImpuesto] = useState(Boolean(inicial?.impuesto_clp));
   const [impuesto, setImpuesto] = useState(inicial?.impuesto_clp ? String(inicial.impuesto_clp) : "");
   const [tipo, setTipo] = useState<TipoCosto>(inicial?.tipo_costo ?? "unico");
+  const [pago, setPago] = useState<EstadoPago>(inicial?.estado_pago ?? "comprada");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uid = useId(); // ids únicos: puede haber más de un formulario en pantalla (registrar + editar)
@@ -159,6 +163,7 @@ export default function FormGasto({
         envio_clp: costoEnvio || null,
         impuesto_clp: costoImpuesto || null,
         tipo_costo: tipo,
+        estado_pago: pago,
       };
       if (inicial) await api(urlEdicion ?? `/api/gastos/${inicial.id}`, { method: "PATCH", json: datos });
       else await api(url, { method: "POST", json: datos });
@@ -215,6 +220,8 @@ export default function FormGasto({
           ))}
         </div>
       </div>
+
+      <SelectorPago id={`${uid}-pago`} valor={pago} onCambio={setPago} />
 
       <div className="rounded-2xl bg-superficie">
         <Interruptor

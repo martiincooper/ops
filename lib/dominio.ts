@@ -2,7 +2,7 @@ import "server-only";
 import type { DB } from "./db";
 import type { Usuario } from "./auth";
 import type { Empresa } from "./empresas";
-import type { TipoCosto } from "./esquemas";
+import type { EstadoPago, TipoCosto } from "./esquemas";
 import { calcularProgreso, type DiaResumen } from "./metricas";
 import { type TareaAsignada, tareasAbiertas } from "./tareas";
 import { TZ_NEGOCIO, ahoraIso, fechaLarga, fechaLocal, hoyLocal } from "./tiempo";
@@ -66,6 +66,8 @@ export interface GastoResumen {
   /** Parte del total que fue impuesto extra, p. ej. aduana (0 = sin impuesto). */
   impuesto_clp: number;
   tipo_costo: TipoCosto;
+  /** Por enviar a pago, esperando pago o comprada (aparte de la validación). */
+  estado_pago: EstadoPago;
   estado: "pendiente" | "aprobado" | "rechazado";
   creado_en: string;
   editado_en: string | null;
@@ -176,8 +178,8 @@ export function ausenciasDesde(db: DB, usuarioId: string, desde: string): Ausenc
 export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoResumen[] {
   const filas = db
     .prepare(
-      `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado, g.creado_en,
-              g.editado_en, g.editado_por_nombre
+      `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado_pago, g.estado,
+              g.creado_en, g.editado_en, g.editado_por_nombre
          FROM gastos g
         WHERE g.usuario_id = ?
         ORDER BY g.creado_en DESC

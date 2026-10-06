@@ -1,7 +1,7 @@
 // Alta y edición de compras (gastos). Sin "server-only" para probarlo con tsx.
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { TipoCosto } from "./esquemas";
+import type { EstadoPago, TipoCosto } from "./esquemas";
 import { repartirMonto } from "./reparto";
 
 type DB = Database.Database;
@@ -24,6 +24,7 @@ export interface DatosGasto {
   envio_clp?: number | null;
   impuesto_clp?: number | null;
   tipo_costo?: TipoCosto;
+  estado_pago?: EstadoPago;
 }
 
 /** Proyectos que pueden recibir costo: activos, o (al editar) los que la compra ya tenía aunque ya no estén activos. */
@@ -42,7 +43,7 @@ function repartir(db: DB, gastoId: string, total: number, proyectoIds: string[])
 
 /**
  * Registra una compra. Se guarda monto_clp = compra + envío + impuesto (total pagado) y el envío y el impuesto
- * aparte. `aprobadaPor`: la registra la jefatura y queda aprobada de inmediato.
+ * aparte. Sin estado de pago, queda como comprada. `aprobadaPor`: la registra la jefatura y queda aprobada de inmediato.
  */
 export function crearGasto(
   db: DB,
@@ -58,8 +59,8 @@ export function crearGasto(
   db.transaction(() => {
     db.prepare(
       `INSERT INTO gastos (id, usuario_id, bitacora_id, item, descripcion, monto_clp, envio_clp, impuesto_clp, tipo_costo,
-                           estado, validado_por, validado_por_nombre, validado_en, de_jefatura)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           estado_pago, estado, validado_por, validado_por_nombre, validado_en, de_jefatura)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       op.usuarioId,
@@ -70,6 +71,7 @@ export function crearGasto(
       envio,
       impuesto,
       g.tipo_costo ?? "unico",
+      g.estado_pago ?? "comprada",
       a ? "aprobado" : "pendiente",
       a?.id ?? null,
       a?.nombre ?? null,
@@ -83,7 +85,7 @@ export function crearGasto(
 
 /**
  * Edita una compra en cualquier estado (el impuesto de aduana o el precio final pueden llegar después de aprobada).
- * Solo cambian los campos enviados; el estado y la validación se conservan. Si cambia el total o los proyectos, se
+ * Solo cambian los campos enviados (también el estado de pago); la validación se conserva. Si cambia el total o los proyectos, se
  * vuelve a repartir.
  */
 export function editarGasto(
@@ -93,9 +95,18 @@ export function editarGasto(
   editor: { nombre: string; ahora: string; usuarioId?: string },
 ): void {
   const actual = db
-    .prepare("SELECT usuario_id, item, descripcion, monto_clp, envio_clp, impuesto_clp, tipo_costo FROM gastos WHERE id = ?")
+    .prepare("SELECT usuario_id, item, descripcion, monto_clp, envio_clp, impuesto_clp, tipo_costo, estado_pago FROM gastos WHERE id = ?")
     .get(gastoId) as
-    | { usuario_id: string; item: string; descripcion: string | null; monto_clp: number; envio_clp: number; impuesto_clp: number; tipo_costo: TipoCosto }
+    | {
+        usuario_id: string;
+        item: string;
+        descripcion: string | null;
+        monto_clp: number;
+        envio_clp: number;
+        impuesto_clp: number;
+        tipo_costo: TipoCosto;
+        estado_pago: EstadoPago;
+      }
     | undefined;
   // Equipo: solo sus propias compras (404 para no revelar las de otros).
   if (!actual || (editor.usuarioId && actual.usuario_id !== editor.usuarioId)) throw new ErrorGasto(404, "Compra no encontrada");
@@ -116,7 +127,7 @@ export function editarGasto(
   db.transaction(() => {
     db.prepare(
       `UPDATE gastos SET item = ?, descripcion = ?, monto_clp = ?, envio_clp = ?, impuesto_clp = ?, tipo_costo = ?,
-              editado_en = ?, editado_por_nombre = ?
+              estado_pago = ?, editado_en = ?, editado_por_nombre = ?
         WHERE id = ?`,
     ).run(
       c.item ?? actual.item,
@@ -125,6 +136,7 @@ export function editarGasto(
       envio,
       impuesto,
       c.tipo_costo ?? actual.tipo_costo,
+      c.estado_pago ?? actual.estado_pago,
       editor.ahora,
       editor.nombre,
       gastoId,

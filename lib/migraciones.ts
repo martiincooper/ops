@@ -317,4 +317,12 @@ export const MIGRACIONES_EMPRESA: string[] = [
   );
   CREATE INDEX idx_tareas_asignadas ON tareas_asignadas (usuario_id, completada_en);
   `,
+
+  // v9 — estado de pago de cada compra, aparte de la validación: por enviar a pago (se enviará a procesar más
+  //      adelante), esperando pago (ya enviada, falta el pago) o comprada (ya pagada). Lo marca quien registra la
+  //      compra y lo puede cambiar después (la persona o la jefatura). Las compras existentes quedan como compradas.
+  `
+  ALTER TABLE gastos ADD COLUMN estado_pago TEXT NOT NULL DEFAULT 'comprada'
+    CHECK (estado_pago IN ('por_enviar', 'esperando_pago', 'comprada'));
+  `,
 ];

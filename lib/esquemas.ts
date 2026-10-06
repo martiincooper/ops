@@ -90,6 +90,13 @@ const montoClp = z.coerce
 export const TIPOS_COSTO = ["unico", "diario", "mensual", "anual"] as const;
 export type TipoCosto = (typeof TIPOS_COSTO)[number];
 
+/**
+ * Estado de pago de una compra (aparte de la validación), en el orden del flujo: por enviar a pago (se enviará a
+ * procesar más adelante) → esperando pago (ya enviada, falta el pago) → comprada (ya pagada).
+ */
+export const ESTADOS_PAGO = ["por_enviar", "esperando_pago", "comprada"] as const;
+export type EstadoPago = (typeof ESTADOS_PAGO)[number];
+
 /** Campos de una compra. monto_clp es la compra; envío e impuesto son partes aparte que suman al total. */
 const camposGasto = {
   proyecto_ids: proyectosDe(10),
@@ -99,6 +106,7 @@ const camposGasto = {
   envio_clp: montoClp.optional().nullable(),
   impuesto_clp: montoClp.optional().nullable(),
   tipo_costo: z.enum(TIPOS_COSTO, { error: "Tipo de costo inválido" }).optional(),
+  estado_pago: z.enum(ESTADOS_PAGO, { error: "Estado de pago inválido" }).optional(),
 };
 
 const totalEnRango = (g: { monto_clp?: number; envio_clp?: number | null; impuesto_clp?: number | null }) =>
@@ -106,8 +114,8 @@ const totalEnRango = (g: { monto_clp?: number; envio_clp?: number | null; impues
 
 /**
  * Compra: uno o más proyectos, nombre, descripción (opcional), monto de la compra en CLP y, opcionales, el costo
- * de envío y un impuesto extra (p. ej. aduana) en CLP, más el tipo de costo (único o recurrente; solo etiqueta).
- * Se guarda el total (compra + envío + impuesto) y el envío y el impuesto por separado.
+ * de envío y un impuesto extra (p. ej. aduana) en CLP, más el tipo de costo (único o recurrente; solo etiqueta) y
+ * el estado de pago (por defecto, comprada). Se guarda el total (compra + envío + impuesto) y el envío y el impuesto por separado.
  */
 export const esquemaGasto = z.preprocess(
   conProyectoUnico,

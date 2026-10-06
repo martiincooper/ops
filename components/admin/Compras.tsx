@@ -2,9 +2,11 @@
 
 import { Check, LoaderCircle, Pencil, Plus, Repeat, RotateCcw, X } from "lucide-react";
 import { Fragment, useState } from "react";
+import { ESTADO_PAGO } from "@/components/EstadoPago";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
 import { Avatar, Insignia, type Tono } from "@/components/ui";
 import type { ProyectoActivo } from "@/lib/dominio";
+import { ESTADOS_PAGO, type EstadoPago } from "@/lib/esquemas";
 import type { FilaGasto } from "@/lib/tableros";
 import { api, clp, cx } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, conEmpresa, fechaHora, useAccion, useDatos, type Alcance } from "./comun";
@@ -13,8 +15,9 @@ const ESTADO: Record<FilaGasto["estado"], Tono> = { pendiente: "alerta", aprobad
 
 export default function Compras({ empresa, alcance }: { empresa: string; alcance: Alcance }) {
   const [estado, setEstado] = useState<"pendiente" | "todos">("pendiente");
+  const [pago, setPago] = useState<EstadoPago | "todos">("todos");
   const { datos, error, cargando, recargar } = useDatos<{ gastos: FilaGasto[] }>(
-    conEmpresa("/api/admin/gastos", empresa, { alcance, estado }),
+    conEmpresa("/api/admin/gastos", empresa, { alcance, estado, ...(pago === "todos" ? {} : { pago }) }),
   );
   const { ocupado, aviso, setAviso, ejecutar } = useAccion();
   // Proyectos activos (para registrar o editar costos desde aquí)
@@ -38,6 +41,13 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
       return nuevo === "pendiente" ? `${g.item}: vuelve a pendiente.` : `${g.item}: ${nuevo}.`;
     });
 
+  const cambiarPago = (g: FilaGasto, nuevo: EstadoPago) =>
+    ejecutar(g.id, async () => {
+      await api(conEmpresa(`/api/admin/gastos/${g.id}/datos`, empresa), { method: "PATCH", json: { estado_pago: nuevo } });
+      await recargar();
+      return `${g.item}: ${ESTADO_PAGO[nuevo].nombre.toLowerCase()}.`;
+    });
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -47,6 +57,17 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
               {e === "pendiente" ? "Por validar" : "Todas"}
             </button>
           ))}
+        </div>
+        <div className="segmentos bg-superficie shadow-tarjeta" role="group" aria-label="Estado de pago">
+          {(["todos", ...ESTADOS_PAGO] as const).map((e) => {
+            const Icono = e === "todos" ? null : ESTADO_PAGO[e].Icono;
+            return (
+              <button key={e} onClick={() => setPago(e)} aria-pressed={pago === e} className={cx("segmento", pago === e && "segmento-activo bg-indigo-suave text-indigo-tinta")}>
+                {Icono && <Icono size={14} aria-hidden className="mr-1 inline" />}
+                {e === "todos" ? "Todo pago" : ESTADO_PAGO[e].corto}
+              </button>
+            );
+          })}
         </div>
         <span className="ml-auto rounded-full bg-superficie px-4 py-2 text-sm text-tinta-2 shadow-tarjeta">
           {gastos.length} compra(s) · <b className="font-semibold text-tinta">{clp(total)}</b>
@@ -74,7 +95,12 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
       )}
       <Aviso aviso={aviso} />
       <Cargando cargando={cargando && !datos} error={error} />
-      {datos && gastos.length === 0 && <Vacio>{estado === "pendiente" ? "No hay compras por validar." : "Sin compras registradas."}</Vacio>}
+      {datos && gastos.length === 0 && (
+        <Vacio>
+          {estado === "pendiente" ? "No hay compras por validar" : "Sin compras registradas"}
+          {pago === "todos" ? "." : ` en «${ESTADO_PAGO[pago].nombre}».`}
+        </Vacio>
+      )}
       {gastos.length > 0 && (
         <div className="tarjeta overflow-x-auto">
           <table className="tabla">
@@ -84,6 +110,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                 <th>Compra</th>
                 <th>Proyecto(s)</th>
                 <th className="text-right">Monto (CLP)</th>
+                <th>Pago</th>
                 <th>Estado</th>
                 <th className="text-right">Validar</th>
               </tr>
@@ -133,6 +160,21 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                       {g.impuesto_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. impuesto {clp(g.impuesto_clp)}</span>}
                     </td>
                     <td>
+                      <label htmlFor={`pago-${g.id}`} className="sr-only">Estado de pago de {g.item}</label>
+                      <select
+                        id={`pago-${g.id}`}
+                        value={g.estado_pago}
+                        disabled={ocupado !== null}
+                        onChange={(e) => cambiarPago(g, e.target.value as EstadoPago)}
+                        title={ESTADO_PAGO[g.estado_pago].ayuda}
+                        className={cx("cursor-pointer rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-semibold disabled:opacity-50", ESTADO_PAGO[g.estado_pago].clase)}
+                      >
+                        {ESTADOS_PAGO.map((e) => (
+                          <option key={e} value={e}>{ESTADO_PAGO[e].nombre}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
                       <Insignia tono={ESTADO[g.estado]}>{g.estado}</Insignia>
                       {g.validado_por_nombre && <span className="mt-1 block text-xs text-tinta-3">{g.validado_por_nombre}</span>}
                       {g.observacion && (
@@ -167,7 +209,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                   </tr>
                   {formulario === g.id && (
                     <tr>
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <div className="max-w-xl">
                           <FormGasto
                             proyectos={activos}
@@ -186,7 +228,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                   )}
                   {rechazando?.id === g.id && (
                     <tr className="bg-pastel-rosa/60">
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <form
                           className="flex flex-wrap items-center gap-2"
                           onSubmit={(e) => {
