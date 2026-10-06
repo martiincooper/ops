@@ -990,7 +990,8 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
             <li>
               <b className="text-tinta">Estado de pago:</b> compras aprobadas y por validar (sin rechazadas), separadas en por enviar a pago (se
               enviarán a procesar más adelante), esperando pago (ya enviadas, falta pagarlas) y compradas (ya pagadas). Lo marca quien registra
-              la compra y lo actualiza la persona o la jefatura. Todas suman al costo, estén pagadas o no.
+              la compra y lo actualiza la persona o la jefatura. Todas suman al costo, estén pagadas o no. Todos los montos están en pesos: las compras ingresadas en dólares se convierten con el dólar del día en que se
+              registran o editan.
             </li>
             <li>
               <b className="text-tinta">Concepto → cliente:</b> días desde el inicio del proyecto hasta la entrega. La meta es la fecha estimada que la

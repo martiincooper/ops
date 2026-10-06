@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { ESTADOS_PAGO, esquemaGasto } from "@/lib/esquemas";
-import { ErrorGasto, crearGasto } from "@/lib/gastos";
+import { ErrorGasto, crearGasto, necesitaTipoCambio } from "@/lib/gastos";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { cuentaDeRegistros, idsHeredados } from "@/lib/registros";
 import { supervisadosDe } from "@/lib/supervision";
 import { gastosEmpresa } from "@/lib/tableros";
 import { ahoraIso } from "@/lib/tiempo";
+import { tipoCambioHoy } from "@/lib/tipoCambio";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export const GET = manejar(async (req: NextRequest) => {
 export const POST = manejar(async (req: NextRequest) => {
   const { u, db } = await contexto(req, ["admin"]);
   const g = await leerJson(req, esquemaGasto);
+  const tipoCambio = necesitaTipoCambio(db, null, g) ? await tipoCambioHoy() : null;
   try {
     const id = db.transaction(() =>
       crearGasto(db, {
@@ -39,6 +41,7 @@ export const POST = manejar(async (req: NextRequest) => {
         datos: g,
         aprobadaPor: { id: u.id, nombre: u.nombre },
         ahora: ahoraIso(),
+        tipoCambio,
       }),
     )();
     return NextResponse.json({ id }, { status: 201 });

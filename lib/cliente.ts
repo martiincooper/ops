@@ -28,6 +28,18 @@ export async function api<T>(url: string, init: RequestInit & { json?: unknown }
 const fmtClp = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
 export const clp = (n: number) => fmtClp.format(n);
 
+const fmtUsd = new Intl.NumberFormat("es-CL", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** "US$1.234,50" */
+export const usd = (n: number) => fmtUsd.format(n);
+
+const fmtTasa = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Pesos por dólar: "$977,25" */
+export const tasa = (n: number) => fmtTasa.format(n);
+
+const fmtDia = new Intl.DateTimeFormat("es-CL", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+/** Fecha YYYY-MM-DD → "6 oct 2026" */
+export const dia = (f: string) => fmtDia.format(new Date(`${f}T12:00:00Z`));
+
 const fmtMiles = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 });
 export const miles = (n: number) => fmtMiles.format(n);
 

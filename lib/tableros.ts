@@ -218,6 +218,13 @@ export interface FilaGasto {
   envio_clp: number;
   /** Parte del total que fue impuesto extra, p. ej. aduana (0 = sin impuesto). */
   impuesto_clp: number;
+  /** Montos ingresados en dólares (null = ese monto se ingresó en pesos); los *_clp ya están convertidos. */
+  monto_usd: number | null;
+  envio_usd: number | null;
+  impuesto_usd: number | null;
+  /** Pesos por dólar con que se convirtió (null = todo en pesos) y la fecha de ese dólar. */
+  tipo_cambio: number | null;
+  tipo_cambio_fecha: string | null;
   tipo_costo: "unico" | "diario" | "mensual" | "anual";
   /** Por enviar a pago, esperando pago o comprada (aparte de la validación). */
   estado_pago: EstadoPago;
@@ -238,7 +245,8 @@ export function gastosEmpresa(
     db
       .prepare(
         `SELECT g.id, g.usuario_id, u.nombre AS persona, u.admin_id IS NOT NULL AS heredado, g.de_jefatura, g.item, g.descripcion,
-                g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado_pago, g.estado, g.validado_por_nombre,
+                g.monto_clp, g.envio_clp, g.impuesto_clp, g.monto_usd, g.envio_usd, g.impuesto_usd, g.tipo_cambio,
+                g.tipo_cambio_fecha, g.tipo_costo, g.estado_pago, g.estado, g.validado_por_nombre,
                 g.validado_en, g.observacion, g.creado_en, g.editado_en, g.editado_por_nombre
            FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
           WHERE (? = 'todos' OR g.estado = 'pendiente') AND (? IS NULL OR g.estado_pago = ?)

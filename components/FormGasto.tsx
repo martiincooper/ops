@@ -1,12 +1,12 @@
 "use client";
 
 import { Landmark, LoaderCircle, Truck } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { SelectorPago } from "@/components/EstadoPago";
 import SelectorProyectos from "@/components/SelectorProyectos";
 import type { ProyectoActivo } from "@/lib/dominio";
 import type { EstadoPago, TipoCosto } from "@/lib/esquemas";
-import { ErrorApi, api, clp, cx, miles } from "@/lib/cliente";
+import { ErrorApi, api, clp, cx, dia, miles, tasa, usd } from "@/lib/cliente";
 import { repartirMonto } from "@/lib/reparto";
 
 /** Compra existente a editar. monto_clp es el total (compra + envío + impuesto). */
@@ -17,10 +17,24 @@ export interface GastoEditable {
   monto_clp: number;
   envio_clp: number;
   impuesto_clp: number;
+  /** Montos ingresados en dólares (null = en pesos). */
+  monto_usd: number | null;
+  envio_usd: number | null;
+  impuesto_usd: number | null;
+  tipo_cambio: number | null;
+  tipo_cambio_fecha: string | null;
   tipo_costo: TipoCosto;
   estado_pago: EstadoPago;
   proyecto_refs: ProyectoActivo[];
 }
+
+type Moneda = "clp" | "usd";
+type TipoCambio = { valor: number; fecha: string };
+
+/** Texto del campo → número ("120,5" → 120.5). */
+const aNumero = (v: string) => Number(v.replace(",", ".")) || 0;
+/** Número en dólares → texto del campo (120.5 → "120,5"). */
+const usdATexto = (n: number) => String(n).replace(".", ",");
 
 interface Props {
   proyectos: ProyectoActivo[];
@@ -81,30 +95,104 @@ function Interruptor({
   );
 }
 
-/** Campo de monto en pesos chilenos: enteros, con separador de miles al escribir. */
-function CampoClp({ id, valor, onCambio, describe }: { id: string; valor: string; onCambio: (v: string) => void; describe?: string }) {
+/** Selector CLP / US$ de un monto. */
+function SelectorMoneda({ id, moneda, onCambio, etiqueta }: { id: string; moneda: Moneda; onCambio: (m: Moneda) => void; etiqueta: string }) {
   return (
-    <div className="relative">
-      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-tinta-3">$</span>
-      <input
-        id={id}
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        aria-describedby={describe}
-        value={valor ? miles(Number(valor)) : ""}
-        onChange={(e) => onCambio(e.target.value.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 10))}
-        placeholder="0"
-        className="campo bg-superficie pl-8 pr-14 tabular-nums"
-      />
-      <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-tinta-3">CLP</span>
+    <span role="radiogroup" aria-label={`Moneda: ${etiqueta}`} id={id} className="inline-flex rounded-full bg-superficie p-0.5 ring-1 ring-linea">
+      {(["clp", "usd"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          role="radio"
+          aria-checked={moneda === m}
+          onClick={() => moneda !== m && onCambio(m)}
+          className={cx("rounded-full px-2.5 py-0.5 text-xs font-semibold transition", moneda === m ? "bg-indigo text-white" : "text-tinta-3 hover:text-tinta")}
+        >
+          {m === "clp" ? "CLP" : "US$"}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Campo de monto en pesos chilenos (enteros, con separador de miles al escribir) o en dólares (hasta 2 decimales).
+ * En dólares muestra debajo el equivalente en pesos con el dólar del día.
+ */
+function CampoMonto({
+  id,
+  etiqueta,
+  moneda,
+  onMoneda,
+  valor,
+  onCambio,
+  tc,
+  ayuda,
+}: {
+  id: string;
+  etiqueta: string;
+  moneda: Moneda;
+  onMoneda: (m: Moneda) => void;
+  valor: string;
+  onCambio: (v: string) => void;
+  tc: TipoCambio | null;
+  ayuda?: string;
+}) {
+  const enUsd = moneda === "usd";
+  const n = aNumero(valor);
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <label htmlFor={id} className="etiqueta mb-0">
+          {etiqueta} {enUsd ? "en dólares (US$)" : "en pesos chilenos (CLP)"}
+        </label>
+        <SelectorMoneda id={`${id}-moneda`} moneda={moneda} etiqueta={etiqueta} onCambio={onMoneda} />
+      </div>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-tinta-3">{enUsd ? "US$" : "$"}</span>
+        <input
+          id={id}
+          type="text"
+          inputMode={enUsd ? "decimal" : "numeric"}
+          autoComplete="off"
+          aria-describedby={`${id}-ayuda`}
+          value={enUsd ? valor : valor ? miles(Number(valor)) : ""}
+          onChange={(e) =>
+            onCambio(
+              enUsd
+                ? e.target.value
+                    .replace(/[^\d.,]/g, "")
+                    .replace(/[.,]/, "\u0000")
+                    .replace(/[.,]/g, "")
+                    .replace("\u0000", ",")
+                    .replace(/^0+(?=\d)/, "")
+                    .replace(/(,\d{2})\d+$/, "$1")
+                    .slice(0, 10)
+                : e.target.value.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 10),
+            )
+          }
+          placeholder={enUsd ? "0,00" : "0"}
+          className={cx("campo bg-superficie pr-14 tabular-nums", enUsd ? "pl-12" : "pl-8")}
+        />
+        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-tinta-3">{enUsd ? "USD" : "CLP"}</span>
+      </div>
+      <p id={`${id}-ayuda`} className="mt-1.5 text-xs text-tinta-3">
+        {enUsd
+          ? n > 0
+            ? tc
+              ? `≈ ${clp(Math.round(n * tc.valor))} CLP con el dólar del día`
+              : "Se convierte a pesos con el dólar del día al guardar"
+            : "Hasta 2 decimales. Ej: 120,50"
+          : ayuda}
+      </p>
     </div>
   );
 }
 
 /**
- * Compra: nombre, descripción, monto en CLP, envío e impuesto opcionales en CLP, tipo de costo, estado de pago (por
- * enviar a pago, esperando pago o comprada) y uno o más proyectos.
+ * Compra: nombre, descripción, monto, envío e impuesto opcionales, tipo de costo, estado de pago (por enviar a pago,
+ * esperando pago o comprada) y uno o más proyectos. Cada monto va en pesos o en dólares (selector CLP / US$): los de
+ * dólares se convierten a pesos con el dólar del día al guardar (no cambian después, salvo que se vuelvan a editar).
  * El total (compra + envío + impuesto) se reparte en partes iguales entre los proyectos. Con `inicial`, edita una
  * compra existente (en cualquier estado: p. ej. agregar el impuesto de aduana a una compra ya aprobada).
  */
@@ -128,40 +216,84 @@ export default function FormGasto({
   const [ids, setIds] = useState<string[]>(validos.length ? validos : proyectos[0] ? [proyectos[0].id] : []);
   const [item, setItem] = useState(inicial?.item ?? "");
   const [descripcion, setDescripcion] = useState(inicial?.descripcion ?? "");
-  const [monto, setMonto] = useState(inicial ? String(inicial.monto_clp - inicial.envio_clp - inicial.impuesto_clp) : "");
-  const [conEnvio, setConEnvio] = useState(Boolean(inicial?.envio_clp));
-  const [envio, setEnvio] = useState(inicial?.envio_clp ? String(inicial.envio_clp) : "");
-  const [conImpuesto, setConImpuesto] = useState(Boolean(inicial?.impuesto_clp));
-  const [impuesto, setImpuesto] = useState(inicial?.impuesto_clp ? String(inicial.impuesto_clp) : "");
+  const [monto, setMonto] = useState(
+    inicial ? (inicial.monto_usd !== null ? usdATexto(inicial.monto_usd) : String(inicial.monto_clp - inicial.envio_clp - inicial.impuesto_clp)) : "",
+  );
+  const [monedaMonto, setMonedaMonto] = useState<Moneda>(inicial?.monto_usd != null ? "usd" : "clp");
+  const [conEnvio, setConEnvio] = useState(Boolean(inicial?.envio_clp || inicial?.envio_usd));
+  const [envio, setEnvio] = useState(inicial?.envio_usd ? usdATexto(inicial.envio_usd) : inicial?.envio_clp ? String(inicial.envio_clp) : "");
+  const [monedaEnvio, setMonedaEnvio] = useState<Moneda>(inicial?.envio_usd ? "usd" : "clp");
+  const [conImpuesto, setConImpuesto] = useState(Boolean(inicial?.impuesto_clp || inicial?.impuesto_usd));
+  const [impuesto, setImpuesto] = useState(
+    inicial?.impuesto_usd ? usdATexto(inicial.impuesto_usd) : inicial?.impuesto_clp ? String(inicial.impuesto_clp) : "",
+  );
+  const [monedaImpuesto, setMonedaImpuesto] = useState<Moneda>(inicial?.impuesto_usd ? "usd" : "clp");
+  // Dólar del día: solo para la vista previa; al guardar, el servidor lo vuelve a pedir y convierte.
+  const [tc, setTc] = useState<TipoCambio | null>(null);
+  const [errorTc, setErrorTc] = useState(false);
   const [tipo, setTipo] = useState<TipoCosto>(inicial?.tipo_costo ?? "unico");
   const [pago, setPago] = useState<EstadoPago>(inicial?.estado_pago ?? "comprada");
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uid = useId(); // ids únicos: puede haber más de un formulario en pantalla (registrar + editar)
 
-  const compra = Number(monto) || 0;
-  const costoEnvio = conEnvio ? Number(envio) || 0 : 0;
-  const costoImpuesto = conImpuesto ? Number(impuesto) || 0 : 0;
+  const usaDolares =
+    monedaMonto === "usd" || (conEnvio && monedaEnvio === "usd") || (conImpuesto && monedaImpuesto === "usd");
+  useEffect(() => {
+    if (!usaDolares || tc) return;
+    let vigente = true;
+    api<TipoCambio>("/api/tipo-cambio")
+      .then((t) => vigente && (setTc(t), setErrorTc(false)))
+      .catch(() => vigente && setErrorTc(true));
+    return () => {
+      vigente = false;
+    };
+  }, [usaDolares, tc]);
+
+  /** Monto ingresado (en su moneda) y su equivalente en pesos (null = en dólares sin dólar del día todavía). */
+  const valorDe = (v: string, m: Moneda, activo = true) => {
+    const n = activo ? aNumero(v) : 0;
+    return { n, clp: m === "clp" ? n : tc ? Math.round(n * tc.valor) : null, m };
+  };
+  const vCompra = valorDe(monto, monedaMonto);
+  const vEnvio = valorDe(envio, monedaEnvio, conEnvio);
+  const vImpuesto = valorDe(impuesto, monedaImpuesto, conImpuesto);
+  const compra = vCompra.clp ?? 0;
+  const costoEnvio = vEnvio.clp ?? 0;
+  const costoImpuesto = vImpuesto.clp ?? 0;
+  const totalConocido = [vCompra, vEnvio, vImpuesto].every((v) => v.clp !== null);
   const total = compra + costoEnvio + costoImpuesto;
   const partes = repartirMonto(total, ids.length);
-  const extras = [costoEnvio > 0 && `envío ${clp(costoEnvio)}`, costoImpuesto > 0 && `impuesto ${clp(costoImpuesto)}`].filter(Boolean);
+  /** "$9.700" o, si se ingresó en dólares, "US$10,00 ≈ $9.700". */
+  const texto = (v: { n: number; clp: number | null; m: Moneda }) =>
+    v.m === "clp" ? clp(v.n) : `${usd(v.n)}${v.clp !== null ? ` ≈ ${clp(v.clp)}` : ""}`;
+  const extras = [vEnvio.n > 0 && `envío ${texto(vEnvio)}`, vImpuesto.n > 0 && `impuesto ${texto(vImpuesto)}`].filter(Boolean);
 
   async function guardar() {
     setError(null);
     if (!ids.length) return setError("Elige al menos un proyecto");
     if (!item.trim()) return setError("Escribe el nombre de la compra");
-    if (compra <= 0) return setError("Ingresa el monto de la compra en pesos chilenos");
-    if (conEnvio && costoEnvio <= 0) return setError("Ingresa el costo del envío o desactívalo");
-    if (conImpuesto && costoImpuesto <= 0) return setError("Ingresa el monto del impuesto o desactívalo");
+    if (vCompra.n <= 0) return setError("Ingresa el monto de la compra");
+    if (conEnvio && vEnvio.n <= 0) return setError("Ingresa el costo del envío o desactívalo");
+    if (conImpuesto && vImpuesto.n <= 0) return setError("Ingresa el monto del impuesto o desactívalo");
     setOcupado(true);
     try {
       const datos = {
         proyecto_ids: ids,
         item: item.trim(),
         descripcion: descripcion.trim() || null,
-        monto_clp: compra,
-        envio_clp: costoEnvio || null,
-        impuesto_clp: costoImpuesto || null,
+        // Cada monto en su moneda: los de dólares los convierte el servidor con el dólar del día
+        ...(monedaMonto === "usd" ? { monto_usd: vCompra.n } : { monto_clp: vCompra.n, monto_usd: null }),
+        ...(!conEnvio
+          ? { envio_clp: null, envio_usd: null }
+          : monedaEnvio === "usd"
+            ? { envio_usd: vEnvio.n }
+            : { envio_clp: vEnvio.n, envio_usd: null }),
+        ...(!conImpuesto
+          ? { impuesto_clp: null, impuesto_usd: null }
+          : monedaImpuesto === "usd"
+            ? { impuesto_usd: vImpuesto.n }
+            : { impuesto_clp: vImpuesto.n, impuesto_usd: null }),
         tipo_costo: tipo,
         estado_pago: pago,
       };
@@ -194,11 +326,42 @@ export default function FormGasto({
           className="campo resize-none bg-superficie"
         />
       </div>
-      <div>
-        <label htmlFor={`${uid}-monto`} className="etiqueta">Monto en pesos chilenos (CLP)</label>
-        <CampoClp id={`${uid}-monto`} valor={monto} onCambio={(v) => { setMonto(v); setError(null); }} describe={`${uid}-monto-ayuda`} />
-        <p id={`${uid}-monto-ayuda`} className="mt-1.5 text-xs text-tinta-3">Solo pesos chilenos, sin decimales. Ej: 15.990</p>
-      </div>
+      <CampoMonto
+        id={`${uid}-monto`}
+        etiqueta="Monto"
+        moneda={monedaMonto}
+        onMoneda={(m) => {
+          setMonedaMonto(m);
+          setMonto("");
+          setError(null);
+        }}
+        valor={monto}
+        onCambio={(v) => {
+          setMonto(v);
+          setError(null);
+        }}
+        tc={tc}
+        ayuda="Sin decimales. Ej: 15.990"
+      />
+      {usaDolares && (
+        <p className="rounded-2xl bg-superficie px-4 py-2.5 text-xs text-tinta-2">
+          {tc ? (
+            <>
+              Dólar del día: <b className="font-semibold text-tinta">{tasa(tc.valor)}</b> ({dia(tc.fecha)}). Los montos en US$ se
+              guardan en pesos con el dólar del día en que se guarda la compra.
+            </>
+          ) : errorTc ? (
+            "No se pudo obtener el dólar del día; se volverá a intentar al guardar."
+          ) : (
+            "Obteniendo el dólar del día…"
+          )}
+          {inicial?.tipo_cambio && inicial.tipo_cambio_fecha && (
+            <span className="mt-0.5 block text-tinta-3">
+              Convertida antes con {tasa(inicial.tipo_cambio)} ({dia(inicial.tipo_cambio_fecha)}); al guardar se convierte con el de hoy.
+            </span>
+          )}
+        </p>
+      )}
 
       <div>
         <span className="etiqueta" id={`${uid}-tipo`}>Tipo de costo</span>
@@ -237,8 +400,22 @@ export default function FormGasto({
         />
         {conEnvio && (
           <div className="animate-aparecer border-t border-linea px-4 pb-4 pt-3">
-            <label htmlFor={`${uid}-envio`} className="etiqueta">Costo de envío en pesos chilenos (CLP)</label>
-            <CampoClp id={`${uid}-envio`} valor={envio} onCambio={(v) => { setEnvio(v); setError(null); }} />
+            <CampoMonto
+              id={`${uid}-envio`}
+              etiqueta="Costo de envío"
+              moneda={monedaEnvio}
+              onMoneda={(m) => {
+                setMonedaEnvio(m);
+                setEnvio("");
+                setError(null);
+              }}
+              valor={envio}
+              onCambio={(v) => {
+                setEnvio(v);
+                setError(null);
+              }}
+              tc={tc}
+            />
           </div>
         )}
       </div>
@@ -257,18 +434,33 @@ export default function FormGasto({
         />
         {conImpuesto && (
           <div className="animate-aparecer border-t border-linea px-4 pb-4 pt-3">
-            <label htmlFor={`${uid}-impuesto`} className="etiqueta">Impuesto en pesos chilenos (CLP)</label>
-            <CampoClp id={`${uid}-impuesto`} valor={impuesto} onCambio={(v) => { setImpuesto(v); setError(null); }} />
+            <CampoMonto
+              id={`${uid}-impuesto`}
+              etiqueta="Impuesto"
+              moneda={monedaImpuesto}
+              onMoneda={(m) => {
+                setMonedaImpuesto(m);
+                setImpuesto("");
+                setError(null);
+              }}
+              valor={impuesto}
+              onCambio={(v) => {
+                setImpuesto(v);
+                setError(null);
+              }}
+              tc={tc}
+            />
           </div>
         )}
       </div>
 
-      {compra > 0 && extras.length > 0 && (
+      {vCompra.n > 0 && (extras.length > 0 || usaDolares) && (
         <p className="flex items-baseline justify-between gap-3 rounded-2xl bg-indigo-suave px-4 py-3 text-sm text-indigo-tinta">
           <span>
-            Total <span className="text-xs">(compra {clp(compra)} + {extras.join(" + ")})</span>
+            Total en pesos{" "}
+            {extras.length > 0 && <span className="text-xs">(compra {texto(vCompra)} + {extras.join(" + ")})</span>}
           </span>
-          <span className="whitespace-nowrap text-base font-bold tabular-nums">{clp(total)}</span>
+          <span className="whitespace-nowrap text-base font-bold tabular-nums">{totalConocido ? clp(total) : "—"}</span>
         </p>
       )}
       <div>
@@ -280,7 +472,7 @@ export default function FormGasto({
             {ids.map((id, i) => (
               <span key={id} className="whitespace-nowrap">
                 <span className="font-mono text-indigo-tinta">{proyectos.find((p) => p.id === id)?.codigo}</span>{" "}
-                <span className="font-semibold text-tinta">{clp(partes[i] ?? 0)}</span>
+                <span className="font-semibold text-tinta">{totalConocido ? clp(partes[i] ?? 0) : "—"}</span>
                 {i < ids.length - 1 ? " · " : ""}
               </span>
             ))}

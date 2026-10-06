@@ -4,6 +4,7 @@ import { Check, LoaderCircle, Pencil, Plus, Repeat, RotateCcw, X } from "lucide-
 import { Fragment, useState } from "react";
 import { ESTADO_PAGO, SelectPago } from "@/components/EstadoPago";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
+import NotaDolares from "@/components/NotaDolares";
 import { Avatar, Insignia, type Tono } from "@/components/ui";
 import type { ProyectoActivo } from "@/lib/dominio";
 import { ESTADOS_PAGO, type EstadoPago } from "@/lib/esquemas";
@@ -158,6 +159,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                       <span className="block font-semibold tabular-nums text-tinta">{clp(g.monto_clp)}</span>
                       {g.envio_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp(g.envio_clp)}</span>}
                       {g.impuesto_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. impuesto {clp(g.impuesto_clp)}</span>}
+                      <NotaDolares g={g} className="ml-auto mt-1 max-w-48 justify-end text-right" />
                     </td>
                     <td>
                       <SelectPago id={`pago-${g.id}`} item={g.item} valor={g.estado_pago} disabled={ocupado !== null} onCambio={(e) => cambiarPago(g, e)} />

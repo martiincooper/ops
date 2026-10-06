@@ -3,7 +3,8 @@ import { contexto } from "@/lib/auth";
 import { gastosRecientes, jornadaDelDia, jornadaEnCurso } from "@/lib/dominio";
 import { ESTADOS_PAGO, esquemaGasto } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
-import { ErrorGasto, crearGasto } from "@/lib/gastos";
+import { ErrorGasto, crearGasto, necesitaTipoCambio } from "@/lib/gastos";
+import { tipoCambioHoy } from "@/lib/tipoCambio";
 import { ahoraIso, hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +20,13 @@ export const GET = manejar(async (req: NextRequest) => {
 
 /**
  * Compra: nombre, descripción (opcional), monto de la compra, envío e impuesto opcionales, tipo de costo y uno o más
- * proyectos (montos en CLP). Se guarda monto_clp = compra + envío + impuesto (total pagado) y el envío y el impuesto
+ * proyectos (montos en CLP, o en USD convertidos con el dólar del día). Se guarda monto_clp = compra + envío + impuesto (total pagado) y el envío y el impuesto
  * aparte. Con varios proyectos el total se reparte en partes iguales (la suma siempre cuadra con el total).
  */
 export const POST = manejar(async (req: NextRequest) => {
   const { u, db } = await contexto(req, ["team"]);
   const g = await leerJson(req, esquemaGasto);
+  const tipoCambio = necesitaTipoCambio(db, null, g) ? await tipoCambioHoy() : null;
   let id: string;
   try {
     id = crearGasto(db, {
@@ -32,6 +34,7 @@ export const POST = manejar(async (req: NextRequest) => {
       bitacoraId: (jornadaEnCurso(db, u.id) ?? jornadaDelDia(db, u.id, hoyLocal()))?.id ?? null,
       datos: g,
       ahora: ahoraIso(),
+      tipoCambio,
     });
   } catch (e) {
     if (e instanceof ErrorGasto) throw new HttpError(e.status, e.message);

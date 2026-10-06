@@ -90,6 +90,14 @@ que además filtra por estado de pago.
 Gerencia ve la sección **Estado de pago de las compras**: las tres listas con su cantidad y total (sin rechazadas).
 El estado de pago no cambia el costo: todas las compras aprobadas y por validar suman, estén pagadas o no.
 
+**Compras en dólares.** El monto, el envío y el impuesto tienen cada uno un selector **CLP / US$** (por defecto CLP;
+en dólares, hasta 2 decimales). Al guardar, los montos en dólares se convierten a pesos con el **dólar del día**
+(dólar observado del Banco Central vía mindicador.cl; si no responde, open.er-api.com) y se guardan en pesos junto
+con el valor original en dólares y el dólar usado. No es dinámico: el monto en pesos no cambia con el dólar, salvo
+que se vuelvan a editar los montos (entonces toda la compra se reconvierte con el dólar de ese día). Si no se puede
+obtener el dólar, la compra en dólares no se guarda (se puede reintentar o ingresar en pesos). Los tres tableros
+muestran siempre pesos; equipo y jefatura ven además una nota con los montos en US$ y el dólar usado.
+
 ## Vista de gerencia (`/exec`)
 
 Tres focos, en este orden. Los proyectos **entregados no entran** en los indicadores: se listan al final.
@@ -431,6 +439,7 @@ Respalda antes de actualizar (`node scripts/backup.mjs` o `docker exec aether-op
 | `DATA_DIR` | `/data` (Docker), `./data` (local) | Bases SQLite |
 | `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
+| `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.
 No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
@@ -442,13 +451,13 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago (46 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares (49 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo (56 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares (57 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
-  -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
+  -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false -e TIPO_CAMBIO_USD=950 aether-ops:test
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 docker rm -f aether-test
 ```

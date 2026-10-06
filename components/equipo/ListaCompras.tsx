@@ -4,6 +4,7 @@ import { LoaderCircle, Pencil, Receipt, Repeat } from "lucide-react";
 import { useState } from "react";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
 import { SelectPago } from "@/components/EstadoPago";
+import NotaDolares from "@/components/NotaDolares";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
 import { Insignia, type Tono } from "@/components/ui";
 import type { GastoResumen, ProyectoActivo } from "@/lib/dominio";
@@ -88,6 +89,7 @@ export default function ListaCompras({
                 <CodigosProyecto codigos={g.proyectos} />
               </div>
               {error?.id === g.id && <p className="mt-1 text-xs text-error-tinta">{error.texto}</p>}
+              <NotaDolares g={g} className="mt-1" />
               {g.editado_por_nombre && <p className="mt-1 text-[11px] text-tinta-3">Editada por {g.editado_por_nombre}</p>}
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1">

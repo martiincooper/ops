@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
 import { MAX_OBJETIVOS, esquemaGasto, esquemaGastoCambio } from "../lib/esquemas";
-import { ErrorGasto, crearGasto, editarGasto } from "../lib/gastos";
+import { ErrorGasto, crearGasto, editarGasto, necesitaTipoCambio } from "../lib/gastos";
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
@@ -544,6 +544,48 @@ async function main() {
     const [g] = comprasPorPago(d);
     assert.deepEqual([g.items[0].persona, g.items[0].fecha, g.items[0].proyectos], ["Ana", "2026-10-02", [{ codigo: "AETH-01", nombre: "Sensor" }]]);
     assert.equal(metricasExec(d, "2026-10-03").pagos.length, 3);
+  });
+
+  console.log("Compras en dólares: conversión a pesos con el dólar del día");
+  await prueba("esquema: montos en US$ con hasta 2 decimales; la compra en pesos o en dólares", () => {
+    const base = { proyecto_ids: ["p1"], item: "Sensor" };
+    assert.equal(esquemaGasto.safeParse({ ...base, monto_usd: 120.5 }).success, true);
+    assert.equal(esquemaGasto.safeParse({ ...base, monto_usd: 120.555 }).success, false);
+    assert.equal(esquemaGasto.safeParse({ ...base, monto_usd: 0 }).success, false);
+    assert.equal(esquemaGasto.safeParse({ ...base, monto_clp: 10000, envio_usd: 9.99, impuesto_usd: 0.01 }).success, true);
+    assert.equal(esquemaGasto.safeParse(base).success, false, "sin monto");
+    assert.equal(esquemaGastoCambio.safeParse({ envio_usd: 15 }).success, true);
+  });
+  await prueba("crear en dólares: cada monto se convierte al peso con el dólar del día; se guarda el valor en US$", () => {
+    const d = dbNueva();
+    const tc = { valor: 977.25, fecha: "2026-10-06" };
+    const datos = { proyecto_ids: ["p1"], item: "Módulo LoRa", monto_usd: 120.5, envio_usd: 10, impuesto_clp: 5000 };
+    assert.equal(necesitaTipoCambio(d, null, datos), true);
+    assert.equal(necesitaTipoCambio(d, null, { proyecto_ids: ["p1"], item: "x", monto_clp: 1000 }), false);
+    assert.throws(() => crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos, ahora: "x" }), /dólar del día/, "sin dólar no se guarda");
+    const id = crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos, ahora: "2026-10-06T12:00:00Z", tipoCambio: tc });
+    // 120,5 × 977,25 = 117.758,6 → 117.759; 10 × 977,25 = 9.772,5 → 9.773 (redondeo al peso)
+    assert.deepEqual(d.prepare("SELECT monto_clp, envio_clp, impuesto_clp, monto_usd, envio_usd, impuesto_usd, tipo_cambio, tipo_cambio_fecha FROM gastos WHERE id = ?").get(id), {
+      monto_clp: 117759 + 9773 + 5000, envio_clp: 9773, impuesto_clp: 5000, monto_usd: 120.5, envio_usd: 10, impuesto_usd: null, tipo_cambio: 977.25, tipo_cambio_fecha: "2026-10-06",
+    });
+    assert.deepEqual(d.prepare("SELECT monto_clp FROM gasto_proyectos").get(), { monto_clp: 132532 }, "el reparto usa pesos");
+  });
+  await prueba("editar: al tocar los montos se reconvierte todo con el dólar de hoy; sin tocarlos no cambia nada", () => {
+    const d = dbNueva();
+    const id = crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos: { proyecto_ids: ["p1"], item: "Placa", monto_usd: 100, envio_clp: 3000 }, ahora: "x", tipoCambio: { valor: 950, fecha: "2026-10-01" } });
+    const fila = () => d.prepare("SELECT monto_clp, envio_clp, monto_usd, tipo_cambio, tipo_cambio_fecha FROM gastos").get();
+    // Solo el estado de pago: no hace falta dólar y no cambia el monto
+    assert.equal(necesitaTipoCambio(d, id, { estado_pago: "comprada" }), false);
+    editarGasto(d, id, { estado_pago: "comprada" }, { nombre: "Ana", ahora: "x" });
+    assert.deepEqual(fila(), { monto_clp: 98000, envio_clp: 3000, monto_usd: 100, tipo_cambio: 950, tipo_cambio_fecha: "2026-10-01" });
+    // Se edita el envío (en pesos): la compra en dólares se reconvierte con el dólar de hoy
+    assert.equal(necesitaTipoCambio(d, id, { envio_clp: 4000 }), true);
+    assert.throws(() => editarGasto(d, id, { envio_clp: 4000 }, { nombre: "Ana", ahora: "x" }), ErrorGasto);
+    editarGasto(d, id, { envio_clp: 4000 }, { nombre: "Ana", ahora: "x" }, { valor: 1000, fecha: "2026-10-06" });
+    assert.deepEqual(fila(), { monto_clp: 104000, envio_clp: 4000, monto_usd: 100, tipo_cambio: 1000, tipo_cambio_fecha: "2026-10-06" });
+    // Pasar la compra a pesos: se borra el valor en dólares y el dólar
+    editarGasto(d, id, { monto_clp: 90000, monto_usd: null }, { nombre: "Ana", ahora: "x" });
+    assert.deepEqual(fila(), { monto_clp: 94000, envio_clp: 4000, monto_usd: null, tipo_cambio: null, tipo_cambio_fecha: null });
   });
 
   console.log("Gerencia: desglose de costos (único, recurrente por periodo, por proyecto)");

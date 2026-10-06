@@ -49,6 +49,12 @@ approval is just a confirmation and is kept). Admins edit every field of any pur
 **Pago** column in `/admin` → Compras, which also filters by it. The executive
 view lists the three groups with count and total ("Estado de pago de las compras", rejected excluded). Payment
 status does not change any cost figure.
+Purchase, shipping and tax amounts each have a **CLP / US$** switch (CLP by default; USD allows cents). On save, USD
+amounts are converted to pesos at the **day's dollar rate** (Banco Central "dólar observado" via mindicador.cl,
+falling back to open.er-api.com) and stored in CLP alongside the original USD values and the rate used. Not dynamic:
+the CLP amount only changes when the amounts are edited again (the whole purchase is then reconverted at that day's
+rate). If no rate is available the USD purchase is not saved. All three dashboards always show CLP; team and admin
+lists add a note with the USD values and rate. `TIPO_CAMBIO_USD` pins the rate (tests, offline servers).
 
 Editing a project (`/admin` → Proyectos → Editar) changes code, name, BOM estimate, start and estimated delivery
 dates; the start date also moves the first stage and cannot pass the next stage or the delivery date.

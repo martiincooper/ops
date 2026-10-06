@@ -97,14 +97,27 @@ export type TipoCosto = (typeof TIPOS_COSTO)[number];
 export const ESTADOS_PAGO = ["por_enviar", "esperando_pago", "comprada"] as const;
 export type EstadoPago = (typeof ESTADOS_PAGO)[number];
 
-/** Campos de una compra. monto_clp es la compra; envío e impuesto son partes aparte que suman al total. */
+/** Monto en dólares: hasta 2 decimales (centavos) y hasta US$ 1 millón. */
+const montoUsd = z.coerce
+  .number({ error: "Monto inválido" })
+  .min(0, "Monto inválido")
+  .max(1_000_000, "Monto fuera de rango")
+  .refine((n) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6, "Los montos en dólares llevan hasta 2 decimales");
+
+/**
+ * Campos de una compra. monto_clp es la compra; envío e impuesto son partes aparte que suman al total. Cada monto puede
+ * venir en dólares (`*_usd`, manda sobre el de pesos): se convierte a pesos con el dólar del día al guardar.
+ */
 const camposGasto = {
   proyecto_ids: proyectosDe(10),
   item: texto(120),
   descripcion: z.string().trim().max(500, "Máximo 500 caracteres").optional().nullable(),
-  monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0"),
+  monto_clp: montoClp.refine((n) => n > 0, "El monto debe ser mayor a 0").optional(),
+  monto_usd: montoUsd.refine((n) => n > 0, "El monto debe ser mayor a 0").optional().nullable(),
   envio_clp: montoClp.optional().nullable(),
+  envio_usd: montoUsd.optional().nullable(),
   impuesto_clp: montoClp.optional().nullable(),
+  impuesto_usd: montoUsd.optional().nullable(),
   tipo_costo: z.enum(TIPOS_COSTO, { error: "Tipo de costo inválido" }).optional(),
   estado_pago: z.enum(ESTADOS_PAGO, { error: "Estado de pago inválido" }).optional(),
 };
@@ -115,11 +128,15 @@ const totalEnRango = (g: { monto_clp?: number; envio_clp?: number | null; impues
 /**
  * Compra: uno o más proyectos, nombre, descripción (opcional), monto de la compra en CLP y, opcionales, el costo
  * de envío y un impuesto extra (p. ej. aduana) en CLP, más el tipo de costo (único o recurrente; solo etiqueta) y
- * el estado de pago (por defecto, comprada). Se guarda el total (compra + envío + impuesto) y el envío y el impuesto por separado.
+ * el estado de pago (por defecto, comprada). Cada monto puede ir en dólares. Se guarda el total en pesos (compra +
+ * envío + impuesto) y el envío y el impuesto por separado.
  */
 export const esquemaGasto = z.preprocess(
   conProyectoUnico,
-  z.object(camposGasto).refine(totalEnRango, { message: "Monto fuera de rango", path: ["envio_clp"] }),
+  z
+    .object(camposGasto)
+    .refine((v) => v.monto_clp !== undefined || typeof v.monto_usd === "number", { message: "Ingresa el monto de la compra", path: ["monto_clp"] })
+    .refine(totalEnRango, { message: "Monto fuera de rango", path: ["envio_clp"] }),
 );
 
 /**

@@ -1,5 +1,5 @@
 // Prueba de extremo a extremo contra un servidor en marcha con datos VACÍOS (dos empresas por defecto).
-// Uso: DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=... COOKIE_SECURE=false \
+// Uso: DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=... COOKIE_SECURE=false TIPO_CAMBIO_USD=950 \
 //        node .next/standalone/server.js        (en otra terminal, PORT=3100)
 //      BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
 import assert from "node:assert/strict";
@@ -525,6 +525,29 @@ async function main() {
     assert.equal((await ana.cliente.pedir(`/api/gastos/${anaGastoId}`, { metodo: "PATCH", json: original })).status, 200);
     // Otra persona no puede editarla
     assert.equal((await dora.cliente.pedir(`/api/gastos/${anaGastoId}`, { metodo: "PATCH", json: { estado_pago: "comprada" } })).status, 404);
+  });
+  await prueba("montos en dólares: se convierten a pesos con el dólar del día (TIPO_CAMBIO_USD=950); los tableros ven pesos", async () => {
+    const tc = await ana.cliente.pedir("/api/tipo-cambio");
+    assert.equal(tc.status, 200);
+    assert.equal(tc.datos.valor, 950, "el servidor de pruebas debe correr con TIPO_CAMBIO_USD=950");
+    assert.equal((await anon.pedir("/api/tipo-cambio")).status, 401);
+    const antes = (await ggA.cliente.pedir("/api/exec")).datos.costo.total_clp;
+    // La persona pasa la compra a dólares (US$ 90,50 → $85.975) con envío de US$ 5 ($4.750)
+    let r = await ana.cliente.pedir(`/api/gastos/${gastoDobleId}`, { metodo: "PATCH", json: { monto_usd: 90.5, envio_usd: 5 } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    let g = r.datos.gastos.find((x) => x.id === gastoDobleId);
+    assert.deepEqual([g.monto_clp, g.envio_clp, g.monto_usd, g.envio_usd, g.tipo_cambio], [85975 + 4750, 4750, 90.5, 5, 950]);
+    assert.equal((await ggA.cliente.pedir("/api/exec")).datos.costo.total_clp, antes - 90001 + 90725, "gerencia ve pesos");
+    // La jefatura cambia el envío a pesos: la compra sigue en dólares, reconvertida
+    assert.equal((await admin.pedir(q(`/api/admin/gastos/${gastoDobleId}/datos`, A), { metodo: "PATCH", json: { envio_clp: 5000, envio_usd: null } })).status, 200);
+    g = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((x) => x.id === gastoDobleId);
+    assert.deepEqual([g.monto_clp, g.envio_clp, g.monto_usd, g.envio_usd], [85975 + 5000, 5000, 90.5, null]);
+    assert.equal((await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ monto_clp: undefined, monto_usd: 1.234 }) })).status, 400);
+    // Vuelve a pesos (datos originales)
+    r = await ana.cliente.pedir(`/api/gastos/${gastoDobleId}`, { metodo: "PATCH", json: { monto_clp: 85001, monto_usd: null } });
+    g = r.datos.gastos.find((x) => x.id === gastoDobleId);
+    assert.deepEqual([g.monto_clp, g.envio_clp, g.monto_usd, g.tipo_cambio], [90001, 5000, null, null]);
+    assert.equal((await ggA.cliente.pedir("/api/exec")).datos.costo.total_clp, antes);
   });
   await prueba("tolerancia de costo: solo administradores la cambian; gerencia la ve", async () => {
     const metas = { tolerancia_costo_pct: 15 };

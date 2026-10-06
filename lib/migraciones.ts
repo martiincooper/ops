@@ -325,4 +325,16 @@ export const MIGRACIONES_EMPRESA: string[] = [
   ALTER TABLE gastos ADD COLUMN estado_pago TEXT NOT NULL DEFAULT 'comprada'
     CHECK (estado_pago IN ('por_enviar', 'esperando_pago', 'comprada'));
   `,
+
+  // v10 — montos en dólares: la compra, el envío y el impuesto se pueden ingresar en USD. Se convierten a pesos con el
+  //       dólar del día al guardar (no es dinámico: se vuelve a convertir solo al editar los montos) y los montos en
+  //       pesos siguen siendo los únicos que usan los tableros. *_usd guarda el valor original en dólares (NULL = ese
+  //       monto se ingresó en pesos); tipo_cambio, los pesos por dólar usados, y tipo_cambio_fecha, la fecha de ese dólar.
+  `
+  ALTER TABLE gastos ADD COLUMN monto_usd REAL CHECK (monto_usd IS NULL OR monto_usd > 0);
+  ALTER TABLE gastos ADD COLUMN envio_usd REAL CHECK (envio_usd IS NULL OR envio_usd >= 0);
+  ALTER TABLE gastos ADD COLUMN impuesto_usd REAL CHECK (impuesto_usd IS NULL OR impuesto_usd >= 0);
+  ALTER TABLE gastos ADD COLUMN tipo_cambio REAL CHECK (tipo_cambio IS NULL OR tipo_cambio > 0);
+  ALTER TABLE gastos ADD COLUMN tipo_cambio_fecha TEXT;
+  `,
 ];

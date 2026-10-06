@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { esquemaGastoCambio } from "@/lib/esquemas";
-import { ErrorGasto, editarGasto } from "@/lib/gastos";
+import { ErrorGasto, editarGasto, necesitaTipoCambio } from "@/lib/gastos";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { ahoraIso } from "@/lib/tiempo";
+import { tipoCambioHoy } from "@/lib/tipoCambio";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -12,8 +13,9 @@ export const PATCH = manejar<Ctx>(async (req, { params }) => {
   const { u, db } = await contexto(req, ["admin"]);
   const { id } = await params;
   const c = await leerJson(req, esquemaGastoCambio);
+  const tipoCambio = necesitaTipoCambio(db, id, c) ? await tipoCambioHoy() : null;
   try {
-    editarGasto(db, id, c, { nombre: u.nombre, ahora: ahoraIso() });
+    editarGasto(db, id, c, { nombre: u.nombre, ahora: ahoraIso() }, tipoCambio);
   } catch (e) {
     if (e instanceof ErrorGasto) throw new HttpError(e.status, e.message);
     throw e;
