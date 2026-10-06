@@ -69,7 +69,7 @@ Repo: [github.com/martiincooper/ops](https://github.com/martiincooper/ops). Rail
 ## Executive view (`/exec`)
 
 Three focus areas; **delivered projects are excluded** from them and listed at the bottom. Built to be read at a
-glance: three big numbers, cost bars, a per-project timeline (actual stages over the plan to the estimated delivery,
+glance: four big numbers, cost bars, the cost breakdown, a per-project timeline (actual stages over the plan to the estimated delivery,
 with a "Hoy" marker) and the pipeline as columns; definitions sit in a collapsed "¿Cómo se calcula?".
 1) **Accumulated cost vs BOM estimate** (target ≤ 100 %, up to +10 % = at risk; the tolerance is the only editable
 target), projects not yet delivered. 2) **Concept-to-customer time**: days from project start to delivery and per
@@ -78,7 +78,20 @@ stage, measured against the **estimated delivery date** entered when the project
 holds **more than 2 projects** a Spanish warning tells management that adding projects now delays the ones in
 progress (a deterrent, not a cap; threshold `AVISO_PROYECTOS_POR_ETAPA` in `lib/etapas.ts`). Each delivered
 project expands to its own KPIs: real concept-to-customer days by stage, delivery vs its estimated date, final cost
-vs its BOM estimate. Stage changes are recorded with the day's date (`proyecto_etapas`, schema v5) and can be
+vs its BOM estimate.
+
+**Cost breakdown** ("Desglose de costos", below Costo vs BOM, plus a fourth headline number, total cost): every
+approved and pending purchase of **all** projects, delivered and paused included. Total cost split into one-off
+(indigo) and recurring (cyan, always with the ↻ icon); the current recurring cost **per day, month or year**
+(Día · Mes · Año switch, default month, `?periodo=dia|mes|anio`): daily × 365 and monthly × 12 give the yearly
+amount, month = year ÷ 12, day = year ÷ 365, shown per cost type in its own unit ("$1.200 / día") and converted to
+the chosen period; one bar per project on a common scale (total cost, split one-off / recurring) with its recurring
+cost for the period; and the collapsible list of recurring costs. When the same recurring cost (same name, ignoring
+case and accents, and same projects) is logged more than once — e.g. every monthly payment — only the most recent
+entry counts for the per-period figure; every payment still adds to the total. Each purchase's cost type (one-off, or
+recurring daily / monthly / yearly; the amount is for one day, month or year) is set when it is registered.
+
+Stage changes are recorded with the day's date (`proyecto_etapas`, schema v5) and can be
 corrected in `/admin` → Proyectos → Etapas. Daily objectives and blockers left the executive view (still in the
 admin standup).
 
@@ -111,8 +124,8 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec (30)
-# end-to-end against a server with an EMPTY data dir (49)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown (42)
+# end-to-end against a server with an EMPTY data dir (54)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
 

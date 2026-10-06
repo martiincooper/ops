@@ -735,6 +735,29 @@ async function main() {
     assert.equal(await sen(), antes + 120000);
     assert.equal((await admin.pedir(q("/api/admin/gastos", A), { metodo: "POST", json: { ...costo, proyecto_ids: [pD] } })).status, 400);
   });
+  await prueba("gerencia · desglose de costos: total, recurrente por periodo (el mismo costo mensual cuenta una vez) y la vista", async () => {
+    const desglose = async () => (await ggA.cliente.pedir("/api/exec")).datos.desglose;
+    const antes = await desglose();
+    const costo = { proyecto_ids: [pA], item: "Servidor e2e", monto_clp: 10000, tipo_costo: "mensual" };
+    for (let i = 0; i < 2; i++) assert.equal((await admin.pedir(q("/api/admin/gastos", A), { metodo: "POST", json: costo })).status, 201);
+    const d = await desglose();
+    assert.equal(d.total_clp, antes.total_clp + 20000, "los dos pagos suman al total");
+    assert.equal(d.recurrente_clp, antes.recurrente_clp + 20000);
+    assert.equal(d.unico_clp, antes.unico_clp);
+    assert.equal(d.recurrente.por_periodo.mes, antes.recurrente.por_periodo.mes + 10000, "por periodo cuenta una vez");
+    assert.equal(d.recurrente.por_periodo.anio, antes.recurrente.por_periodo.anio + 120000);
+    const c = d.recurrente.costos.find((x) => x.item === "Servidor e2e");
+    assert.deepEqual([c.tipo, c.monto_clp, c.registros, c.pagado_clp, c.proyectos.map((p) => p.codigo)], ["mensual", 10000, 2, 20000, ["AETH-SEN-01"]]);
+    const sen = d.proyectos.find((p) => p.codigo === "AETH-SEN-01");
+    assert.ok(sen.recurrente_por_periodo.mes >= 10000 && sen.total_clp >= sen.recurrente_clp && sen.recurrente_clp >= 20000);
+    assert.equal((await ggD.cliente.pedir("/api/exec")).datos.desglose.recurrente.costos.some((x) => x.item === "Servidor e2e"), false, "otra empresa");
+    const r = await ggA.cliente.pedir("/exec?periodo=anio");
+    assert.equal(r.status, 200);
+    const html = new TextDecoder().decode(r.datos);
+    assert.match(html, /Desglose de costos/);
+    assert.match(html, /Servidor e2e/);
+    assert.match(html, /\/ año/);
+  });
   await prueba("objetivo desde el standup: comienza la jornada de hoy si no existe; luego lo agrega", async () => {
     const o = { descripcion: "Enviar el paquete", proyecto_ids: [pA] };
     assert.equal((await fer.cliente.pedir(q(`/api/admin/standup/${fer.id}/objetivos`, A), { metodo: "POST", json: o })).status, 403);

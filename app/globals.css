@@ -7,6 +7,7 @@
  *   marca        bg-indigo · bg-indigo-hondo · bg-indigo-suave · text-indigo-tinta
  *   pasteles     bg-pastel-{azul,lila,durazno,rosa,menta}   (tarjetas de objetivos)
  *   estado       {ok,alerta,error} + -tinta (texto) + -fondo (fondo)   — siempre con ícono y texto
+ *   costo        bg-recurrente · text-recurrente-tinta · bg-recurrente-fondo (único usa bg-indigo)
  */
 @theme {
   --color-fondo: #eeecfb;
@@ -28,6 +29,11 @@
   --color-pastel-durazno: #fdf3e6;
   --color-pastel-rosa: #fdecf2;
   --color-pastel-menta: #e6f6ee;
+
+  /* Tipo de costo (gerencia): único = indigo; recurrente = cian (validado contra indigo y los estados) */
+  --color-recurrente: #0e8fa8;
+  --color-recurrente-tinta: #0a6475;
+  --color-recurrente-fondo: #e3f3f6;
 
   --color-ok: #22a06b;
   --color-ok-tinta: #146c46;

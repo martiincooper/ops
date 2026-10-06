@@ -486,6 +486,85 @@ async function main() {
     assert.equal(metricasExec(d, "2026-10-01").costo.proyectos[0].total_clp, 50000);
   });
 
+  console.log("Gerencia: desglose de costos (único, recurrente por periodo, por proyecto)");
+  /** Base con p1 (AETH-01), p2 (AETH-02, entregado) y p3 (AETH-03, sin compras). */
+  function dbCostos() {
+    const d = dbNueva();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p2','AETH-02','Fuente',100000,'2026-06-01','2026-08-30','entregado')").run();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p3','AETH-03','Gateway',0,'2026-09-01','2026-11-30')").run();
+    const g = d.prepare("INSERT INTO gastos (id, usuario_id, item, monto_clp, tipo_costo, estado, creado_en) VALUES (?, 'u1', ?, ?, ?, ?, ?)");
+    const gp = d.prepare("INSERT INTO gasto_proyectos (gasto_id, proyecto_id, monto_clp) VALUES (?, ?, ?)");
+    const compra = (id: string, item: string, tipo: string, estado: string, creado: string, partes: [string, number][]) => {
+      g.run(id, item, partes.reduce((s, [, m]) => s + m, 0), tipo, estado, `${creado}T15:00:00Z`);
+      partes.forEach(([p, m]) => gp.run(id, p, m));
+    };
+    return { d, compra };
+  }
+  await prueba("costo total: único + recurrente pagado, rechazadas fuera, entregados incluidos, repartido por proyecto", () => {
+    const { d, compra } = dbCostos();
+    compra("g1", "PCB v1", "unico", "aprobado", "2026-09-05", [["p1", 300000]]);
+    compra("g2", "Stencil", "unico", "pendiente", "2026-09-06", [["p1", 25000], ["p2", 25000]]);
+    compra("g3", "Licencia CAD", "mensual", "aprobado", "2026-09-07", [["p1", 18000]]);
+    compra("g4", "Rechazada", "unico", "rechazado", "2026-09-08", [["p1", 999999]]);
+    compra("g5", "Hosting", "anual", "aprobado", "2026-09-09", [["p2", 120000]]);
+    const x = metricasExec(d, hoy).desglose;
+    assert.deepEqual([x.total_clp, x.unico_clp, x.recurrente_clp, x.por_validar_clp, x.compras], [488000, 350000, 138000, 50000, 4]);
+    assert.deepEqual(
+      x.proyectos.map((p) => [p.codigo, p.estado, p.total_clp, p.unico_clp, p.recurrente_clp, p.compras]),
+      [
+        ["AETH-01", "concepto", 343000, 325000, 18000, 3],
+        ["AETH-02", "entregado", 145000, 25000, 120000, 2],
+      ],
+      "del mayor al menor; el entregado cuenta; sin compras no aparece",
+    );
+    assert.equal(metricasExec(d, hoy).costo.total_clp, 343000, "Costo vs BOM sigue sin los entregados");
+  });
+  await prueba("costo recurrente: diario, mensual y anual llevados a día, mes y año", () => {
+    const { d, compra } = dbCostos();
+    compra("g1", "Datos móviles", "diario", "aprobado", "2026-09-05", [["p1", 5000]]);
+    compra("g2", "Licencia CAD", "mensual", "aprobado", "2026-09-06", [["p1", 18000]]);
+    compra("g3", "Hosting", "anual", "pendiente", "2026-09-07", [["p1", 60000], ["p3", 60000]]);
+    const r = metricasExec(d, hoy).desglose.recurrente;
+    assert.deepEqual(r.por_tipo, [
+      { tipo: "diario", costos: 1, monto_clp: 5000, por_periodo: { dia: 5000, mes: 152083, anio: 1825000 } },
+      { tipo: "mensual", costos: 1, monto_clp: 18000, por_periodo: { dia: 592, mes: 18000, anio: 216000 } },
+      { tipo: "anual", costos: 1, monto_clp: 120000, por_periodo: { dia: 329, mes: 10000, anio: 120000 } },
+    ]);
+    assert.deepEqual(r.por_periodo, { dia: 5921, mes: 180083, anio: 2161000 });
+    assert.deepEqual(r.costos.map((c) => [c.item, c.tipo, c.monto_clp, c.proyectos.map((p) => p.codigo)]), [
+      ["Datos móviles", "diario", 5000, ["AETH-01"]],
+      ["Licencia CAD", "mensual", 18000, ["AETH-01"]],
+      ["Hosting", "anual", 120000, ["AETH-01", "AETH-03"]],
+    ]);
+    const x = metricasExec(d, hoy).desglose;
+    const p3 = x.proyectos.find((p) => p.codigo === "AETH-03")!;
+    assert.deepEqual(p3.recurrente_por_periodo, { dia: 164, mes: 5000, anio: 60000 }, "su parte del hosting anual");
+    assert.equal(x.proyectos.find((p) => p.codigo === "AETH-01")!.recurrente_por_periodo.mes, 152083 + 18000 + 5000);
+  });
+  await prueba("el mismo costo recurrente registrado cada mes cuenta una vez (el más reciente) por periodo, todos en el total", () => {
+    const { d, compra } = dbCostos();
+    compra("g1", "Licencia CAD", "mensual", "aprobado", "2026-08-01", [["p1", 18000]]);
+    compra("g2", "licencia  cad ", "mensual", "aprobado", "2026-09-01", [["p1", 20000]]); // mismo costo: sube el precio
+    compra("g3", "Licencia CÁD", "mensual", "rechazado", "2026-09-15", [["p1", 50000]]); //    rechazado: no cuenta
+    compra("g4", "Licencia CAD", "mensual", "aprobado", "2026-09-02", [["p3", 7000]]); //     otro proyecto: otro costo
+    compra("g5", "Licencia CAD", "anual", "aprobado", "2026-07-01", [["p2", 100000]]); //    otro proyecto y tipo
+    const x = metricasExec(d, hoy).desglose;
+    const lic = x.recurrente.costos.find((c) => c.proyectos[0].codigo === "AETH-01")!;
+    assert.deepEqual([lic.item, lic.monto_clp, lic.registros, lic.pagado_clp, lic.ultimo_registro], ["licencia  cad ", 20000, 2, 38000, "2026-09-01"]);
+    assert.equal(x.recurrente.costos.length, 3);
+    assert.equal(x.recurrente.por_periodo.mes, 20000 + 7000 + Math.round(100000 / 12));
+    assert.equal(x.recurrente_clp, 18000 + 20000 + 7000 + 100000, "todos los pagos suman al total");
+    // Si el registro más reciente pasa a «único», el vigente vuelve a ser el anterior
+    d.prepare("UPDATE gastos SET tipo_costo = 'unico' WHERE id = 'g2'").run();
+    const y = metricasExec(d, hoy).desglose;
+    assert.equal(y.recurrente.costos.find((c) => c.proyectos[0].codigo === "AETH-01")!.monto_clp, 18000);
+    assert.deepEqual([y.unico_clp, y.recurrente_clp], [20000, 125000]);
+  });
+  await prueba("sin compras: todo en cero y sin proyectos", () => {
+    const x = metricasExec(dbCostos().d, hoy).desglose;
+    assert.deepEqual([x.total_clp, x.recurrente.por_periodo, x.recurrente.por_tipo, x.proyectos], [0, { dia: 0, mes: 0, anio: 0 }, [], []]);
+  });
+
   console.log("Objetivos sin tope de 4, objetivos de jefatura y tareas asignadas");
   await prueba("más de 4 objetivos por jornada, hasta el tope de seguridad", () => {
     const d = dbNueva();

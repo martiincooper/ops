@@ -13,6 +13,7 @@ import {
   leerEtapas,
   tramos,
 } from "./etapas";
+import type { TipoCosto } from "./esquemas";
 import { calcularProgreso, porcentaje } from "./metricas";
 import { type Metas, leerMetas } from "./metas";
 import { esFinDeSemana, fechaLocal, sumarDias } from "./tiempo";
@@ -333,6 +334,205 @@ export interface EtapaPipeline {
   saturada: boolean;
 }
 
+// ── Desglose de costos: total, único vs recurrente y costo recurrente por periodo
+//
+// El tipo de costo de cada compra (único, o recurrente diario / mensual / anual) define cómo se agrega:
+//  - Costo total: todas las compras aprobadas y por validar (sin rechazadas) de todos los proyectos, también los
+//    entregados y en pausa. Se separa en único y recurrente (lo pagado en compras marcadas como recurrentes).
+//  - Costo recurrente por periodo: cada costo recurrente se lleva a su equivalente por día, mes y año
+//    (diario × 365 = anual, mensual × 12 = anual; mes = año / 12, día = año / 365). Si el mismo costo recurrente se
+//    registra varias veces (mismo nombre y mismos proyectos, p. ej. el pago de cada mes), cuenta solo el registro más
+//    reciente: es el precio vigente. Todos los pagos sí suman al costo total.
+
+export type TipoCostoRecurrente = "diario" | "mensual" | "anual";
+export type PeriodoCosto = "dia" | "mes" | "anio";
+export const PERIODOS_COSTO: PeriodoCosto[] = ["dia", "mes", "anio"];
+export const TIPOS_RECURRENTES: TipoCostoRecurrente[] = ["diario", "mensual", "anual"];
+
+/** Un monto llevado a su equivalente por día, por mes y por año (CLP, redondeado). */
+export type MontoPorPeriodo = Record<PeriodoCosto, number>;
+
+const VECES_AL_ANIO: Record<TipoCostoRecurrente, number> = { diario: 365, mensual: 12, anual: 1 };
+const PERIODOS_AL_ANIO: Record<PeriodoCosto, number> = { dia: 365, mes: 12, anio: 1 };
+
+/** Equivalente anual (sin redondear) de un costo recurrente. */
+const anualDe = (monto: number, tipo: TipoCostoRecurrente) => monto * VECES_AL_ANIO[tipo];
+const porPeriodo = (anual: number): MontoPorPeriodo => ({
+  dia: Math.round(anual / PERIODOS_AL_ANIO.dia),
+  mes: Math.round(anual / PERIODOS_AL_ANIO.mes),
+  anio: Math.round(anual),
+});
+
+/** Clave de un costo recurrente: nombre normalizado (sin mayúsculas, tildes ni espacios extra) + proyectos. */
+export function claveRecurrente(item: string, proyectoIds: string[]): string {
+  const nombre = item.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  return `${nombre}|${[...proyectoIds].sort().join(",")}`;
+}
+
+export interface CostoRecurrente {
+  item: string;
+  tipo: TipoCostoRecurrente;
+  /** Monto del registro más reciente, en su propia unidad (por día, por mes o por año según `tipo`). */
+  monto_clp: number;
+  por_periodo: MontoPorPeriodo;
+  proyectos: { codigo: string; nombre: string }[];
+  /** Veces que se registró (cada registro suma al costo total). */
+  registros: number;
+  /** Suma de todos sus registros (lo pagado). */
+  pagado_clp: number;
+  /** Fecha local (YYYY-MM-DD) del registro más reciente. */
+  ultimo_registro: string;
+}
+
+export interface ProyectoDesglose {
+  id: string;
+  codigo: string;
+  nombre: string;
+  estado: EstadoProyecto;
+  total_clp: number;
+  unico_clp: number;
+  recurrente_clp: number;
+  compras: number;
+  /** Costo recurrente vigente del proyecto por periodo (su parte de cada costo recurrente). */
+  recurrente_por_periodo: MontoPorPeriodo;
+}
+
+export interface DesgloseCostos {
+  total_clp: number;
+  unico_clp: number;
+  /** Lo pagado en compras recurrentes (parte del total). */
+  recurrente_clp: number;
+  /** Parte del total que aún está por validar (compras pendientes). */
+  por_validar_clp: number;
+  compras: number;
+  recurrente: {
+    /** Costo recurrente vigente de la empresa por periodo. */
+    por_periodo: MontoPorPeriodo;
+    /** Por tipo de costo (solo los que tienen costos), en el orden diario → mensual → anual. */
+    por_tipo: { tipo: TipoCostoRecurrente; costos: number; monto_clp: number; por_periodo: MontoPorPeriodo }[];
+    /** Cada costo recurrente vigente, del mayor al menor por año. */
+    costos: CostoRecurrente[];
+  };
+  /** Proyectos con costo registrado, del mayor al menor costo total. */
+  proyectos: ProyectoDesglose[];
+}
+
+export function desgloseCostos(db: DB): DesgloseCostos {
+  const proyectos = new Map(
+    (db.prepare("SELECT id, codigo, nombre, estado FROM proyectos").all() as Pick<ProyectoDesglose, "id" | "codigo" | "nombre" | "estado">[]).map(
+      (p) => [p.id, p],
+    ),
+  );
+  const filas = db
+    .prepare(
+      `SELECT g.id, g.item, g.tipo_costo, g.estado, g.creado_en, gp.proyecto_id, gp.monto_clp
+         FROM gastos g JOIN gasto_proyectos gp ON gp.gasto_id = g.id
+        WHERE g.estado <> 'rechazado'
+        ORDER BY g.creado_en, g.id`,
+    )
+    .all() as { id: string; item: string; tipo_costo: TipoCosto; estado: string; creado_en: string; proyecto_id: string; monto_clp: number }[];
+
+  // Compras con sus partes por proyecto
+  const compras = new Map<string, { item: string; tipo: TipoCosto; pendiente: boolean; creado_en: string; total: number; partes: Map<string, number> }>();
+  for (const f of filas) {
+    const c = compras.get(f.id) ?? { item: f.item, tipo: f.tipo_costo, pendiente: f.estado === "pendiente", creado_en: f.creado_en, total: 0, partes: new Map() };
+    c.total += f.monto_clp;
+    c.partes.set(f.proyecto_id, (c.partes.get(f.proyecto_id) ?? 0) + f.monto_clp);
+    compras.set(f.id, c);
+  }
+
+  type Acumulado = { total: number; unico: number; recurrente: number; compras: number; anual: number };
+  const porProyecto = new Map<string, Acumulado>();
+  const acumular = (id: string) => {
+    let a = porProyecto.get(id);
+    if (!a) porProyecto.set(id, (a = { total: 0, unico: 0, recurrente: 0, compras: 0, anual: 0 }));
+    return a;
+  };
+
+  // Costos recurrentes agrupados por clave: el más reciente es el vigente (las compras vienen en orden de registro)
+  const grupos = new Map<string, { ultima: { item: string; tipo: TipoCostoRecurrente; creado_en: string; total: number; partes: Map<string, number> }; registros: number; pagado: number }>();
+  let unico = 0;
+  let recurrente = 0;
+  let porValidar = 0;
+  for (const c of compras.values()) {
+    if (c.pendiente) porValidar += c.total;
+    for (const [pid, monto] of c.partes) {
+      const a = acumular(pid);
+      a.total += monto;
+      a.compras += 1;
+      if (c.tipo === "unico") a.unico += monto;
+      else a.recurrente += monto;
+    }
+    if (c.tipo === "unico") {
+      unico += c.total;
+      continue;
+    }
+    recurrente += c.total;
+    const clave = claveRecurrente(c.item, [...c.partes.keys()]);
+    const g = grupos.get(clave);
+    const ultima = { ...c, tipo: c.tipo };
+    if (g) {
+      g.ultima = ultima;
+      g.registros += 1;
+      g.pagado += c.total;
+    } else grupos.set(clave, { ultima, registros: 1, pagado: c.total });
+  }
+
+  const costos: CostoRecurrente[] = [];
+  const anualPorTipo = new Map<TipoCostoRecurrente, { costos: number; monto: number; anual: number }>();
+  let anualTotal = 0;
+  for (const { ultima, registros, pagado } of grupos.values()) {
+    const anual = anualDe(ultima.total, ultima.tipo);
+    anualTotal += anual;
+    const t = anualPorTipo.get(ultima.tipo) ?? { costos: 0, monto: 0, anual: 0 };
+    t.costos += 1;
+    t.monto += ultima.total;
+    t.anual += anual;
+    anualPorTipo.set(ultima.tipo, t);
+    for (const [pid, monto] of ultima.partes) acumular(pid).anual += anualDe(monto, ultima.tipo);
+    costos.push({
+      item: ultima.item,
+      tipo: ultima.tipo,
+      monto_clp: ultima.total,
+      por_periodo: porPeriodo(anual),
+      proyectos: [...ultima.partes.keys()]
+        .map((id) => proyectos.get(id))
+        .filter((p) => p !== undefined)
+        .map((p) => ({ codigo: p.codigo, nombre: p.nombre }))
+        .sort((a, b) => a.codigo.localeCompare(b.codigo)),
+      registros,
+      pagado_clp: pagado,
+      ultimo_registro: fechaLocal(ultima.creado_en),
+    });
+  }
+
+  const desglose: ProyectoDesglose[] = [...porProyecto.entries()]
+    .flatMap(([id, a]) => {
+      const p = proyectos.get(id);
+      return p
+        ? [{ ...p, total_clp: a.total, unico_clp: a.unico, recurrente_clp: a.recurrente, compras: a.compras, recurrente_por_periodo: porPeriodo(a.anual) }]
+        : [];
+    })
+    .sort((a, b) => b.total_clp - a.total_clp || b.recurrente_por_periodo.anio - a.recurrente_por_periodo.anio || a.codigo.localeCompare(b.codigo));
+
+  return {
+    total_clp: unico + recurrente,
+    unico_clp: unico,
+    recurrente_clp: recurrente,
+    por_validar_clp: porValidar,
+    compras: compras.size,
+    recurrente: {
+      por_periodo: porPeriodo(anualTotal),
+      por_tipo: TIPOS_RECURRENTES.flatMap((tipo) => {
+        const t = anualPorTipo.get(tipo);
+        return t ? [{ tipo, costos: t.costos, monto_clp: t.monto, por_periodo: porPeriodo(t.anual) }] : [];
+      }),
+      costos: costos.sort((a, b) => b.por_periodo.anio - a.por_periodo.anio || a.item.localeCompare(b.item, "es")),
+    },
+    proyectos: desglose,
+  };
+}
+
 export interface MetricasExec {
   corte: string;
   periodo: { desde: string; hasta: string; anterior_desde: string; anterior_hasta: string };
@@ -366,6 +566,8 @@ export interface MetricasExec {
     pausados: ProyectoEnCurso[];
   };
   entregados: ProyectoEntregado[];
+  /** Costo total, único vs recurrente, recurrente por periodo y por proyecto (todos los proyectos). */
+  desglose: DesgloseCostos;
   personas_activas: number;
 }
 
@@ -559,6 +761,7 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
       pausados: enCurso.filter((p) => p.estado === "pausado"),
     },
     entregados,
+    desglose: desgloseCostos(db),
     personas_activas: equipoActivo(db).length,
   };
 }

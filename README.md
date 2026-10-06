@@ -76,10 +76,13 @@ envío incluido, se reparte en partes iguales (los pesos que sobran van a los pr
 `/admin` → **Compras**; gerencia ve el costo acumulado de cada proyecto frente a su estimación BOM (las
 rechazadas no cuentan).
 
+Cada compra tiene un **tipo de costo**: único / fijo, o recurrente **diario**, **mensual** o **anual** (el monto
+registrado es el de un día, un mes o un año, según el tipo). Gerencia lo usa en el **Desglose de costos**.
+
 ## Vista de gerencia (`/exec`)
 
 Tres focos, en este orden. Los proyectos **entregados no entran** en los indicadores: se listan al final.
-Pensada para entenderse de un vistazo: tres números grandes arriba, barras de costo, una línea de tiempo por
+Pensada para entenderse de un vistazo: cuatro números grandes arriba, barras de costo, el desglose de costos, una línea de tiempo por
 proyecto (etapas reales sobre el plan hasta la entrega estimada, con la marca de «Hoy») y el pipeline en columnas.
 Las definiciones quedan en «¿Cómo se calcula?», al final.
 
@@ -88,6 +91,22 @@ Las definiciones quedan en «¿Cómo se calcula?», al final.
 | 1 | **Costo acumulado vs estimación BOM**: compras aprobadas y por validar (envío incluido) de cada proyecto frente al costo estimado antes de comenzarlo | ≤ 100 %; hasta +10 % «en riesgo» (tolerancia editable) | proyectos no entregados; muestra lo agregado en 14 días vs los 14 anteriores |
 | 2 | **Tiempo de concepto a cliente**: días desde el inicio del proyecto hasta la entrega, y cuántos en cada etapa | la **fecha estimada de entrega** que la jefatura registra al crear el proyecto (sin otra meta) | proyectos en desarrollo |
 | 3 | **Pipeline de desarrollo**: proyectos por etapa (Concepto, Prototipado, Pruebas), cuántos días lleva cada uno en su etapa | aviso cuando una etapa tiene **más de 2 proyectos** | sin entregados ni pausados (los pausados se listan aparte) |
+
+**Desglose de costos** (debajo de Costo vs BOM; cuarto número arriba, «costo total»): todas las compras aprobadas y
+por validar de **todos** los proyectos, también entregados y en pausa.
+
+- **Costo total**, separado en **único / fijo** (indigo) y **recurrente** (cian, siempre con el ícono ↻): lo ya
+  pagado en compras de cada tipo, con su porcentaje.
+- **Costo recurrente** vigente **por día, por mes o por año** (selector Día · Mes · Año; por defecto Mes; en la URL
+  `?periodo=dia|mes|anio`). Cada costo se lleva a su equivalente: diario × 365 y mensual × 12 dan el anual; mes = año
+  ÷ 12, día = año ÷ 365. Se muestra por tipo (diario, mensual, anual) con su monto en su propia unidad («$1.200 /
+  día») y convertido al periodo elegido.
+- **Por proyecto**: una barra por proyecto con la misma escala (largo = costo total, dividida en único y recurrente)
+  y su costo recurrente vigente en el periodo elegido.
+- **Costos recurrentes**: la lista, a un clic, con proyectos, último registro y cuántas veces se registró.
+- Si el mismo costo recurrente (mismo nombre, sin distinguir mayúsculas ni tildes, y mismos proyectos) se registra
+  varias veces —por ejemplo, el pago de cada mes—, para el costo por periodo cuenta **solo el registro más reciente**
+  (el precio vigente); todos los pagos suman al costo total.
 
 - El aviso del pipeline no es un tope ni bloquea nada: es un mensaje para gerencia («Pipeline cargado…
   sumar proyectos nuevos ahora retrasa la entrega de los que ya están en curso»). El umbral es fijo
@@ -121,7 +140,7 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | Días no disponibles (días completos) para la planificación | |
 | `/mi-progreso`: objetivos logrados en 14 días, historial, mis compras, cambio de código | |
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
-| `/exec`: costo vs estimación BOM, tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
+| `/exec`: costo vs estimación BOM, desglose de costos (total, único vs recurrente, recurrente por día/mes/año y por proyecto), tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
 | Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) y edición de los datos del proyecto | |
 
 ---
@@ -235,7 +254,7 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
 `ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 49 pruebas extremo a extremo contra el contenedor) y publica la imagen para
+(typecheck, lógica y las 54 pruebas extremo a extremo contra el contenedor) y publica la imagen para
 `amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
 
 ```bash
@@ -412,10 +431,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia (30 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos (42 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros (49 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos (54 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test
