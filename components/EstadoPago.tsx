@@ -38,6 +38,39 @@ export function ChipPago({ estado, corto = false, className }: { estado: EstadoP
   );
 }
 
+/** Cambio rápido del estado de pago en una lista: select nativo con el color del estado actual. */
+export function SelectPago({
+  id,
+  item,
+  valor,
+  disabled,
+  onCambio,
+}: {
+  id: string;
+  item: string;
+  valor: EstadoPago;
+  disabled?: boolean;
+  onCambio: (e: EstadoPago) => void;
+}) {
+  return (
+    <>
+      <label htmlFor={id} className="sr-only">Estado de pago de {item}</label>
+      <select
+        id={id}
+        value={valor}
+        disabled={disabled}
+        onChange={(e) => onCambio(e.target.value as EstadoPago)}
+        title={ESTADO_PAGO[valor].ayuda}
+        className={cx("cursor-pointer rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-semibold disabled:opacity-50", ESTADO_PAGO[valor].clase)}
+      >
+        {ESTADOS_PAGO.map((e) => (
+          <option key={e} value={e}>{ESTADO_PAGO[e].nombre}</option>
+        ))}
+      </select>
+    </>
+  );
+}
+
 /** Selector del estado de pago (formulario de compra). */
 export function SelectorPago({ id, valor, onCambio }: { id: string; valor: EstadoPago; onCambio: (e: EstadoPago) => void }) {
   return (

@@ -7,6 +7,7 @@ import Anillo from "@/components/Anillo";
 import FormGasto from "@/components/FormGasto";
 import type { EstadoDia, TareaDia } from "@/lib/dominio";
 import { ErrorApi, api, cx, horaDe } from "@/lib/cliente";
+import HistorialCompras from "./HistorialCompras";
 import ListaCompras from "./ListaCompras";
 import Objetivos from "./Objetivos";
 import Tareas from "./Tareas";
@@ -39,6 +40,9 @@ export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDis
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formGasto, setFormGasto] = useState(false);
+  // Compras: las de hoy o todas (historial, para editarlas o mover su estado de pago). `versionCompras` recarga el historial.
+  const [vistaCompras, setVistaCompras] = useState<"hoy" | "todas">("hoy");
+  const [versionCompras, setVersionCompras] = useState(0);
   const j = estado.jornada;
   const enCurso = estado.fase === "en_curso";
   const conJornada = enCurso || estado.fase === "terminada";
@@ -198,15 +202,36 @@ export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDis
       {/* Compras */}
       <section className="tarjeta p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <h2 className="titulo-seccion whitespace-nowrap">Compras de hoy</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="titulo-seccion whitespace-nowrap">Compras</h2>
+            <div className="segmentos" role="group" aria-label="Qué compras ver">
+              {(["hoy", "todas"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={vistaCompras === v}
+                  onClick={() => setVistaCompras(v)}
+                  className={cx("segmento", vistaCompras === v && "segmento-activo bg-superficie text-indigo-tinta shadow-sm")}
+                >
+                  {v === "hoy" ? "Hoy" : "Todas"}
+                </button>
+              ))}
+            </div>
+          </div>
           {!formGasto && (
             <button type="button" onClick={() => setFormGasto(true)} disabled={estado.proyectos.length === 0} className="boton shrink-0 whitespace-nowrap">
               <Plus size={16} /> Registrar<span className="sr-only sm:not-sr-only">&nbsp;compra</span>
             </button>
           )}
         </div>
-        {estado.gastos_hoy.length === 0 && !formGasto && <p className="text-sm text-tinta-3">Sin compras registradas hoy.</p>}
-        <ListaCompras gastos={estado.gastos_hoy} proyectos={estado.proyectos} onCambio={async () => onCambio(await api<EstadoDia>("/api/jornada"))} />
+        {vistaCompras === "hoy" ? (
+          <>
+            {estado.gastos_hoy.length === 0 && !formGasto && <p className="text-sm text-tinta-3">Sin compras registradas hoy.</p>}
+            <ListaCompras gastos={estado.gastos_hoy} proyectos={estado.proyectos} onCambio={async () => onCambio(await api<EstadoDia>("/api/jornada"))} />
+          </>
+        ) : (
+          <HistorialCompras key={versionCompras} proyectos={estado.proyectos} />
+        )}
         {formGasto && (
           <div className="mt-3">
             <FormGasto
@@ -221,6 +246,7 @@ export default function Tablero({ estado, onCambio, onTerminar, onAviso, onNoDis
               onCancelar={() => setFormGasto(false)}
               onGuardado={async () => {
                 setFormGasto(false);
+                setVersionCompras((v) => v + 1);
                 onCambio(await api<EstadoDia>("/api/jornada"));
               }}
             />

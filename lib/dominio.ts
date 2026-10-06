@@ -175,17 +175,18 @@ export function ausenciasDesde(db: DB, usuarioId: string, desde: string): Ausenc
     .all(usuarioId, desde) as Ausencia[];
 }
 
-export function gastosRecientes(db: DB, usuarioId: string, limite = 30): GastoResumen[] {
+/** Compras de la persona, de la más reciente a la más antigua; con `pago`, solo las de ese estado de pago. */
+export function gastosRecientes(db: DB, usuarioId: string, limite = 30, pago: EstadoPago | null = null): GastoResumen[] {
   const filas = db
     .prepare(
       `SELECT g.id, g.item, g.descripcion, g.monto_clp, g.envio_clp, g.impuesto_clp, g.tipo_costo, g.estado_pago, g.estado,
               g.creado_en, g.editado_en, g.editado_por_nombre
          FROM gastos g
-        WHERE g.usuario_id = ?
+        WHERE g.usuario_id = ? AND (? IS NULL OR g.estado_pago = ?)
         ORDER BY g.creado_en DESC
         LIMIT ?`,
     )
-    .all(usuarioId, limite) as Omit<GastoResumen, "proyectos" | "proyecto_refs">[];
+    .all(usuarioId, pago, pago, limite) as Omit<GastoResumen, "proyectos" | "proyecto_refs">[];
   const qProyectos = db.prepare(
     `SELECT p.id, p.codigo, p.nombre FROM gasto_proyectos gp JOIN proyectos p ON p.id = gp.proyecto_id
       WHERE gp.gasto_id = ? ORDER BY p.codigo`,

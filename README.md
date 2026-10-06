@@ -81,8 +81,12 @@ registrado es el de un día, un mes o un año, según el tipo). Gerencia lo usa 
 
 Cada compra tiene también un **estado de pago**, aparte de la validación: **por enviar a pago** (se enviará a
 procesar más adelante), **esperando pago** (ya enviada, falta pagarla) o **comprada** (ya pagada; es el valor por
-defecto y el de las compras anteriores a este cambio). Lo elige quien registra la compra y se cambia al editarla
-(equipo) o directamente en la columna **Pago** de `/admin` → **Compras**, que además filtra por estado de pago.
+defecto y el de las compras anteriores a este cambio). Lo elige quien registra la compra y lo mueve sobre todo la
+propia persona: en `/checkin` → Compras → **Todas** (y en `/mi-progreso`) ve el historial completo de sus compras,
+filtrable por estado de pago, cambia el estado de pago en la misma lista y edita todos los campos de cualquier compra
+con **Editar**, aunque ya esté aprobada (la aprobación de la jefatura es solo una confirmación y se conserva). La
+jefatura edita todos los campos de cualquier compra y cambia el pago en la columna **Pago** de `/admin` → **Compras**,
+que además filtra por estado de pago.
 Gerencia ve la sección **Estado de pago de las compras**: las tres listas con su cantidad y total (sin rechazadas).
 El estado de pago no cambia el costo: todas las compras aprobadas y por validar suman, estén pagadas o no.
 
@@ -441,7 +445,7 @@ npm run typecheck
 npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago (46 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago (55 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo (56 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false aether-ops:test

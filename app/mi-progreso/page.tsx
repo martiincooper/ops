@@ -2,10 +2,10 @@ import { ArrowLeft, CalendarOff, KeyRound } from "lucide-react";
 import Link from "next/link";
 import Anillo from "@/components/Anillo";
 import BotonSalir from "@/components/BotonSalir";
-import MisCompras from "@/components/equipo/MisCompras";
+import HistorialCompras from "@/components/equipo/HistorialCompras";
 import { empresaDe, requirePagina } from "@/lib/auth";
 import { getDbEmpresa } from "@/lib/db";
-import { ausenciasDesde, gastosRecientes, proyectosActivos } from "@/lib/dominio";
+import { ausenciasDesde, proyectosActivos } from "@/lib/dominio";
 import { calcularProgreso, type DiaResumen } from "@/lib/metricas";
 import { fechaCorta, fechaLocal, hoyLocal } from "@/lib/tiempo";
 import { cx } from "@/lib/cliente";
@@ -45,7 +45,6 @@ export default async function MiProgreso() {
   const db = getDbEmpresa(empresa.clave);
   const hoy = hoyLocal();
   const p = calcularProgreso(db, u.id, hoy, fechaLocal(u.creado_en));
-  const gastos = gastosRecientes(db, u.id, 15);
   const ausencias = ausenciasDesde(db, u.id, hoy);
 
   return (
@@ -100,11 +99,7 @@ export default async function MiProgreso() {
 
       <section className="tarjeta p-5">
         <h2 className="titulo-seccion mb-3">Mis compras</h2>
-        {gastos.length === 0 ? (
-          <p className="text-sm text-tinta-3">Aún no registras compras.</p>
-        ) : (
-          <MisCompras gastos={gastos} proyectos={proyectosActivos(db)} />
-        )}
+        <HistorialCompras proyectos={proyectosActivos(db)} />
       </section>
 
       <Link href="/cambiar-pin" className="tarjeta flex items-center gap-3 px-5 py-4 text-sm font-semibold text-tinta hover:bg-suave">

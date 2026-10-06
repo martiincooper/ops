@@ -2,7 +2,7 @@
 
 import { Check, LoaderCircle, Pencil, Plus, Repeat, RotateCcw, X } from "lucide-react";
 import { Fragment, useState } from "react";
-import { ESTADO_PAGO } from "@/components/EstadoPago";
+import { ESTADO_PAGO, SelectPago } from "@/components/EstadoPago";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
 import { Avatar, Insignia, type Tono } from "@/components/ui";
 import type { ProyectoActivo } from "@/lib/dominio";
@@ -160,19 +160,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                       {g.impuesto_clp > 0 && <span className="block whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. impuesto {clp(g.impuesto_clp)}</span>}
                     </td>
                     <td>
-                      <label htmlFor={`pago-${g.id}`} className="sr-only">Estado de pago de {g.item}</label>
-                      <select
-                        id={`pago-${g.id}`}
-                        value={g.estado_pago}
-                        disabled={ocupado !== null}
-                        onChange={(e) => cambiarPago(g, e.target.value as EstadoPago)}
-                        title={ESTADO_PAGO[g.estado_pago].ayuda}
-                        className={cx("cursor-pointer rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-semibold disabled:opacity-50", ESTADO_PAGO[g.estado_pago].clase)}
-                      >
-                        {ESTADOS_PAGO.map((e) => (
-                          <option key={e} value={e}>{ESTADO_PAGO[e].nombre}</option>
-                        ))}
-                      </select>
+                      <SelectPago id={`pago-${g.id}`} item={g.item} valor={g.estado_pago} disabled={ocupado !== null} onCambio={(e) => cambiarPago(g, e)} />
                     </td>
                     <td>
                       <Insignia tono={ESTADO[g.estado]}>{g.estado}</Insignia>

@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { gastosRecientes, jornadaDelDia, jornadaEnCurso } from "@/lib/dominio";
-import { esquemaGasto } from "@/lib/esquemas";
+import { ESTADOS_PAGO, esquemaGasto } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { ErrorGasto, crearGasto } from "@/lib/gastos";
 import { ahoraIso, hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
+const HISTORIAL = 1000;
+
+/** Historial de compras propias (todas, hasta HISTORIAL). ?pago=por_enviar|esperando_pago|comprada filtra por estado de pago. */
 export const GET = manejar(async (req: NextRequest) => {
   const { u, db } = await contexto(req, ["team"]);
-  return NextResponse.json({ gastos: gastosRecientes(db, u.id) });
+  const pago = ESTADOS_PAGO.find((e) => e === req.nextUrl.searchParams.get("pago")) ?? null;
+  return NextResponse.json({ gastos: gastosRecientes(db, u.id, HISTORIAL, pago) });
 });
 
 /**

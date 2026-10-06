@@ -492,6 +492,12 @@ async function main() {
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.equal(r.datos.gastos.find((x) => x.id === gastoDobleId).estado_pago, "esperando_pago");
     assert.equal((await admin.pedir(q(`/api/admin/gastos/${anaGastoId}/datos`, A), { metodo: "PATCH", json: { estado_pago: "por_enviar" } })).status, 200);
+    // Historial del equipo: todas sus compras, filtrables por estado de pago
+    const suyas = async (pago) => (await ana.cliente.pedir(`/api/gastos${pago ? `?pago=${pago}` : ""}`)).datos.gastos.map((g) => g.id);
+    assert.equal((await suyas()).length, 3);
+    assert.deepEqual(await suyas("por_enviar"), [anaGastoId]);
+    assert.deepEqual(await suyas("esperando_pago"), [gastoDobleId]);
+    assert.equal((await suyas("pagada")).length, 3, "un filtro desconocido se ignora");
     const filtro = async (pago) => (await admin.pedir(q("/api/admin/gastos", A, `&alcance=todos&estado=todos&pago=${pago}`))).datos.gastos.map((g) => g.id);
     assert.deepEqual(await filtro("por_enviar"), [anaGastoId]);
     assert.deepEqual(await filtro("esperando_pago"), [gastoDobleId]);
@@ -505,6 +511,20 @@ async function main() {
       ["comprada", 1, 11900],
     ]);
     assert.equal(m.costo.total_clp, 43435 + 90001 + 11900, "el costo no cambia con el estado de pago");
+  });
+  await prueba("el equipo edita todos los campos de una compra antigua y aprobada; sigue aprobada", async () => {
+    const r = await ana.cliente.pedir(`/api/gastos/${anaGastoId}`, {
+      metodo: "PATCH",
+      json: { item: "ST-Link V3", descripcion: "Precio final", monto_clp: 40000, envio_clp: 2000, impuesto_clp: 1435, tipo_costo: "unico", estado_pago: "esperando_pago", proyecto_ids: [pA] },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    const g = (await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.find((x) => x.id === anaGastoId);
+    assert.deepEqual([g.item, g.monto_clp, g.estado_pago, g.estado], ["ST-Link V3", 43435, "esperando_pago", "aprobado"]);
+    // Vuelve a sus datos originales para las pruebas siguientes
+    const original = { item: "ST-Link V3 Mini", descripcion: "Programador para el sensor", monto_clp: 43435, envio_clp: null, impuesto_clp: null, estado_pago: "por_enviar" };
+    assert.equal((await ana.cliente.pedir(`/api/gastos/${anaGastoId}`, { metodo: "PATCH", json: original })).status, 200);
+    // Otra persona no puede editarla
+    assert.equal((await dora.cliente.pedir(`/api/gastos/${anaGastoId}`, { metodo: "PATCH", json: { estado_pago: "comprada" } })).status, 404);
   });
   await prueba("tolerancia de costo: solo administradores la cambian; gerencia la ve", async () => {
     const metas = { tolerancia_costo_pct: 15 };

@@ -42,8 +42,11 @@ projects. The total (purchase + shipping) is stored and the shipping part shown 
 the total, shipping included, is split equally (leftover pesos go to the first ones).
 Each purchase also has a **payment status**, separate from validation: "por enviar a pago" (to be sent for payment
 processing later), "esperando pago" (sent, awaiting payment) or "comprada" (already paid; the default, and what
-existing purchases get — `gastos.estado_pago`, automatic migration). It is set when registering and changed by
-editing (team) or straight from the **Pago** column in `/admin` → Compras, which also filters by it. The executive
+existing purchases get — `gastos.estado_pago`, automatic migration). It is set when registering and moved mainly by the
+teammate: `/checkin` → Compras → **Todas** (and `/mi-progreso`) lists their full purchase history, filterable by
+payment status, with the status changeable inline and every field editable via **Editar** even after approval (admin
+approval is just a confirmation and is kept). Admins edit every field of any purchase and change the status from the
+**Pago** column in `/admin` → Compras, which also filters by it. The executive
 view lists the three groups with count and total ("Estado de pago de las compras", rejected excluded). Payment
 status does not change any cost figure.
 

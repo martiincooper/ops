@@ -1,21 +1,29 @@
 "use client";
 
-import { Pencil, Receipt, Repeat } from "lucide-react";
+import { LoaderCircle, Pencil, Receipt, Repeat } from "lucide-react";
 import { useState } from "react";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
-import { ChipPago } from "@/components/EstadoPago";
+import { SelectPago } from "@/components/EstadoPago";
 import { CodigosProyecto } from "@/components/SelectorProyectos";
 import { Insignia, type Tono } from "@/components/ui";
 import type { GastoResumen, ProyectoActivo } from "@/lib/dominio";
-import { clp } from "@/lib/cliente";
+import type { EstadoPago } from "@/lib/esquemas";
+import { ErrorApi, api, clp } from "@/lib/cliente";
 
 const ESTADO: Record<GastoResumen["estado"], Tono> = { pendiente: "alerta", aprobado: "ok", rechazado: "error" };
 
 const fmtFecha = new Intl.DateTimeFormat("es-CL", { weekday: "short", day: "numeric", month: "short", timeZone: "America/Santiago" });
+const fmtFechaAnio = new Intl.DateTimeFormat("es-CL", { day: "numeric", month: "short", year: "numeric", timeZone: "America/Santiago" });
+/** "lun, 6 oct" este año; "29 dic 2025" otros años. */
+const fecha = (iso: string) => {
+  const d = new Date(iso);
+  return d.getFullYear() === new Date().getFullYear() ? fmtFecha.format(d) : fmtFechaAnio.format(d);
+};
 
 /**
- * Compras propias con su estado de validación y de pago. Cada una se puede editar en cualquier estado (precio final,
- * envío, impuesto de aduana que llega después de aprobada, estado de pago…); la validación se conserva.
+ * Compras propias con su estado de validación y de pago. El estado de pago se cambia aquí mismo (por enviar → esperando
+ * pago → comprada); el resto de los campos con «Editar», en cualquier estado de validación (también aprobadas o
+ * rechazadas: precio final, envío, impuesto de aduana…). La validación se conserva.
  */
 export default function ListaCompras({
   gastos,
@@ -29,6 +37,22 @@ export default function ListaCompras({
   onCambio: () => void | Promise<void>;
 }) {
   const [editando, setEditando] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState<string | null>(null);
+  const [error, setError] = useState<{ id: string; texto: string } | null>(null);
+
+  async function cambiarPago(g: GastoResumen, estado_pago: EstadoPago) {
+    setOcupado(g.id);
+    setError(null);
+    try {
+      await api(`/api/gastos/${g.id}`, { method: "PATCH", json: { estado_pago } });
+      await onCambio();
+    } catch (e) {
+      setError({ id: g.id, texto: e instanceof ErrorApi ? e.message : "No se pudo guardar. Revisa tu conexión." });
+    } finally {
+      setOcupado(null);
+    }
+  }
+
   return (
     <ul className="space-y-2">
       {gastos.map((g) =>
@@ -52,16 +76,18 @@ export default function ListaCompras({
             <div className="min-w-0 flex-1">
               <p className="line-clamp-2 font-medium leading-snug text-tinta">{g.item}</p>
               {!conFecha && g.descripcion && <p className="line-clamp-2 text-sm text-tinta-3">{g.descripcion}</p>}
-              {conFecha && <p className="text-xs capitalize text-tinta-3">{fmtFecha.format(new Date(g.creado_en))}</p>}
+              {conFecha && <p className="text-xs capitalize text-tinta-3">{fecha(g.creado_en)}</p>}
               {g.tipo_costo !== "unico" && (
                 <p className="mt-1 flex items-center gap-1 text-xs font-medium text-indigo-tinta">
                   <Repeat size={12} /> {NOMBRE_TIPO_COSTO[g.tipo_costo]}
                 </p>
               )}
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <ChipPago estado={g.estado_pago} />
+                <SelectPago id={`pago-${g.id}`} item={g.item} valor={g.estado_pago} disabled={ocupado !== null} onCambio={(e) => cambiarPago(g, e)} />
+                {ocupado === g.id && <LoaderCircle size={14} className="animate-spin text-tinta-3" />}
                 <CodigosProyecto codigos={g.proyectos} />
               </div>
+              {error?.id === g.id && <p className="mt-1 text-xs text-error-tinta">{error.texto}</p>}
               {g.editado_por_nombre && <p className="mt-1 text-[11px] text-tinta-3">Editada por {g.editado_por_nombre}</p>}
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1">
