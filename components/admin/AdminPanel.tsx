@@ -6,6 +6,7 @@ import {
   FolderKanban,
   KeyRound,
   LayoutList,
+  MessagesSquare,
   Receipt,
   ShieldCheck,
   TrendingUp,
@@ -16,16 +17,18 @@ import { useEffect, useState } from "react";
 import BotonSalir from "@/components/BotonSalir";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
+import { esDominioGerencia } from "@/lib/chat/modulos";
 import { cx } from "@/lib/cliente";
 import Administradores from "./Administradores";
 import Capacidad from "./Capacidad";
+import ChatGerencia from "./ChatGerencia";
 import Compras from "./Compras";
 import Equipo from "./Equipo";
 import Proyectos from "./Proyectos";
 import Standup from "./Standup";
 import type { Alcance, EmpresaPublica, Yo } from "./comun";
 
-export type Vista = "standup" | "capacidad" | "compras" | "equipo" | "proyectos" | "admins";
+export type Vista = "standup" | "capacidad" | "compras" | "equipo" | "proyectos" | "admins" | "chat";
 
 const VISTAS: { clave: Vista; titulo: string; corto: string; icono: typeof Users; conAlcance?: boolean }[] = [
   { clave: "standup", titulo: "Standup", corto: "Standup", icono: LayoutList, conAlcance: true },
@@ -34,6 +37,7 @@ const VISTAS: { clave: Vista; titulo: string; corto: string; icono: typeof Users
   { clave: "equipo", titulo: "Equipo", corto: "Equipo", icono: Users },
   { clave: "proyectos", titulo: "Proyectos", corto: "Proyectos", icono: FolderKanban },
   { clave: "admins", titulo: "Administradores", corto: "Admins", icono: ShieldCheck },
+  { clave: "chat", titulo: "Portal gerencial", corto: "Chatbot", icono: MessagesSquare },
 ];
 
 export default function AdminPanel({
@@ -51,7 +55,9 @@ export default function AdminPanel({
   const [vista, setVista] = useState<Vista>(inicial.vista);
   const [alcance, setAlcance] = useState<Alcance>(inicial.alcance);
   const emp = empresas.find((e) => e.clave === empresa) ?? empresas[0];
-  const actual = VISTAS.find((v) => v.clave === vista)!;
+  // El panel del portal gerencial solo para administradores @datasheq.com
+  const vistas = esDominioGerencia(yo.email) ? VISTAS : VISTAS.filter((v) => v.clave !== "chat");
+  const actual = vistas.find((v) => v.clave === vista) ?? vistas[0];
 
   // Mantiene la selección en la URL (recargar o compartir el enlace conserva empresa, pestaña y alcance)
   useEffect(() => {
@@ -65,7 +71,7 @@ export default function AdminPanel({
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-24 flex-col items-center gap-1 bg-superficie py-5 shadow-tarjeta lg:flex">
         <Marca conTexto={false} className="mb-6" />
         <nav aria-label="Secciones" className="flex flex-col items-center gap-1">
-          {VISTAS.map((v) => (
+          {vistas.map((v) => (
             <button
               key={v.clave}
               type="button"
@@ -137,7 +143,7 @@ export default function AdminPanel({
 
           {/* Secciones (móvil y tablet) */}
           <nav aria-label="Secciones" className="flex gap-1 overflow-x-auto px-4 pb-3 lg:hidden">
-            {VISTAS.map((v) => (
+            {vistas.map((v) => (
               <button
                 key={v.clave}
                 type="button"
@@ -159,7 +165,11 @@ export default function AdminPanel({
             <div>
               <h1 className="text-2xl font-semibold text-tinta">{actual.titulo}</h1>
               <p className="mt-0.5 text-sm text-tinta-3">
-                {vista === "admins" ? "Todas las empresas" : `${emp.nombre} · ${emp.dominios.map((d) => "@" + d).join(", ")}`}
+                {vista === "admins"
+                  ? "Todas las empresas"
+                  : vista === "chat"
+                    ? "Chatbot de requerimientos de gerencia (@datasheq.com) · salas, historial e Issues de GitHub"
+                    : `${emp.nombre} · ${emp.dominios.map((d) => "@" + d).join(", ")}`}
               </p>
             </div>
             {actual.conAlcance && (
@@ -179,6 +189,7 @@ export default function AdminPanel({
           {vista === "equipo" && <Equipo key={empresa} empresa={emp} yo={yo} />}
           {vista === "proyectos" && <Proyectos key={empresa} empresa={emp} hoy={hoy} />}
           {vista === "admins" && <Administradores yo={yo} />}
+          {vista === "chat" && actual.clave === "chat" && <ChatGerencia />}
         </main>
       </div>
     </div>
