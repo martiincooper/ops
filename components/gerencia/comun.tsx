@@ -6,6 +6,7 @@ import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
 import type { ClaveModulo } from "@/lib/chat/modulos";
 import { cx } from "@/lib/cliente";
+import BotonAccesoAdmin from "./BotonAccesoAdmin";
 
 export const ICONO_MODULO: Record<ClaveModulo, typeof Scale> = {
   "c-legal": Scale,
@@ -30,8 +31,18 @@ export function IconoModulo({ clave, color, tamano = 22, className }: { clave: C
   );
 }
 
-/** Cabecera del portal gerencial. */
-export function CabeceraPortal({ nombre, subtitulo, volver }: { nombre: string; subtitulo: string; volver?: React.ReactNode }) {
+/** Cabecera del portal gerencial, con «Acceso Administrador». */
+export function CabeceraPortal({
+  nombre,
+  subtitulo,
+  esAdmin,
+  volver,
+}: {
+  nombre: string;
+  subtitulo: string;
+  esAdmin: boolean;
+  volver?: React.ReactNode;
+}) {
   return (
     <header className="sticky top-0 z-30 border-b border-linea/70 bg-fondo/85 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 lg:px-8">
@@ -44,6 +55,7 @@ export function CabeceraPortal({ nombre, subtitulo, volver }: { nombre: string; 
           <p className="truncate text-base font-semibold text-tinta">Portal gerencial DataSheq</p>
           <p className="truncate text-xs text-tinta-3">{subtitulo}</p>
         </div>
+        <BotonAccesoAdmin esAdmin={esAdmin} />
         <BotonSalir conTexto={false} className="bg-superficie" />
         <span className="hidden sm:block">
           <Avatar nombre={nombre} tamano={40} />

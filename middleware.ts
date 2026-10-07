@@ -20,7 +20,7 @@ const PERMITIDAS_CAMBIO_PIN = ["/cambiar-pin"];
 const ACCESO_PAGINAS: { prefijo: string; roles: Rol[] }[] = [
   { prefijo: "/admin", roles: ["admin"] },
   { prefijo: "/exec", roles: ["executive", "admin"] },
-  { prefijo: "/gerencia", roles: ["executive", "admin"] }, // además, solo @datasheq.com (lo valida la página)
+  { prefijo: "/gerencia", roles: ["executive", "admin", "team"] }, // solo @datasheq.com (lo valida la página)
   { prefijo: "/checkin", roles: ["team"] },
   { prefijo: "/mi-progreso", roles: ["team"] },
 ];
@@ -35,8 +35,11 @@ export async function middleware(req: NextRequest) {
 
   if (PUBLICAS.some((p) => coincide(pathname, p))) {
     if (claims && pathname === "/login") {
-      const portal = req.nextUrl.searchParams.get("portal") === "gerencia" && claims.rol !== "team";
-      return NextResponse.redirect(new URL(claims.cp ? "/cambiar-pin" : portal ? "/gerencia" : inicioPorRol(claims.rol), req.url));
+      // ?portal=gerencia → portal; ?portal=admin → panel del portal (administradores) o portal (el resto)
+      const portal = req.nextUrl.searchParams.get("portal");
+      const destino =
+        portal === "admin" ? (claims.rol === "admin" ? "/admin?vista=chat" : "/gerencia") : portal === "gerencia" ? "/gerencia" : inicioPorRol(claims.rol);
+      return NextResponse.redirect(new URL(claims.cp ? "/cambiar-pin" : destino, req.url));
     }
     return NextResponse.next();
   }

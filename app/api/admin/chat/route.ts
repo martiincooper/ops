@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
+import { requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { manejar } from "@/lib/http";
 import { githubConfigurado, repositorioIssues } from "@/lib/chat/github";
@@ -9,7 +9,7 @@ import { INACTIVIDAD_MIN, estadoSalas } from "@/lib/chat/salas";
 
 /** Panel del administrador: estado de las salas e historial de conversaciones con su Issue. */
 export const GET = manejar(async (req) => {
-  await requireUsuario(req, ["admin"]);
+  await requireAdminPortal(req);
   const db = getDbControl();
   const filas = db
     .prepare(

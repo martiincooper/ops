@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUsuario } from "@/lib/auth";
+import { requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { HttpError, manejar } from "@/lib/http";
 import { conversacion, mensajes } from "@/lib/chat/salas";
@@ -8,7 +8,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /** Transcripción y requerimiento de una conversación (auditoría). */
 export const GET = manejar<Ctx>(async (req, { params }) => {
-  await requireUsuario(req, ["admin"]);
+  await requireAdminPortal(req);
   const { id } = await params;
   const db = getDbControl();
   const c = conversacion(db, id);

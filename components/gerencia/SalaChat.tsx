@@ -56,7 +56,7 @@ type Accion = "mensaje" | "siguiente" | "mas_detalles";
 
 const LATIDO_MS = 60_000;
 
-export default function SalaChat({ modulo, nombre }: { modulo: Modulo; nombre: string }) {
+export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; nombre: string; esAdmin: boolean }) {
   const router = useRouter();
   const [fase, setFase] = useState<Fase>("entrando");
   const [vista, setVista] = useState<Vista | null>(null);
@@ -202,6 +202,7 @@ export default function SalaChat({ modulo, nombre }: { modulo: Modulo; nombre: s
       <CabeceraPortal
         nombre={nombre}
         subtitulo={`Sala ${modulo.nombre} · ${modulo.area}`}
+        esAdmin={esAdmin}
         volver={
           <Link href="/gerencia" aria-label="Volver al portal" title="Volver al portal" className="boton-icono bg-superficie">
             <ArrowLeft size={18} />

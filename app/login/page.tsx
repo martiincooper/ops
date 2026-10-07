@@ -13,9 +13,12 @@ export default function Login() {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reinicio, setReinicio] = useState(0);
-  // /login?portal=gerencia: ingreso al portal gerencial (solo @datasheq.com)
-  const [portal, setPortal] = useState(false);
-  useEffect(() => setPortal(new URLSearchParams(window.location.search).get("portal") === "gerencia"), []);
+  // /login?portal=gerencia: portal gerencial · /login?portal=admin: «Acceso Administrador» (ambos solo @datasheq.com)
+  const [portal, setPortal] = useState<"gerencia" | "admin" | null>(null);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("portal");
+    setPortal(p === "gerencia" || p === "admin" ? p : null);
+  }, []);
 
   const enviarPin = useCallback(
     async (pin: string) => {
@@ -23,7 +26,12 @@ export default function Login() {
       setError(null);
       try {
         const r = await api<{ redirigir: string }>("/api/auth/login", { method: "POST", json: { email, pin } });
-        window.location.href = portal && r.redirigir !== "/cambiar-pin" ? "/gerencia" : r.redirigir;
+        let destino = r.redirigir;
+        if (portal && destino !== "/cambiar-pin") {
+          if (portal === "gerencia") destino = "/gerencia";
+          else destino = destino === "/admin" ? "/admin?vista=chat" : "/gerencia?aviso=sin-admin";
+        }
+        window.location.href = destino;
       } catch (e) {
         const err = e as ErrorApi;
         const restantes = err.datos?.intentos_restantes as number | undefined;
@@ -60,11 +68,15 @@ export default function Login() {
               }}
             >
               <div>
-                <h1 className="text-2xl font-semibold text-tinta">{portal ? "Portal gerencial" : "Ingresar"}</h1>
+                <h1 className="text-2xl font-semibold text-tinta">
+                  {portal === "admin" ? "Acceso Administrador" : portal === "gerencia" ? "Portal gerencial" : "Ingresar"}
+                </h1>
                 <p className="mt-1 text-sm text-tinta-3">
-                  {portal
-                    ? `Uso exclusivo para personal de @${DOMINIO_GERENCIA}. Ingresa con tu email y tu código de 6 dígitos.`
-                    : "Con tu email de trabajo y tu código de 6 dígitos."}
+                  {portal === "admin"
+                    ? `Ingresa con tus credenciales de administrador (@${DOMINIO_GERENCIA}) para ver el historial, las salas y los Issues de GitHub.`
+                    : portal
+                      ? `Uso exclusivo para personal de @${DOMINIO_GERENCIA}. Ingresa con tu email y tu código de 6 dígitos.`
+                      : "Con tu email de trabajo y tu código de 6 dígitos."}
                 </p>
               </div>
               <div>
@@ -87,6 +99,13 @@ export default function Login() {
               <p className="text-center text-sm text-tinta-3">
                 ¿Primer ingreso? Usa el código inicial que te entregó tu jefatura; se te pedirá cambiarlo.
               </p>
+              {portal && (
+                <p className="text-center text-sm">
+                  <a href={portal === "admin" ? "/login?portal=gerencia" : "/login?portal=admin"} className="font-semibold text-indigo-tinta hover:underline">
+                    {portal === "admin" ? "Volver al ingreso del portal gerencial" : "Acceso Administrador"}
+                  </a>
+                </p>
+              )}
             </form>
           ) : (
             <div className="animate-aparecer">

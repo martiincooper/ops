@@ -18,12 +18,18 @@ import {
   mensajes,
 } from "./salas";
 
-/** Gerencia y administradores, solo con email @datasheq.com. */
+/** Cualquier cuenta @datasheq.com (equipo, gerencia o administración); el resto, acceso denegado. */
 export async function requireGerencia(req: NextRequest): Promise<{ u: Usuario; p: Persona; db: DB }> {
   const u = await requireUsuario(req);
   if (!esDominioGerencia(u.email)) throw new HttpError(403, MENSAJE_ACCESO_DENEGADO);
-  if (u.rol !== "executive" && u.rol !== "admin") throw new HttpError(403, "El portal gerencial es solo para gerencia y administración.");
   return { u, p: personaDe(u), db: getDbControl() };
+}
+
+/** Panel del portal en /admin: administradores con email @datasheq.com. */
+export async function requireAdminPortal(req: NextRequest): Promise<Usuario> {
+  const u = await requireUsuario(req, ["admin"]);
+  if (!esDominioGerencia(u.email)) throw new HttpError(403, MENSAJE_ACCESO_DENEGADO);
+  return u;
 }
 
 export const personaDe = (u: Usuario): Persona => ({ id: u.id, rol: u.rol, email: u.email, nombre: u.nombre });

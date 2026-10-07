@@ -153,10 +153,14 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 Chatbot para que la gerencia levante requerimientos sobre la plataforma DataSheq. Al terminar la entrevista, el
 asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** con su ticket.
 
-- **Solo `@datasheq.com`**: gerencia y administradores con email de ese dominio. Cualquier otra cuenta (Gmail,
-  Hotmail, otro dominio) ve «Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com», en
-  la página y en la API. El ingreso directo es `/login?portal=gerencia` (rechaza otros dominios antes de pedir el
-  código); gerencia de Datasheq tiene además un botón **Portal gerencial** en `/exec`.
+- **Solo `@datasheq.com`**: cualquier cuenta de ese dominio (equipo, gerencia o administración) entra a hacer sus
+  entrevistas, sin necesitar permisos de administración. Cualquier otra cuenta (Gmail, Hotmail, otro dominio) ve
+  «Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com», en la página y en la API. El
+  ingreso directo es `/login?portal=gerencia` (rechaza otros dominios antes de pedir el código); gerencia de
+  Datasheq tiene además un botón **Portal gerencial** en `/exec`.
+- **Acceso Administrador**: botón en la barra superior del portal y de cada sala. Un administrador @datasheq.com va
+  directo al panel (`/admin?vista=chat`); el resto cierra sesión y entra por `/login?portal=admin` con credenciales
+  de administrador (si la cuenta no lo es, vuelve al portal con un aviso).
 - **7 salas**, una por módulo: C-Legal (Cumplimiento Legal), C-Controla (Control Documental), C-Previene (Gestor
   Documental), C-Lidera (Programas de Liderazgo), C-Acredita (Gestión del personal), C-Capacita (Gestor del
   conocimiento) y C-Investiga (Reportabilidad e Incidentes). El asistente conoce el propósito de cada una
@@ -172,7 +176,8 @@ asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** c
   (`prioridad: alta`), tipo (`tipo: mejora`) y `gerencia` (se crean solas si no existen), y en el cuerpo el ticket,
   los datos de quien lo pidió, resumen, contexto, alcance, criterios de aceptación y la transcripción. Si GitHub no
   responde o falta `GITHUB_TOKEN`, el requerimiento queda guardado y se reenvía desde el panel.
-- **Panel del administrador** (`/admin` → **Portal gerencial**): estado de las 7 salas (quién la usa, desde cuándo,
+- **Panel del administrador** (`/admin` → **Portal gerencial**, solo administradores @datasheq.com; el resto de
+  `/admin` no cambia): estado de las 7 salas (quién la usa, desde cuándo,
   cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
   enlace directo al Issue (o **Reintentar** si quedó pendiente).
 - **IA**: Claude (`CHAT_MODELO`, por defecto `claude-opus-5-5`) con `ANTHROPIC_API_KEY`. Sin clave (o con

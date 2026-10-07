@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import BotonSalir from "@/components/BotonSalir";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
+import { esDominioGerencia } from "@/lib/chat/modulos";
 import { cx } from "@/lib/cliente";
 import Administradores from "./Administradores";
 import Capacidad from "./Capacidad";
@@ -54,7 +55,9 @@ export default function AdminPanel({
   const [vista, setVista] = useState<Vista>(inicial.vista);
   const [alcance, setAlcance] = useState<Alcance>(inicial.alcance);
   const emp = empresas.find((e) => e.clave === empresa) ?? empresas[0];
-  const actual = VISTAS.find((v) => v.clave === vista)!;
+  // El panel del portal gerencial solo para administradores @datasheq.com
+  const vistas = esDominioGerencia(yo.email) ? VISTAS : VISTAS.filter((v) => v.clave !== "chat");
+  const actual = vistas.find((v) => v.clave === vista) ?? vistas[0];
 
   // Mantiene la selección en la URL (recargar o compartir el enlace conserva empresa, pestaña y alcance)
   useEffect(() => {
@@ -68,7 +71,7 @@ export default function AdminPanel({
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-24 flex-col items-center gap-1 bg-superficie py-5 shadow-tarjeta lg:flex">
         <Marca conTexto={false} className="mb-6" />
         <nav aria-label="Secciones" className="flex flex-col items-center gap-1">
-          {VISTAS.map((v) => (
+          {vistas.map((v) => (
             <button
               key={v.clave}
               type="button"
@@ -140,7 +143,7 @@ export default function AdminPanel({
 
           {/* Secciones (móvil y tablet) */}
           <nav aria-label="Secciones" className="flex gap-1 overflow-x-auto px-4 pb-3 lg:hidden">
-            {VISTAS.map((v) => (
+            {vistas.map((v) => (
               <button
                 key={v.clave}
                 type="button"
@@ -186,7 +189,7 @@ export default function AdminPanel({
           {vista === "equipo" && <Equipo key={empresa} empresa={emp} yo={yo} />}
           {vista === "proyectos" && <Proyectos key={empresa} empresa={emp} hoy={hoy} />}
           {vista === "admins" && <Administradores yo={yo} />}
-          {vista === "chat" && <ChatGerencia />}
+          {vista === "chat" && actual.clave === "chat" && <ChatGerencia />}
         </main>
       </div>
     </div>
