@@ -7,7 +7,23 @@ import { MAX_OBJETIVOS, esquemaGasto, esquemaGastoCambio } from "../lib/esquemas
 import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio } from "../lib/gastos";
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
-import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
+import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
+import { type Linea, requerimientoGuiado, turnoGuiado } from "../lib/chat/guion";
+import { MENSAJE_SALA_OCUPADA, MODULOS, codigoTicket, esDominioGerencia } from "../lib/chat/modulos";
+import {
+  ErrorSala,
+  INACTIVIDAD_MIN,
+  agregarMensaje,
+  asignarTicket,
+  cerrarConversacion,
+  conversacion as conversacionChat,
+  entrarSala,
+  estadoSalas,
+  exigirActiva,
+  liberarSala,
+  mensajes as mensajesChat,
+  tocar,
+} from "../lib/chat/salas";
 import { ErrorObjetivo, agregarObjetivo, agregarObjetivoJefatura, bitacoraEditable, comenzarJornada, cambiarBloqueo, cambiarObjetivo, quitarObjetivo } from "../lib/objetivos";
 import { cuentaDeRegistros, eliminarCuenta, idsHeredados } from "../lib/registros";
 import { repartirMonto } from "../lib/reparto";
@@ -746,6 +762,105 @@ async function main() {
     const h = await hashPin("482915");
     assert.equal(await verificarPin("482915", h), true);
     assert.equal(await verificarPin("482916", h), false);
+  });
+
+  console.log("Portal gerencial (salas y entrevista)");
+  const dbControl = () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_CONTROL.forEach((m) => d.exec(m));
+    return d;
+  };
+  const ana = { id: "g1", rol: "executive", email: "ana@datasheq.com", nombre: "Ana Pérez" };
+  const beto = { id: "g2", rol: "executive", email: "beto@datasheq.com", nombre: "Beto Rojas" };
+  const t0 = new Date("2026-10-07T13:00:00Z");
+  const mas = (min: number) => new Date(t0.getTime() + min * 60_000);
+
+  await prueba("solo @datasheq.com entra al portal", () => {
+    assert.equal(esDominioGerencia("ana@datasheq.com"), true);
+    assert.equal(esDominioGerencia("Ana@DataSheq.com"), true);
+    for (const e of ["ana@gmail.com", "ana@hotmail.com", "ana@datasheq.cl", "ana@datasheq.com.evil.io", "ana@aether-tech.dev"]) {
+      assert.equal(esDominioGerencia(e), false, e);
+    }
+  });
+  await prueba("siete salas con etiqueta C-…", () => {
+    assert.deepEqual(MODULOS.map((m) => m.nombre), ["C-Legal", "C-Controla", "C-Previene", "C-Lidera", "C-Acredita", "C-Capacita", "C-Investiga"]);
+  });
+  await prueba("entrar bloquea la sala; otra persona recibe 409 con el aviso", () => {
+    const d = dbControl();
+    const { conversacion: c, nueva } = entrarSala(d, "c-legal", ana, t0);
+    assert.equal(nueva, true);
+    assert.match(mensajesChat(d, c.id)[0].texto, /^Hola, Ana\. Bienvenido al portal gerencial de DataSheq\. Es un gusto saludarte\./);
+    assert.throws(() => entrarSala(d, "c-legal", beto, mas(1)), (e: ErrorSala) => e.status === 409 && e.message === MENSAJE_SALA_OCUPADA);
+    // otra sala sí está libre
+    assert.equal(entrarSala(d, "c-previene", beto, mas(1)).nueva, true);
+    const salas = estadoSalas(d, beto, false, mas(1));
+    assert.deepEqual(salas.filter((s) => s.ocupada).map((s) => [s.clave, s.propia]), [["c-legal", false], ["c-previene", true]]);
+    assert.equal(salas.find((s) => s.clave === "c-legal")?.usuario_email, undefined); // no ve quién la ocupa
+  });
+  await prueba("la misma persona retoma su conversación al volver a entrar", () => {
+    const d = dbControl();
+    const a = entrarSala(d, "c-legal", ana, t0).conversacion;
+    const b = entrarSala(d, "c-legal", { ...ana, email: "ANA@datasheq.com" }, mas(2));
+    assert.equal(b.nueva, false);
+    assert.equal(b.conversacion.id, a.id);
+  });
+  await prueba("se libera por inactividad (y un latido la mantiene)", () => {
+    const d = dbControl();
+    const c = entrarSala(d, "c-legal", ana, t0).conversacion;
+    agregarMensaje(d, c.id, "usuario", "Necesitamos evaluar el DS 594", undefined, mas(1));
+    tocar(d, c.id, mas(INACTIVIDAD_MIN - 1)); // latido
+    assert.throws(() => entrarSala(d, "c-legal", beto, mas(INACTIVIDAD_MIN + 1)), ErrorSala);
+    assert.equal(entrarSala(d, "c-legal", beto, mas(2 * INACTIVIDAD_MIN)).nueva, true);
+    assert.equal(conversacionChat(d, c.id)?.estado, "expirada"); // queda en el historial
+    assert.throws(() => exigirActiva(d, c.id, ana, mas(2 * INACTIVIDAD_MIN)), (e: ErrorSala) => e.status === 410);
+  });
+  await prueba("finalizar libera la sala; sin respuestas no queda historial", () => {
+    const d = dbControl();
+    const c = entrarSala(d, "c-lidera", ana, t0).conversacion;
+    cerrarConversacion(d, c.id, "finalizada", mas(1));
+    assert.equal(conversacionChat(d, c.id), undefined);
+    assert.equal(entrarSala(d, "c-lidera", beto, mas(2)).nueva, true);
+    assert.equal(liberarSala(d, "c-lidera", mas(3)), true);
+    assert.equal(estadoSalas(d, null, true, mas(3)).some((s) => s.ocupada), false);
+  });
+  await prueba("una sala a la vez: entrar a otra libera la anterior", () => {
+    const d = dbControl();
+    const c = entrarSala(d, "c-legal", ana, t0).conversacion;
+    agregarMensaje(d, c.id, "usuario", "algo", undefined, mas(1));
+    entrarSala(d, "c-previene", ana, mas(2));
+    assert.equal(conversacionChat(d, c.id)?.estado, "finalizada");
+    assert.equal(entrarSala(d, "c-legal", beto, mas(3)).nueva, true);
+  });
+  await prueba("tickets correlativos", () => {
+    const d = dbControl();
+    const a = entrarSala(d, "c-legal", ana, t0).conversacion;
+    const b = entrarSala(d, "c-previene", beto, t0).conversacion;
+    assert.equal(asignarTicket(d, a.id), 1);
+    assert.equal(asignarTicket(d, b.id), 2);
+    assert.equal(asignarTicket(d, a.id), 1); // no cambia si ya tiene
+    assert.equal(codigoTicket(7), "GER-0007");
+  });
+  await prueba("entrevista guiada: repregunta si es breve, avanza y termina lista para generar", () => {
+    const m = MODULOS[0];
+    const lineas: Linea[] = [{ autor: "robot", texto: "Hola", meta: { tema: 0 } }];
+    const t1 = turnoGuiado(m, lineas, "mensaje", "Informe");
+    assert.equal(t1.meta.repregunta, true);
+    assert.equal(t1.meta.tema, 0);
+    lineas.push({ autor: "usuario", texto: "Informe" }, { autor: "robot", texto: t1.mensaje, meta: t1.meta });
+    const t2 = turnoGuiado(m, lineas, "mensaje", "Ok"); // segunda respuesta breve: ya no insiste
+    assert.equal(t2.meta.tema, 1);
+    let ultimo = t2;
+    lineas.push({ autor: "robot", texto: t2.mensaje, meta: t2.meta });
+    for (let i = 0; i < m.temas.length; i++) {
+      ultimo = turnoGuiado(m, lineas, "siguiente", "");
+      lineas.push({ autor: "robot", texto: ultimo.mensaje, meta: ultimo.meta });
+    }
+    assert.equal(ultimo.listo_para_generar, true);
+    assert.equal(ultimo.completitud, 100);
+    const r = requerimientoGuiado(m, [...lineas, { autor: "usuario", texto: "Es urgente por una fiscalización" }]);
+    assert.equal(r.prioridad, "alta");
+    assert.equal(r.titulo, "Informe");
   });
 
   console.log(`\n${ok} pruebas OK${process.exitCode ? " — HAY FALLOS" : ""}`);

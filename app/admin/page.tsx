@@ -5,7 +5,7 @@ import { hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
-const VISTAS: Vista[] = ["standup", "capacidad", "compras", "equipo", "proyectos", "admins"];
+const VISTAS: Vista[] = ["standup", "capacidad", "compras", "equipo", "proyectos", "admins", "chat"];
 
 export default async function Admin({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const u = await requirePagina(["admin"]);

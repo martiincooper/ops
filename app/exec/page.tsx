@@ -8,6 +8,7 @@ import {
   HelpCircle,
   KeyRound,
   LayoutList,
+  MessagesSquare,
   Minus,
   PackageCheck,
   PauseCircle,
@@ -23,6 +24,7 @@ import { ESTADO_PAGO } from "@/components/EstadoPago";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
 import { empresaDe, requirePagina } from "@/lib/auth";
+import { esDominioGerencia } from "@/lib/chat/modulos";
 import { getDbEmpresa } from "@/lib/db";
 import { EMPRESAS } from "@/lib/empresas";
 import { type DiasPorEtapa, NOMBRE_ESTADO, diasEntre } from "@/lib/etapas";
@@ -362,6 +364,11 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
             {u.rol === "admin" && (
               <Link href={`/admin?empresa=${empresa.clave}`} title="Jefatura" aria-label="Jefatura" className="boton-icono bg-superficie">
                 <LayoutList size={18} />
+              </Link>
+            )}
+            {esDominioGerencia(u.email) && (
+              <Link href="/gerencia" title="Portal gerencial (asistente)" className="boton-suave bg-superficie">
+                <MessagesSquare size={16} aria-hidden /> <span className="hidden sm:inline">Portal gerencial</span>
               </Link>
             )}
             <Link href="/cambiar-pin" aria-label="Cambiar código" title="Cambiar código" className="boton-icono bg-superficie">

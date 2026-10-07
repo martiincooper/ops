@@ -1,9 +1,10 @@
 "use client";
 
 import { ArrowLeft, LoaderCircle } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Marca from "@/components/Marca";
 import PinPad from "@/components/PinPad";
+import { DOMINIO_GERENCIA, MENSAJE_ACCESO_DENEGADO, esDominioGerencia } from "@/lib/chat/modulos";
 import { ErrorApi, api } from "@/lib/cliente";
 
 export default function Login() {
@@ -12,6 +13,9 @@ export default function Login() {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reinicio, setReinicio] = useState(0);
+  // /login?portal=gerencia: ingreso al portal gerencial (solo @datasheq.com)
+  const [portal, setPortal] = useState(false);
+  useEffect(() => setPortal(new URLSearchParams(window.location.search).get("portal") === "gerencia"), []);
 
   const enviarPin = useCallback(
     async (pin: string) => {
@@ -19,7 +23,7 @@ export default function Login() {
       setError(null);
       try {
         const r = await api<{ redirigir: string }>("/api/auth/login", { method: "POST", json: { email, pin } });
-        window.location.href = r.redirigir;
+        window.location.href = portal && r.redirigir !== "/cambiar-pin" ? "/gerencia" : r.redirigir;
       } catch (e) {
         const err = e as ErrorApi;
         const restantes = err.datos?.intentos_restantes as number | undefined;
@@ -32,7 +36,7 @@ export default function Login() {
         setOcupado(false);
       }
     },
-    [email],
+    [email, portal],
   );
 
   return (
@@ -49,14 +53,19 @@ export default function Login() {
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Ingresa un email válido");
+                if (portal && !esDominioGerencia(email.trim())) return setError(MENSAJE_ACCESO_DENEGADO);
                 setEmail(email.trim().toLowerCase());
                 setError(null);
                 setPaso("pin");
               }}
             >
               <div>
-                <h1 className="text-2xl font-semibold text-tinta">Ingresar</h1>
-                <p className="mt-1 text-sm text-tinta-3">Con tu email de trabajo y tu código de 6 dígitos.</p>
+                <h1 className="text-2xl font-semibold text-tinta">{portal ? "Portal gerencial" : "Ingresar"}</h1>
+                <p className="mt-1 text-sm text-tinta-3">
+                  {portal
+                    ? `Uso exclusivo para personal de @${DOMINIO_GERENCIA}. Ingresa con tu email y tu código de 6 dígitos.`
+                    : "Con tu email de trabajo y tu código de 6 dígitos."}
+                </p>
               </div>
               <div>
                 <label htmlFor="email" className="etiqueta">Email de trabajo</label>
@@ -69,11 +78,11 @@ export default function Login() {
                   autoFocus
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="nombre@empresa.cl"
+                  placeholder={portal ? `nombre@${DOMINIO_GERENCIA}` : "nombre@empresa.cl"}
                   className="campo"
                 />
               </div>
-              {error && <p className="rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
+              {error && <p role="alert" className="rounded-2xl bg-error-fondo px-4 py-2.5 text-sm text-error-tinta">{error}</p>}
               <button type="submit" className="boton-primario">Continuar</button>
               <p className="text-center text-sm text-tinta-3">
                 ¿Primer ingreso? Usa el código inicial que te entregó tu jefatura; se te pedirá cambiarlo.

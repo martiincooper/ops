@@ -33,6 +33,51 @@ export const MIGRACIONES_CONTROL: string[] = [
   );
   CREATE INDEX idx_supervision_usuario ON supervision (empresa, usuario_id);
   `,
+  // v2 — portal gerencial: conversaciones con el robot, mensajes y bloqueo de salas (una persona por módulo)
+  `
+  CREATE TABLE chat_conversaciones (
+    id TEXT PRIMARY KEY,
+    modulo TEXT NOT NULL,
+    usuario_id TEXT NOT NULL,                        -- id en su base (control.db o la de su empresa)
+    usuario_rol TEXT NOT NULL,
+    usuario_email TEXT NOT NULL,
+    usuario_nombre TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'activa'
+      CHECK (estado IN ('activa', 'generada', 'finalizada', 'expirada')),
+    completitud INTEGER NOT NULL DEFAULT 0 CHECK (completitud BETWEEN 0 AND 100),
+    iniciada_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    ultima_actividad TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    terminada_en TEXT,
+    ticket INTEGER UNIQUE,                           -- número correlativo al generar el requerimiento (GER-0001)
+    titulo TEXT,
+    prioridad TEXT CHECK (prioridad IN ('critica', 'alta', 'media', 'baja')),
+    clasificacion TEXT,
+    requerimiento_json TEXT,                         -- resumen estructurado que redactó la IA
+    issue_numero INTEGER,
+    issue_url TEXT,
+    issue_error TEXT                                 -- por qué no se pudo crear el Issue (se reintenta desde /admin)
+  );
+  CREATE INDEX idx_chat_conv_inicio ON chat_conversaciones (iniciada_en);
+  CREATE INDEX idx_chat_conv_usuario ON chat_conversaciones (usuario_email, estado);
+
+  CREATE TABLE chat_mensajes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversacion_id TEXT NOT NULL REFERENCES chat_conversaciones(id) ON DELETE CASCADE,
+    autor TEXT NOT NULL CHECK (autor IN ('robot', 'usuario', 'sistema')),
+    texto TEXT NOT NULL,
+    meta_json TEXT,                                  -- datos del robot: completitud, faltantes, sala sugerida
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  CREATE INDEX idx_chat_mensajes_conv ON chat_mensajes (conversacion_id, id);
+
+  -- Una fila por sala ocupada. La clave primaria garantiza una sola persona por módulo.
+  CREATE TABLE chat_salas (
+    modulo TEXT PRIMARY KEY,
+    conversacion_id TEXT NOT NULL UNIQUE REFERENCES chat_conversaciones(id) ON DELETE CASCADE,
+    usuario_email TEXT NOT NULL,
+    desde TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

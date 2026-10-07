@@ -148,6 +148,36 @@ compras registrados solo para él; los compartidos con otros proyectos solo lo p
 nuevo entre los que quedan. No se puede deshacer: para un proyecto real que terminó, usa el estado
 «entregado» en vez de eliminarlo.
 
+## Portal gerencial con asistente (`/gerencia`)
+
+Chatbot para que la gerencia levante requerimientos sobre la plataforma DataSheq. Al terminar la entrevista, el
+asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** con su ticket.
+
+- **Solo `@datasheq.com`**: gerencia y administradores con email de ese dominio. Cualquier otra cuenta (Gmail,
+  Hotmail, otro dominio) ve «Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com», en
+  la página y en la API. El ingreso directo es `/login?portal=gerencia` (rechaza otros dominios antes de pedir el
+  código); gerencia de Datasheq tiene además un botón **Portal gerencial** en `/exec`.
+- **7 salas**, una por módulo: C-Legal (Cumplimiento Legal), C-Controla (Control Documental), C-Previene (Gestor
+  Documental), C-Lidera (Programas de Liderazgo), C-Acredita (Gestión del personal), C-Capacita (Gestor del
+  conocimiento) y C-Investiga (Reportabilidad e Incidentes). El asistente conoce el propósito de cada una
+  (`lib/chat/modulos.ts`) y, si el tema corresponde a otra, lo dice y ofrece el botón para cambiar de sala.
+- **Entrevista conversacional**: saludo personalizado, una pregunta a la vez, repreguntas amables si falta
+  información y una barra de «% reunido» con lo que aún falta. Botones: **Pasar a la siguiente pregunta**, **Agregar
+  más detalles**, **Finalizar y generar requerimiento** y **Finalizar conversación** (sin generar).
+- **Una persona por sala**: al entrar, la sala queda reservada para esa persona; quien intente entrar ve «El módulo
+  se encuentra en uso por otro usuario. Por favor intenta más tarde». Se libera al finalizar (con o sin
+  requerimiento) o tras `CHAT_INACTIVIDAD_MIN` minutos sin actividad (por defecto 15; escribir cuenta como
+  actividad). Volver a entrar retoma la conversación; entrar a otra sala libera la anterior.
+- **Issue automático**: título `[GER-0001][C-Legal] …`, etiquetas del módulo (`C-Legal`), prioridad
+  (`prioridad: alta`), tipo (`tipo: mejora`) y `gerencia` (se crean solas si no existen), y en el cuerpo el ticket,
+  los datos de quien lo pidió, resumen, contexto, alcance, criterios de aceptación y la transcripción. Si GitHub no
+  responde o falta `GITHUB_TOKEN`, el requerimiento queda guardado y se reenvía desde el panel.
+- **Panel del administrador** (`/admin` → **Portal gerencial**): estado de las 7 salas (quién la usa, desde cuándo,
+  cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
+  enlace directo al Issue (o **Reintentar** si quedó pendiente).
+- **IA**: Claude (`CHAT_MODELO`, por defecto `claude-opus-5-5`) con `ANTHROPIC_API_KEY`. Sin clave (o con
+  `CHAT_IA=off`) funciona con una entrevista guiada por temas, sin IA.
+
 ## Contenido de esta versión
 
 | Incluido | Próxima etapa |
@@ -161,6 +191,7 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
 | `/exec`: costo vs estimación BOM, desglose de costos (total, único vs recurrente, recurrente por día/mes/año y por proyecto), tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
 | Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) y edición de los datos del proyecto | |
+| `/gerencia`: portal gerencial con asistente (7 salas, una persona por sala, solo @datasheq.com) que crea Issues en GitHub; panel en `/admin` | |
 
 ---
 
@@ -440,6 +471,12 @@ Respalda antes de actualizar (`node scripts/backup.mjs` o `docker exec aether-op
 | `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
+| `ANTHROPIC_API_KEY` | — (entrevista guiada sin IA) | Asistente del portal gerencial con Claude |
+| `CHAT_MODELO` | `claude-opus-5-5` | Modelo de Claude del asistente |
+| `CHAT_IA` | — | `off` fuerza la entrevista guiada aunque haya clave |
+| `CHAT_INACTIVIDAD_MIN` | `15` | Minutos sin actividad tras los que una sala se libera |
+| `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token con permiso «Issues: write» sobre el repositorio de los Issues |
+| `GITHUB_REPO` | `martiincooper/ops` | Repositorio donde se crean los Issues de los requerimientos |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.
 No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
@@ -451,7 +488,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares (49 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, tickets, entrevista guiada) (59 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares (57 pruebas)
@@ -471,7 +508,9 @@ app/globals.css     sistema de diseño (colores, tarjetas, botones)
 app/                páginas (login, cambiar-pin, checkin, mi-progreso, admin, exec) y api/ (route handlers)
 components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, ModalNoDisponible, Anillo, ui)
 components/equipo/  jornada del integrante (comenzar, terminar, tablero)
-components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores)
+components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores, portal gerencial)
+components/gerencia/ portal gerencial: salas, chat con el asistente, acceso denegado
+lib/chat/           portal gerencial: módulos, bloqueo de salas, entrevista (Claude o guiada), Issues de GitHub
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
