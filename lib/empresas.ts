@@ -9,7 +9,7 @@ export interface Empresa {
   dominios: string[];
 }
 
-const DEFECTO = "aether-tech|Aether Tech|aether-tech.dev;datasheq|Datasheq|datasheq.cl";
+const DEFECTO = "aether-tech|Aether Tech|aether-tech.dev;datasheq|Datasheq|datasheq.com";
 
 function leer(config: string): Empresa[] {
   const lista = config

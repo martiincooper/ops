@@ -142,7 +142,8 @@ async function main() {
   console.log("Empresas y tableros");
   await prueba("dominio del email decide la empresa", () => {
     assert.equal(empresaPorEmail("ana@aether-tech.dev")?.clave, "aether-tech");
-    assert.equal(empresaPorEmail("Pedro@DATASHEQ.CL")?.clave, "datasheq");
+    assert.equal(empresaPorEmail("Pedro@DATASHEQ.COM")?.clave, "datasheq");
+    assert.equal(empresaPorEmail("pedro@datasheq.cl"), undefined);
     assert.equal(empresaPorEmail("x@gmail.com"), undefined);
     assert.equal(empresaPorEmail("x@sub.aether-tech.dev"), undefined);
   });

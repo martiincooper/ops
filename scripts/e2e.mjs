@@ -155,15 +155,15 @@ async function main() {
   await prueba("cuentas: el dominio debe coincidir con la empresa elegida", async () => {
     const x = (empresa, email) => admin.pedir(q("/api/admin/usuarios", empresa), { metodo: "POST", json: { email, nombre: "X", rol: "team" } });
     assert.equal((await x(D, "x@aether-tech.dev")).status, 400);
-    assert.equal((await x(A, "x@datasheq.cl")).status, 400);
+    assert.equal((await x(A, "x@datasheq.com")).status, 400);
     assert.equal((await x(A, "x@gmail.com")).status, 400);
   });
   await prueba("crear equipo y gerencia en ambas empresas, con supervisores", async () => {
     ana = await cuenta(admin, A, "ana@aether-tech.dev", "Ana Rojas", "team", "739204"); // supervisor por defecto: quien la crea
     beto = await cuenta(admin, A, "beto@aether-tech.dev", "Beto Díaz", "team", "618273", [admin2Id]);
-    dora = await cuenta(admin, D, "dora@datasheq.cl", "Dora Pérez", "team", "905162", [adminId, admin2Id]);
+    dora = await cuenta(admin, D, "dora@datasheq.com", "Dora Pérez", "team", "905162", [adminId, admin2Id]);
     ggA = await cuenta(admin, A, "gg@aether-tech.dev", "Gerencia Aether", "executive", "504918");
-    ggD = await cuenta(admin, D, "gerencia@datasheq.cl", "Gerencia Datasheq", "executive", "571930");
+    ggD = await cuenta(admin, D, "gerencia@datasheq.com", "Gerencia Datasheq", "executive", "571930");
     const u = (await admin.pedir(q("/api/admin/usuarios", A))).datos.usuarios;
     assert.deepEqual(u.find((x) => x.email === "ana@aether-tech.dev").supervisores.map((s) => s.id), [adminId]);
     assert.deepEqual(u.find((x) => x.email === "beto@aether-tech.dev").supervisores.map((s) => s.id), [admin2Id]);
@@ -290,7 +290,7 @@ async function main() {
     const de2 = (await admin2.pedir(q("/api/admin/standup", A, "&alcance=mios"))).datos.filas.map((f) => f.email);
     assert.deepEqual(de2, ["beto@aether-tech.dev"]);
     const compartida = (await admin2.pedir(q("/api/admin/standup", D, "&alcance=mios"))).datos.filas.map((f) => f.email);
-    assert.deepEqual(compartida, ["dora@datasheq.cl"]);
+    assert.deepEqual(compartida, ["dora@datasheq.com"]);
   });
   await prueba("standup: bloqueo primero; marcar resuelto (una sola vez)", async () => {
     const filas = (await admin.pedir(q("/api/admin/standup", A, "&alcance=todos"))).datos.filas;
@@ -392,7 +392,7 @@ async function main() {
     assert.equal(r.datos.no_disponible_hoy.motivo, "Otro cliente");
     const tareas = [{ proyecto_ids: [pD], descripcion: "a" }, { proyecto_ids: [pD], descripcion: "b" }];
     assert.equal((await dora.cliente.pedir("/api/jornada/comenzar", { metodo: "POST", json: { tareas } })).status, 409);
-    const st = (await admin.pedir(q("/api/admin/standup", D, "&alcance=todos"))).datos.filas.find((x) => x.email === "dora@datasheq.cl");
+    const st = (await admin.pedir(q("/api/admin/standup", D, "&alcance=todos"))).datos.filas.find((x) => x.email === "dora@datasheq.com");
     assert.equal(st.prioridad, 3);
     assert.equal(st.motivo, "No disponible hoy");
     const d = await dora.cliente.pedir(`/api/no-disponible/${r.datos.id}`, { metodo: "DELETE" });
@@ -672,19 +672,19 @@ async function main() {
   });
   await prueba("bloqueo tras 5 fallos (cuenta de Datasheq); reseteo por admin desbloquea", async () => {
     const c = new Cliente("dora2");
-    for (let i = 1; i <= 4; i++) assert.equal((await c.login("dora@datasheq.cl", "111112")).status, 401);
-    assert.equal((await c.login("dora@datasheq.cl", "111112")).status, 429);
-    assert.equal((await c.login("dora@datasheq.cl", "905162")).status, 429);
+    for (let i = 1; i <= 4; i++) assert.equal((await c.login("dora@datasheq.com", "111112")).status, 401);
+    assert.equal((await c.login("dora@datasheq.com", "111112")).status, 429);
+    assert.equal((await c.login("dora@datasheq.com", "905162")).status, 429);
     assert.equal((await admin.pedir(q(`/api/admin/usuarios/${dora.id}`, D), { metodo: "PATCH", json: { resetear_pin: true } })).status, 200);
     assert.equal((await dora.cliente.pedir("/api/jornada")).status, 401);
-    assert.equal((await c.login("dora@datasheq.cl", "000000")).datos.redirigir, "/cambiar-pin");
+    assert.equal((await c.login("dora@datasheq.com", "000000")).datos.redirigir, "/cambiar-pin");
   });
   await prueba("administradores: no a sí mismo; quitar a otro borra sus supervisiones", async () => {
     assert.equal((await admin.pedir(`/api/admin/administradores/${adminId}`, { metodo: "PATCH", json: { activo: false } })).status, 400);
     assert.equal((await admin.pedir(`/api/admin/administradores/${adminId}`, { metodo: "DELETE" })).status, 400);
     assert.equal((await admin.pedir(`/api/admin/administradores/${admin2Id}`, { metodo: "DELETE" })).status, 200);
     assert.equal((await admin2.pedir(q("/api/admin/standup", A))).status, 401);
-    const u = (await admin.pedir(q("/api/admin/usuarios", D))).datos.usuarios.find((x) => x.email === "dora@datasheq.cl");
+    const u = (await admin.pedir(q("/api/admin/usuarios", D))).datos.usuarios.find((x) => x.email === "dora@datasheq.com");
     assert.deepEqual(u.supervisores.map((s) => s.id), [adminId]);
   });
   await prueba("desactivar y reactivar una cuenta: sin acceso mientras está desactivada", async () => {

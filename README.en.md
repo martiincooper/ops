@@ -10,7 +10,7 @@ Design decisions and spec review: [`docs/REVISION.md`](docs/REVISION.md).
 ## Two companies, one site
 
 - The login email's domain picks the company and its database: `@aether-tech.dev` → Aether Tech,
-  `@datasheq.cl` → Datasheq (env `EMPRESAS`). Team and executive accounts only ever see their own company.
+  `@datasheq.com` → Datasheq (env `EMPRESAS`). Team and executive accounts only ever see their own company.
 - Admins (middle management) live in `control.db`, can have any email domain, and switch companies with a
   selector in `/admin` (standup, 14-day capacity, purchase validation, team with supervisors, projects, admins)
   and `/exec`. The first admin is `ADMIN_EMAIL`; admins add other admins.
@@ -150,7 +150,7 @@ BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 |---|---|---|
 | `JWT_SECRET` | — | Required in production, ≥ 32 chars |
 | `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | First admin, created when there are none; any domain |
-| `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | `key\|Name\|domains`, `;`-separated |
+| `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.com` | `key\|Name\|domains`, `;`-separated |
 | `PIN_INICIAL` | `000000` | Initial code for new and reset accounts |
 | `DATA_DIR` | `/data` (Docker), `./data` (local) | SQLite databases |
 | `TZ_NEGOCIO` | `America/Santiago` | Defines which date is "today" (one jornada per day) |

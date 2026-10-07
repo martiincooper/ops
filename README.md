@@ -16,7 +16,7 @@ una con su propia base de datos. Pensado para un equipo que trabaja **por objeti
 | **Administradores** (jefatura intermedia) | **cualquier dominio** | `/admin` con **selector de empresa**, y `/exec` de cualquiera de las dos |
 
 - El dominio del email decide la empresa y la base de datos: `@aether-tech.dev` → Aether Tech,
-  `@datasheq.cl` → Datasheq (configurable con `EMPRESAS`). Un email de otro dominio solo puede ser administrador.
+  `@datasheq.com` → Datasheq (configurable con `EMPRESAS`). Un email de otro dominio solo puede ser administrador.
 - El primer administrador es `ADMIN_EMAIL`. Desde `/admin` → **Administradores** se agregan otros, con el mismo
   tablero y los mismos permisos.
 - **Desactivar, reactivar y eliminar** (Equipo y Administradores): desactivar quita el acceso y conserva todo;
@@ -434,7 +434,7 @@ Respalda antes de actualizar (`node scripts/backup.mjs` o `docker exec aether-op
 |---|---|---|
 | `JWT_SECRET` | — | Obligatoria en producción, ≥ 32 caracteres |
 | `ADMIN_EMAIL` / `ADMIN_NOMBRE` | — | Primer administrador (se crea si no hay ninguno); cualquier dominio |
-| `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.cl` | Empresas: `clave\|Nombre\|dominios` separadas por `;` |
+| `EMPRESAS` | `aether-tech\|Aether Tech\|aether-tech.dev;datasheq\|Datasheq\|datasheq.com` | Empresas: `clave\|Nombre\|dominios` separadas por `;` |
 | `PIN_INICIAL` | `000000` | Código inicial de cuentas nuevas o reseteadas |
 | `DATA_DIR` | `/data` (Docker), `./data` (local) | Bases SQLite |
 | `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
