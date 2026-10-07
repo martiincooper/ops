@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
 import { MAX_OBJETIVOS, esquemaGasto, esquemaGastoCambio } from "../lib/esquemas";
-import { ErrorGasto, crearGasto, editarGasto, necesitaTipoCambio } from "../lib/gastos";
+import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio } from "../lib/gastos";
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_EMPRESA } from "../lib/migraciones";
@@ -475,6 +475,20 @@ async function main() {
     // Otra persona del equipo no puede editarla
     assert.throws(() => editarGasto(d, id, { item: "x" }, { nombre: "Beto", ahora: "x", usuarioId: "u2" }), /no encontrada/);
     assert.deepEqual(d.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+  await prueba("eliminar compra: equipo solo las propias (en cualquier estado), jefatura cualquiera; se borra su reparto", () => {
+    const d = dbNueva();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo) VALUES ('p2','AETH-02','Fuente',100000,'2026-09-01','2026-11-30')").run();
+    const nueva = () => crearGasto(d, { usuarioId: "u1", bitacoraId: null, datos: { proyecto_ids: ["p1", "p2"], item: "Sensor", monto_clp: 10000 }, ahora: "2026-10-07T12:00:00Z" });
+    const a = nueva();
+    const b = nueva();
+    d.prepare("UPDATE gastos SET estado = 'aprobado' WHERE id = ?").run(a);
+    assert.throws(() => eliminarGasto(d, a, "u2"), /no encontrada/);
+    eliminarGasto(d, a, "u1");
+    eliminarGasto(d, b);
+    assert.throws(() => eliminarGasto(d, b), ErrorGasto);
+    assert.equal((d.prepare("SELECT COUNT(*) AS n FROM gastos").get() as { n: number }).n, 0);
+    assert.equal((d.prepare("SELECT COUNT(*) AS n FROM gasto_proyectos").get() as { n: number }).n, 0);
   });
   await prueba("costo de jefatura: a nombre de su fila de registros, aprobado y no marcado como heredado", () => {
     const d = dbNueva();

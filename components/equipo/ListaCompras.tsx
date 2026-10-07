@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Pencil, Receipt, Repeat } from "lucide-react";
+import { LoaderCircle, Pencil, Receipt, Repeat, Trash2 } from "lucide-react";
 import { useState } from "react";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
 import { SelectPago } from "@/components/EstadoPago";
@@ -24,7 +24,8 @@ const fecha = (iso: string) => {
 /**
  * Compras propias con su estado de validación y de pago. El estado de pago se cambia aquí mismo (por enviar → esperando
  * pago → comprada); el resto de los campos con «Editar», en cualquier estado de validación (también aprobadas o
- * rechazadas: precio final, envío, impuesto de aduana…). La validación se conserva.
+ * rechazadas: precio final, envío, impuesto de aduana…). La validación se conserva. «Eliminar» la borra (pide
+ * confirmar).
  */
 export default function ListaCompras({
   gastos,
@@ -40,12 +41,16 @@ export default function ListaCompras({
   const [editando, setEditando] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; texto: string } | null>(null);
+  const [confirmar, setConfirmar] = useState<string | null>(null);
 
-  async function cambiarPago(g: GastoResumen, estado_pago: EstadoPago) {
+  const cambiarPago = (g: GastoResumen, estado_pago: EstadoPago) => enviar(g, "PATCH", { estado_pago });
+
+  async function enviar(g: GastoResumen, method: "PATCH" | "DELETE", json?: unknown) {
     setOcupado(g.id);
     setError(null);
     try {
-      await api(`/api/gastos/${g.id}`, { method: "PATCH", json: { estado_pago } });
+      await api(`/api/gastos/${g.id}`, { method, json });
+      setConfirmar(null);
       await onCambio();
     } catch (e) {
       setError({ id: g.id, texto: e instanceof ErrorApi ? e.message : "No se pudo guardar. Revisa tu conexión." });
@@ -97,14 +102,37 @@ export default function ListaCompras({
               {g.envio_clp > 0 && <span className="whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. envío {clp(g.envio_clp)}</span>}
               {g.impuesto_clp > 0 && <span className="whitespace-nowrap text-xs tabular-nums text-tinta-3">incl. impuesto {clp(g.impuesto_clp)}</span>}
               <Insignia tono={ESTADO[g.estado]}>{g.estado}</Insignia>
-              <button
-                type="button"
-                onClick={() => setEditando(g.id)}
-                aria-label={`Editar compra: ${g.item}`}
-                className="mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-indigo-tinta hover:bg-superficie"
-              >
-                <Pencil size={12} /> Editar
-              </button>
+              <div className="mt-0.5 flex items-center gap-0.5">
+                {confirmar === g.id ? (
+                  <button
+                    type="button"
+                    disabled={ocupado !== null}
+                    onClick={() => enviar(g, "DELETE")}
+                    title="Borra la compra. No se puede deshacer."
+                    className="rounded-full bg-error px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    ¿Eliminar?
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={ocupado !== null}
+                    onClick={() => setConfirmar(g.id)}
+                    aria-label={`Eliminar compra: ${g.item}`}
+                    className="rounded-full p-1.5 text-tinta-3 hover:bg-error-fondo hover:text-error-tinta disabled:opacity-50"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditando(g.id)}
+                  aria-label={`Editar compra: ${g.item}`}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-indigo-tinta hover:bg-superficie"
+                >
+                  <Pencil size={12} /> Editar
+                </button>
+              </div>
             </div>
           </li>
         ),

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { esquemaValidacionGasto } from "@/lib/esquemas";
+import { ErrorGasto, eliminarGasto } from "@/lib/gastos";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { ahoraIso } from "@/lib/tiempo";
 
@@ -24,5 +25,18 @@ export const PATCH = manejar<Ctx>(async (req, { params }) => {
     pendiente ? null : ahoraIso(),
     id,
   );
+  return NextResponse.json({ ok: true });
+});
+
+/** Elimina cualquier compra de la empresa, en cualquier estado. */
+export const DELETE = manejar<Ctx>(async (req, { params }) => {
+  const { db } = await contexto(req, ["admin"]);
+  const { id } = await params;
+  try {
+    eliminarGasto(db, id);
+  } catch (e) {
+    if (e instanceof ErrorGasto) throw new HttpError(e.status, e.message);
+    throw e;
+  }
   return NextResponse.json({ ok: true });
 });

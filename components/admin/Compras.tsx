@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, LoaderCircle, Pencil, Plus, Repeat, RotateCcw, X } from "lucide-react";
+import { Check, LoaderCircle, Pencil, Plus, Repeat, RotateCcw, Trash2, X } from "lucide-react";
 import { Fragment, useState } from "react";
 import { ESTADO_PAGO, SelectPago } from "@/components/EstadoPago";
 import FormGasto, { NOMBRE_TIPO_COSTO } from "@/components/FormGasto";
@@ -28,6 +28,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
     .map(({ id, codigo, nombre }) => ({ id, codigo, nombre }));
   const [formulario, setFormulario] = useState<"nuevo" | string | null>(null);
   const [rechazando, setRechazando] = useState<{ id: string; motivo: string } | null>(null);
+  const [confirmar, setConfirmar] = useState<string | null>(null);
   const gastos = datos?.gastos ?? [];
   const total = gastos.reduce((s, g) => s + g.monto_clp, 0);
 
@@ -47,6 +48,15 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
       await api(conEmpresa(`/api/admin/gastos/${g.id}/datos`, empresa), { method: "PATCH", json: { estado_pago: nuevo } });
       await recargar();
       return `${g.item}: ${ESTADO_PAGO[nuevo].nombre.toLowerCase()}.`;
+    });
+
+  const eliminar = (g: FilaGasto) =>
+    ejecutar(g.id, async () => {
+      await api(conEmpresa(`/api/admin/gastos/${g.id}`, empresa), { method: "DELETE" });
+      setConfirmar(null);
+      if (formulario === g.id) setFormulario(null);
+      await recargar();
+      return `${g.item}: compra eliminada.`;
     });
 
   return (
@@ -113,7 +123,7 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                 <th className="text-right">Monto (CLP)</th>
                 <th>Pago</th>
                 <th>Estado</th>
-                <th className="text-right">Validar</th>
+                <th className="text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -192,6 +202,15 @@ export default function Compras({ empresa, alcance }: { empresa: string; alcance
                         {g.estado !== "pendiente" && (
                           <button type="button" title="Volver a pendiente" aria-label="Volver a pendiente" disabled={ocupado !== null} onClick={() => decidir(g, "pendiente")} className="rounded-full p-2 text-tinta-3 hover:bg-suave disabled:opacity-50">
                             <RotateCcw size={14} />
+                          </button>
+                        )}
+                        {confirmar === g.id ? (
+                          <button type="button" disabled={ocupado !== null} onClick={() => eliminar(g)} title="Borra la compra y su reparto entre proyectos. No se puede deshacer." className="rounded-full bg-error px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                            ¿Eliminar?
+                          </button>
+                        ) : (
+                          <button type="button" title="Eliminar compra" aria-label={`Eliminar compra: ${g.item}`} disabled={ocupado !== null} onClick={() => setConfirmar(g.id)} className="rounded-full p-2 text-tinta-3 hover:bg-error-fondo hover:text-error-tinta disabled:opacity-50">
+                            <Trash2 size={14} />
                           </button>
                         )}
                       </div>

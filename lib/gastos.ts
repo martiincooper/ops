@@ -249,3 +249,14 @@ export function editarGasto(
     if (proyectos.length) repartir(db, gastoId, total, proyectos);
   })();
 }
+
+/**
+ * Elimina una compra en cualquier estado, con su reparto entre proyectos (gasto_proyectos: ON DELETE CASCADE). Con
+ * `usuarioId` (equipo) solo las propias; 404 si no existe o es de otra persona.
+ */
+export function eliminarGasto(db: DB, gastoId: string, usuarioId?: string): void {
+  const r = usuarioId
+    ? db.prepare("DELETE FROM gastos WHERE id = ? AND usuario_id = ?").run(gastoId, usuarioId)
+    : db.prepare("DELETE FROM gastos WHERE id = ?").run(gastoId);
+  if (r.changes === 0) throw new ErrorGasto(404, "Compra no encontrada");
+}

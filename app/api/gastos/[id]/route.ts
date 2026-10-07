@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { gastosRecientes } from "@/lib/dominio";
 import { esquemaGastoCambio } from "@/lib/esquemas";
-import { ErrorGasto, editarGasto, necesitaTipoCambio } from "@/lib/gastos";
+import { ErrorGasto, editarGasto, eliminarGasto, necesitaTipoCambio } from "@/lib/gastos";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { ahoraIso } from "@/lib/tiempo";
 import { tipoCambioHoy } from "@/lib/tipoCambio";
@@ -20,6 +20,19 @@ export const PATCH = manejar<Ctx>(async (req, { params }) => {
   const tipoCambio = necesitaTipoCambio(db, id, c) ? await tipoCambioHoy() : null;
   try {
     editarGasto(db, id, c, { nombre: u.nombre, ahora: ahoraIso(), usuarioId: u.id }, tipoCambio);
+  } catch (e) {
+    if (e instanceof ErrorGasto) throw new HttpError(e.status, e.message);
+    throw e;
+  }
+  return NextResponse.json({ gastos: gastosRecientes(db, u.id) });
+});
+
+/** Elimina una compra propia en cualquier estado. */
+export const DELETE = manejar<Ctx>(async (req, { params }) => {
+  const { u, db } = await contexto(req, ["team"]);
+  const { id } = await params;
+  try {
+    eliminarGasto(db, id, u.id);
   } catch (e) {
     if (e instanceof ErrorGasto) throw new HttpError(e.status, e.message);
     throw e;

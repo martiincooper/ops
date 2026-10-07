@@ -549,6 +549,20 @@ async function main() {
     assert.deepEqual([g.monto_clp, g.envio_clp, g.monto_usd, g.tipo_cambio], [90001, 5000, null, null]);
     assert.equal((await ggA.cliente.pedir("/api/exec")).datos.costo.total_clp, antes);
   });
+  await prueba("eliminar compra: la persona borra las suyas, la jefatura cualquiera; otra empresa no", async () => {
+    const nueva = async () => (await ana.cliente.pedir("/api/gastos", { metodo: "POST", json: compra({ item: "Para borrar" }) })).datos.id;
+    const a = await nueva();
+    const b = await nueva();
+    assert.equal((await dora.cliente.pedir(`/api/gastos/${a}`, { metodo: "DELETE" })).status, 404);
+    const r = await ana.cliente.pedir(`/api/gastos/${a}`, { metodo: "DELETE" });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.ok(!r.datos.gastos.some((x) => x.id === a));
+    assert.equal((await ana.cliente.pedir(`/api/gastos/${a}`, { metodo: "DELETE" })).status, 404);
+    assert.equal((await ana.cliente.pedir(q(`/api/admin/gastos/${b}`, A), { metodo: "DELETE" })).status, 403);
+    assert.equal((await admin.pedir(q(`/api/admin/gastos/${b}`, D), { metodo: "DELETE" })).status, 404);
+    assert.equal((await admin.pedir(q(`/api/admin/gastos/${b}`, A), { metodo: "DELETE" })).status, 200);
+    assert.ok(!(await admin.pedir(q("/api/admin/gastos", A, "&alcance=todos&estado=todos"))).datos.gastos.some((x) => x.id === b));
+  });
   await prueba("tolerancia de costo: solo administradores la cambian; gerencia la ve", async () => {
     const metas = { tolerancia_costo_pct: 15 };
     assert.equal((await ggA.cliente.pedir(q("/api/admin/metas", A), { metodo: "PUT", json: metas })).status, 403);
