@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, ChevronDown, ExternalLink, Lock, LockOpen, RefreshCw, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Bot, ChevronDown, ExternalLink, Lock, LockOpen, RefreshCw, ScrollText } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { ChipEstadoIssue, IconoModulo } from "@/components/gerencia/comun";
 import {
@@ -63,9 +63,10 @@ interface Detalle {
   mensajes: { id: number; autor: string; texto: string; creado_en: string }[];
 }
 
-const ESTADO: Record<Fila["estado"], { texto: string; clase: string }> = {
-  activa: { texto: "En curso", clase: "bg-indigo-suave text-indigo-tinta" },
-  generada: { texto: "Requerimiento", clase: "bg-ok-fondo text-ok-tinta" },
+// Estado de la conversación con el asistente; distinto del estado del Issue en GitHub (columna aparte, #14)
+const CONVERSACION: Record<Fila["estado"], { texto: string; clase: string }> = {
+  activa: { texto: "Entrevista abierta", clase: "bg-indigo-suave text-indigo-tinta" },
+  generada: { texto: "Requerimiento generado", clase: "bg-ok-fondo text-ok-tinta" },
   finalizada: { texto: "Finalizada", clase: "bg-suave text-tinta-2" },
   expirada: { texto: "Expirada", clase: "bg-alerta-fondo text-alerta-tinta" },
 };
@@ -325,7 +326,7 @@ export default function ChatGerencia() {
                   <th>Módulo</th>
                   <th>Solicitante</th>
                   <th>Requerimiento</th>
-                  <th>Estado</th>
+                  <th>Conversación</th>
                   <th>Inicio</th>
                   <th>Issue en GitHub</th>
                   <th>Estado en GitHub</th>
@@ -358,7 +359,7 @@ export default function ChatGerencia() {
                         )}
                       </td>
                       <td>
-                        <span className={cx("chip", ESTADO[f.estado].clase)}>{ESTADO[f.estado].texto}</span>
+                        <span className={cx("chip whitespace-nowrap", CONVERSACION[f.estado].clase)}>{CONVERSACION[f.estado].texto}</span>
                       </td>
                       <td className="whitespace-nowrap text-tinta-3">{fechaHora(f.iniciada_en)}</td>
                       <td>
@@ -403,9 +404,14 @@ export default function ChatGerencia() {
                           type="button"
                           onClick={() => setAbierta(abierta === f.id ? null : f.id)}
                           aria-expanded={abierta === f.id}
-                          className="boton-texto"
+                          aria-label="Transcripción"
+                          title="Transcripción"
+                          className="boton-texto whitespace-nowrap"
                         >
-                          Transcripción <ChevronDown size={14} className={cx("transition", abierta === f.id && "rotate-180")} aria-hidden />
+                          {/* Solo ícono bajo 1536 px: la tabla cabe sin desplazarse de lado */}
+                          <ScrollText size={15} aria-hidden className="2xl:hidden" />
+                          <span className="hidden 2xl:inline">Transcripción</span>
+                          <ChevronDown size={14} className={cx("transition", abierta === f.id && "rotate-180")} aria-hidden />
                         </button>
                       </td>
                     </tr>
