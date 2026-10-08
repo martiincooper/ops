@@ -17,6 +17,7 @@ import {
   expiraEn,
   mensajes,
 } from "./salas";
+import { TURNOS_MAX, sumarConsumo, turnosDelAsistente } from "./uso";
 
 /** Cualquier cuenta @datasheq.com (equipo, gerencia o administración); el resto, acceso denegado. */
 export async function requireGerencia(req: NextRequest): Promise<{ u: Usuario; p: Persona; db: DB }> {
@@ -64,6 +65,8 @@ export function vistaConversacion(db: DB, id: string) {
     ticket: c.ticket ? codigoTicket(c.ticket) : null,
     issue_url: c.issue_url,
     issue_error: c.issue_error,
+    turnos: turnosDelAsistente(db, id),
+    turnos_max: TURNOS_MAX,
     mensajes: mensajes(db, id),
   };
 }
@@ -104,7 +107,8 @@ export async function generarRequerimiento(db: DB, c: Conversacion, p: Persona) 
   const m = moduloDe(c);
   const l = lineas(db, c.id);
   if (!l.some((x) => x.autor === "usuario")) throw new HttpError(400, "Cuéntame primero qué necesitas para poder generar el requerimiento.");
-  const r = await redactar(m, p, l);
+  const { requerimiento: r, consumo } = await redactar(m, p, l);
+  sumarConsumo(db, c.id, consumo); // lo gastado cuenta aunque el requerimiento ya se hubiera generado en otra pestaña
 
   const ahora = new Date().toISOString();
   const ticket = db.transaction(() => {

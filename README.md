@@ -182,6 +182,11 @@ asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** c
   enlace directo al Issue (o **Reintentar** si quedó pendiente).
 - **IA**: Claude (`CHAT_MODELO`, por defecto `claude-opus-5-5`) con `ANTHROPIC_API_KEY`. Sin clave (o con
   `CHAT_IA=off`) funciona con una entrevista guiada por temas, sin IA.
+- **Límites de uso** (cada turno es una llamada a la IA): cada cuenta puede enviar hasta 10 turnos por minuto y
+  generar hasta 3 requerimientos por minuto; si se pasa, ve «Vas muy rápido. Espera unos segundos y vuelve a
+  intentar» sin perder lo escrito. Cada conversación admite hasta `CHAT_TURNOS_MAX` respuestas del asistente (por
+  defecto 40): con la última, el asistente invita a generar el requerimiento y el chat solo permite finalizar. El panel
+  muestra los tokens de IA del mes, en total y por módulo.
 
 ## Contenido de esta versión
 
@@ -485,6 +490,7 @@ producción.
 | `CHAT_MODELO` | `claude-opus-5-5` | Modelo de Claude del asistente |
 | `CHAT_IA` | — | `off` fuerza la entrevista guiada aunque haya clave |
 | `CHAT_INACTIVIDAD_MIN` | `15` | Minutos sin actividad tras los que una sala se libera |
+| `CHAT_TURNOS_MAX` | `40` | Respuestas del asistente por conversación (tope de uso de la IA) |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token con permiso «Issues: write» sobre el repositorio de los Issues |
 | `GITHUB_REPO` | `martiincooper/ops` | Repositorio donde se crean los Issues de los requerimientos |
 
@@ -498,7 +504,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, tickets, entrevista guiada) (59 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, consumo, entrevista guiada) (62 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares (57 pruebas)

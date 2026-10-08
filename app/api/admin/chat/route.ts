@@ -6,6 +6,7 @@ import { githubConfigurado, repositorioIssues } from "@/lib/chat/github";
 import { iaActiva } from "@/lib/chat/ia";
 import { codigoTicket } from "@/lib/chat/modulos";
 import { INACTIVIDAD_MIN, estadoSalas } from "@/lib/chat/salas";
+import { TURNOS_MAX, consumoDelMes } from "@/lib/chat/uso";
 
 /** Panel del administrador: estado de las salas e historial de conversaciones con su Issue. */
 export const GET = manejar(async (req) => {
@@ -24,6 +25,13 @@ export const GET = manejar(async (req) => {
   return NextResponse.json({
     salas: estadoSalas(db, null, true),
     historial: filas.map((f) => ({ ...f, ticket: f.ticket ? codigoTicket(f.ticket) : null })),
-    config: { github: githubConfigurado(), repositorio: repositorioIssues(), ia: iaActiva(), inactividad_min: INACTIVIDAD_MIN },
+    consumo: consumoDelMes(db),
+    config: {
+      github: githubConfigurado(),
+      repositorio: repositorioIssues(),
+      ia: iaActiva(),
+      inactividad_min: INACTIVIDAD_MIN,
+      turnos_max: TURNOS_MAX,
+    },
   });
 });

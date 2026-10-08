@@ -41,6 +41,8 @@ interface Vista {
   ticket: string | null;
   issue_url: string | null;
   issue_error: string | null;
+  turnos: number;
+  turnos_max: number;
   mensajes: Mensaje[];
 }
 
@@ -195,6 +197,8 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
   const faltantes = ultimoRobot?.meta?.faltantes ?? [];
   const completitud = vista?.completitud ?? 0;
   const hayRespuestas = !!vista?.mensajes.some((m) => m.autor === "usuario" && m.id !== -1);
+  // Tope de respuestas del asistente (#4): solo queda generar el requerimiento o finalizar
+  const alTope = !!vista && vista.turnos >= vista.turnos_max;
   const activa = fase === "activa";
 
   return (
@@ -363,6 +367,12 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                   </div>
                   <span className="text-xs tabular-nums text-tinta-3">{completitud}% reunido</span>
                 </div>
+                {alTope && (
+                  <p role="status" className="mb-3 rounded-2xl bg-alerta-fondo px-4 py-2.5 text-sm text-alerta-tinta">
+                    Esta conversación llegó al máximo de {vista.turnos_max} respuestas del asistente. Presiona «Finalizar y generar
+                    requerimiento» para enviar lo conversado.
+                  </p>
+                )}
                 {faltantes.length > 0 && (
                   <p className="mb-3 text-xs text-tinta-3">
                     <span className="font-semibold">Falta conocer:</span> {faltantes.join(" · ")}
@@ -370,10 +380,10 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                 )}
 
                 <div className="mb-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => enviar("siguiente")} disabled={!!ocupado || !hayRespuestas} className="boton-suave bg-superficie">
+                  <button type="button" onClick={() => enviar("siguiente")} disabled={!!ocupado || !hayRespuestas || alTope} className="boton-suave bg-superficie">
                     <SkipForward size={15} aria-hidden /> Pasar a la siguiente pregunta
                   </button>
-                  <button type="button" onClick={() => enviar("mas_detalles")} disabled={!!ocupado || !hayRespuestas} className="boton-suave bg-superficie">
+                  <button type="button" onClick={() => enviar("mas_detalles")} disabled={!!ocupado || !hayRespuestas || alTope} className="boton-suave bg-superficie">
                     <MessageSquarePlus size={15} aria-hidden /> Agregar más detalles
                   </button>
                   <button type="button" onClick={() => setConfirmar("generar")} disabled={!!ocupado || !hayRespuestas} className="boton">
@@ -423,11 +433,12 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                         enviar("mensaje");
                       }
                     }}
-                    placeholder="Escribe tu respuesta… (Enter para enviar, Mayús+Enter para nueva línea)"
+                    placeholder={alTope ? "Se alcanzó el máximo de respuestas de esta conversación" : "Escribe tu respuesta… (Enter para enviar, Mayús+Enter para nueva línea)"}
+                    disabled={alTope}
                     className="campo min-h-[3.25rem] resize-none bg-superficie"
                     autoFocus
                   />
-                  <button type="submit" disabled={!!ocupado || !texto.trim()} aria-label="Enviar" title="Enviar" className="boton-icono h-[3.25rem] w-[3.25rem] bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50">
+                  <button type="submit" disabled={!!ocupado || !texto.trim() || alTope} aria-label="Enviar" title="Enviar" className="boton-icono h-[3.25rem] w-[3.25rem] bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50">
                     <SendHorizontal size={20} />
                   </button>
                 </form>

@@ -9,6 +9,7 @@ import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tar
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { type Linea, requerimientoGuiado, turnoGuiado } from "../lib/chat/guion";
+import { CUPO_POR_MINUTO, consumirCupo, consumoDelMes, reiniciarCupos, sumarConsumo, turnosDelAsistente } from "../lib/chat/uso";
 import { MENSAJE_SALA_OCUPADA, MODULOS, codigoTicket, esDominioGerencia } from "../lib/chat/modulos";
 import {
   ErrorSala,
@@ -855,6 +856,38 @@ async function main() {
     assert.equal(asignarTicket(d, b.id), 2);
     assert.equal(asignarTicket(d, a.id), 1); // no cambia si ya tiene
     assert.equal(codigoTicket(7), "GER-0007");
+  });
+  await prueba("cupo por minuto por cuenta: 10 turnos y 3 «generar», se renueva al minuto", () => {
+    reiniciarCupos();
+    const t = Date.parse("2026-10-08T15:00:00Z");
+    for (let i = 0; i < CUPO_POR_MINUTO.mensaje; i++) assert.equal(consumirCupo("ana@datasheq.com", "mensaje", t + i * 1000), true);
+    assert.equal(consumirCupo("ANA@datasheq.com", "mensaje", t + 30_000), false); // mismo correo, sin distinguir mayúsculas
+    assert.equal(consumirCupo("beto@datasheq.com", "mensaje", t + 30_000), true); // cada cuenta tiene su cupo
+    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 30_000), true); // cupos separados por tipo
+    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 31_000), true);
+    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 32_000), true);
+    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 33_000), false);
+    assert.equal(consumirCupo("ana@datasheq.com", "mensaje", t + 61_000), true); // pasó el minuto
+    reiniciarCupos();
+  });
+  await prueba("turnos del asistente (sin el saludo) y consumo de tokens del mes por módulo", () => {
+    const d = dbControl();
+    const a = entrarSala(d, "c-legal", ana, t0).conversacion; // t0 = 7-oct-2026
+    assert.equal(turnosDelAsistente(d, a.id), 0);
+    agregarMensaje(d, a.id, "usuario", "x", undefined, mas(1));
+    agregarMensaje(d, a.id, "robot", "y", undefined, mas(1));
+    assert.equal(turnosDelAsistente(d, a.id), 1);
+    sumarConsumo(d, a.id, { entrada: 1200, salida: 300 });
+    sumarConsumo(d, a.id, { entrada: 800, salida: 200 });
+    const b = entrarSala(d, "c-previene", beto, t0).conversacion;
+    sumarConsumo(d, b.id, { entrada: 500, salida: 100 });
+    // conversación del mes anterior (30-sep 23:30 en Chile = 1-oct 02:30 UTC): no cuenta para octubre
+    const vieja = entrarSala(d, "c-lidera", { ...beto, email: "eva@datasheq.com" }, new Date("2026-10-01T02:30:00Z")).conversacion;
+    sumarConsumo(d, vieja.id, { entrada: 9999, salida: 9999 });
+    const c = consumoDelMes(d, t0);
+    assert.equal(c.mes, "2026-10");
+    assert.deepEqual(c.total, { entrada: 2500, salida: 600, conversaciones: 2 });
+    assert.deepEqual(c.por_modulo.map((x) => [x.modulo, x.entrada, x.salida]), [["c-legal", 2000, 500], ["c-previene", 500, 100]]);
   });
   await prueba("entrevista guiada: repregunta si es breve, avanza y termina lista para generar", () => {
     const m = MODULOS[0];
