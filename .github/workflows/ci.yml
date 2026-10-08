@@ -58,7 +58,9 @@ jobs:
             aether-ops:ci
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:3100/api/health && break; sleep 1; done
           BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
-          test "$(docker inspect -f '{{.Config.User}}' aether)" = "1001"
+          # El contenedor inicia como root solo para preparar /data (scripts/arranque.cjs) y baja a uid 1001:
+          # se verifica el usuario del proceso del servidor (PID 1), no el de la imagen.
+          test "$(docker exec aether node -e "process.stdout.write(require('fs').readFileSync('/proc/1/status','utf8').match(/^Uid:\s+(\d+)/m)[1])")" = "1001"
 
       - name: Registros del contenedor
         if: always()
