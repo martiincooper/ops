@@ -3,13 +3,21 @@
 // sobre GITHUB_REPO (por defecto martiincooper/ops).
 import "server-only";
 import type { Requerimiento } from "./guion";
+import type { ConfigGithub } from "./seguimiento";
 import { NOMBRE_CLASIFICACION, NOMBRE_PRIORIDAD, codigoTicket, type Modulo } from "./modulos";
 
-const API = "https://api.github.com";
+// GITHUB_API_URL: para GitHub Enterprise o un GitHub simulado en pruebas.
+const API = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
 const REPO = process.env.GITHUB_REPO || "martiincooper/ops";
 
 export function githubConfigurado(): boolean {
   return !!process.env.GITHUB_TOKEN;
+}
+
+/** Configuración para el seguimiento de Issues (null sin token). */
+export function configGithub(): ConfigGithub | null {
+  const token = process.env.GITHUB_TOKEN;
+  return token ? { api: API, repo: REPO, token } : null;
 }
 
 export const repositorioIssues = () => REPO;

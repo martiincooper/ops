@@ -83,6 +83,13 @@ export const MIGRACIONES_CONTROL: string[] = [
   ALTER TABLE chat_conversaciones ADD COLUMN tokens_entrada INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE chat_conversaciones ADD COLUMN tokens_salida INTEGER NOT NULL DEFAULT 0;
   `,
+  // v4 — seguimiento del Issue en GitHub (#6): estado, motivo de cierre, persona asignada y última consulta
+  `
+  ALTER TABLE chat_conversaciones ADD COLUMN issue_estado TEXT CHECK (issue_estado IN ('open', 'closed'));
+  ALTER TABLE chat_conversaciones ADD COLUMN issue_motivo TEXT;
+  ALTER TABLE chat_conversaciones ADD COLUMN issue_asignado TEXT;
+  ALTER TABLE chat_conversaciones ADD COLUMN issue_actualizado_en TEXT;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

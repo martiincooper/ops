@@ -983,6 +983,20 @@ async function main() {
       assert.equal((await admin.pedir(ruta, { metodo })).status, 403, ruta); // administrador @aether-tech.dev
     }
   });
+  await prueba("seguimiento (#6): «Mis requerimientos» muestra solo los propios; estado en el panel", async () => {
+    const mios = await gGerente.pedir("/api/chat/mis-requerimientos");
+    assert.equal(mios.status, 200);
+    assert.deepEqual(
+      mios.datos.requerimientos.map((r) => [r.ticket, r.modulo, r.estado, r.issue_url]),
+      [["GER-0001", "c-legal", "pendiente", null]], // sin GITHUB_TOKEN: pendiente de envío
+    );
+    assert.deepEqual(mios.datos.seguimiento, { sincronizado_en: null, error: null });
+    assert.deepEqual((await gEquipo.pedir("/api/chat/mis-requerimientos")).datos.requerimientos, []); // no ve los ajenos
+    assert.equal((await admin.pedir("/api/chat/mis-requerimientos")).status, 403); // otro dominio
+    const panel = await gAdmin.pedir("/api/admin/chat?actualizar=1");
+    assert.equal(panel.datos.historial.find((f) => f.ticket === "GER-0001").estado_issue, "pendiente");
+    assert.equal(panel.datos.historial.find((f) => !f.ticket).estado_issue, null); // conversación sin requerimiento
+  });
   await prueba("equipo @datasheq.com usa el portal sin permisos de administración; /login?portal=admin según rol", async () => {
     assert.equal((await gEquipo.pedir("/gerencia")).status, 200);
     assert.equal((await gEquipo.pedir("/api/admin/chat")).status, 403);

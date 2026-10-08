@@ -2,7 +2,7 @@
 
 import { Bot, ChevronDown, ExternalLink, Lock, LockOpen, RefreshCw, AlertTriangle } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
-import { IconoModulo } from "@/components/gerencia/comun";
+import { ChipEstadoIssue, IconoModulo } from "@/components/gerencia/comun";
 import {
   type Clasificacion,
   MODULOS,
@@ -12,6 +12,7 @@ import {
   moduloPorClave,
 } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
+import { type EstadoSincronizacion, type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
 import { CUPO_POR_MINUTO, type ConsumoMes } from "@/lib/chat/uso";
 import { api, cx, miles } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, fechaHora, useAccion, useDatos } from "./comun";
@@ -32,6 +33,9 @@ interface Fila {
   issue_numero: number | null;
   issue_url: string | null;
   issue_error: string | null;
+  issue_asignado: string | null;
+  issue_actualizado_en: string | null;
+  estado_issue: EstadoVisible | null;
   respuestas: number;
 }
 
@@ -39,6 +43,7 @@ interface Datos {
   salas: EstadoSala[];
   historial: Fila[];
   consumo: ConsumoMes;
+  seguimiento: EstadoSincronizacion;
   config: { github: boolean; repositorio: string; ia: boolean; inactividad_min: number; turnos_max: number };
 }
 
@@ -104,14 +109,26 @@ export default function ChatGerencia() {
   const { ocupado, aviso, ejecutar } = useAccion();
   const [abierta, setAbierta] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<string>("todos");
+  const [filtroEstado, setFiltroEstado] = useState<EstadoVisible | "todos">("todos");
+  const [actualizando, setActualizando] = useState(false);
 
   useEffect(() => {
     const t = setInterval(recargar, 30_000);
     return () => clearInterval(t);
   }, [recargar]);
 
+  /** «Actualizar»: vuelve a consultar GitHub (como máximo cada minuto) y recarga el panel. */
+  const actualizar = async () => {
+    setActualizando(true);
+    await api("/api/admin/chat?actualizar=1").catch(() => {});
+    await recargar();
+    setActualizando(false);
+  };
+
   if (!datos) return <Cargando cargando={cargando} error={error} />;
-  const historial = datos.historial.filter((f) => filtro === "todos" || f.modulo === filtro);
+  const historial = datos.historial.filter(
+    (f) => (filtro === "todos" || f.modulo === filtro) && (filtroEstado === "todos" || f.estado_issue === filtroEstado),
+  );
   const generados = datos.historial.filter((f) => f.estado === "generada");
   const pendientes = generados.filter((f) => !f.issue_url);
 
@@ -203,8 +220,8 @@ export default function ChatGerencia() {
       <section>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="titulo-seccion">Estado de las salas</h2>
-          <button type="button" onClick={recargar} className="boton-texto">
-            <RefreshCw size={15} aria-hidden /> Actualizar
+          <button type="button" onClick={actualizar} disabled={actualizando} className="boton-texto">
+            <RefreshCw size={15} aria-hidden className={cx(actualizando && "animate-spin")} /> Actualizar
           </button>
         </div>
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -262,25 +279,46 @@ export default function ChatGerencia() {
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="titulo-seccion">Historial de conversaciones</h2>
-          <label className="flex items-center gap-2 text-sm text-tinta-3">
-            Módulo
-            <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className="campo w-auto py-2">
-              <option value="todos">Todos</option>
-              {MODULOS.map((m) => (
-                <option key={m.clave} value={m.clave}>{m.nombre}</option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-tinta-3">
+              Módulo
+              <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className="campo w-auto py-2">
+                <option value="todos">Todos</option>
+                {MODULOS.map((m) => (
+                  <option key={m.clave} value={m.clave}>{m.nombre}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-tinta-3">
+              Estado en GitHub
+              <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value as EstadoVisible | "todos")} className="campo w-auto py-2">
+                <option value="todos">Todos</option>
+                {(Object.keys(NOMBRE_ESTADO) as EstadoVisible[]).map((k) => (
+                  <option key={k} value={k}>{NOMBRE_ESTADO[k]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
+
+        {datos.config.github && (
+          <p className={cx("mb-3 text-xs", datos.seguimiento.error ? "text-alerta-tinta" : "text-tinta-3")}>
+            {datos.seguimiento.error
+              ? `No se pudo consultar GitHub (${datos.seguimiento.error}). Se muestra el último estado conocido${datos.seguimiento.sincronizado_en ? `, del ${fechaHora(datos.seguimiento.sincronizado_en)}` : ""}.`
+              : datos.seguimiento.sincronizado_en
+                ? `Estados de GitHub al ${fechaHora(datos.seguimiento.sincronizado_en)} (se consultan cada 10 minutos o con «Actualizar»).`
+                : "Los estados de GitHub se consultan cada 10 minutos."}
+          </p>
+        )}
 
         {historial.length === 0 ? (
           <Vacio>
             <Bot size={20} className="mx-auto mb-2" aria-hidden />
-            Aún no hay conversaciones{filtro !== "todos" ? " en este módulo" : ""}.
+            Aún no hay conversaciones{filtro !== "todos" || filtroEstado !== "todos" ? " con estos filtros" : ""}.
           </Vacio>
         ) : (
           <div className="tarjeta overflow-x-auto">
-            <table className="tabla min-w-[900px]">
+            <table className="tabla min-w-[1020px]">
               <thead>
                 <tr>
                   <th>Ticket</th>
@@ -290,6 +328,7 @@ export default function ChatGerencia() {
                   <th>Estado</th>
                   <th>Inicio</th>
                   <th>Issue en GitHub</th>
+                  <th>Estado en GitHub</th>
                   <th />
                 </tr>
               </thead>
@@ -350,6 +389,16 @@ export default function ChatGerencia() {
                         )}
                       </td>
                       <td>
+                        {f.estado_issue ? (
+                          <div className="space-y-1">
+                            <ChipEstadoIssue estado={f.estado_issue} />
+                            {f.issue_asignado && <p className="text-xs text-tinta-3"></p>}
+                          </div>
+                        ) : (
+                          <span className="text-tinta-3">—</span>
+                        )}
+                      </td>
+                      <td>
                         <button
                           type="button"
                           onClick={() => setAbierta(abierta === f.id ? null : f.id)}
@@ -362,7 +411,7 @@ export default function ChatGerencia() {
                     </tr>
                     {abierta === f.id && (
                       <tr>
-                        <td colSpan={8} className="bg-suave/60">
+                        <td colSpan={9} className="bg-suave/60">
                           <Transcripcion id={f.id} />
                         </td>
                       </tr>
