@@ -14,6 +14,7 @@
     "test:logica": "tsx scripts/test-logica.ts",
     "test:e2e": "node scripts/e2e.mjs",
     "backup": "node scripts/backup.mjs",
+    "restaurar": "node scripts/restaurar.mjs",
     "local": "bash scripts/local.sh"
   },
   "dependencies": {

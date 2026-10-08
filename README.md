@@ -462,6 +462,11 @@ cada base de empresa se migra sola:
 
 Respalda antes de actualizar (`node scripts/backup.mjs` o `docker exec aether-ops node scripts/backup.mjs`).
 
+Para usar un respaldo (por ejemplo, el de producción) en tu computador: copia la carpeta `AAAAMMDD-HHMMSS` del
+respaldo, detén el servidor y ejecuta `npm run restaurar -- <carpeta>`. Valida las bases antes de tocar nada, mueve
+los datos actuales a `data-anterior-<fecha>/` y deja el respaldo en `./data`. Las cuentas conservan sus códigos de
+producción.
+
 ---
 
 ## 5. Configuración
