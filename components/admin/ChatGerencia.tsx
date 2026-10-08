@@ -336,8 +336,8 @@ export default function ChatGerencia() {
                 {historial.map((f) => (
                   <Fragment key={f.id}>
                     <tr>
-                      <td className="font-semibold tabular-nums text-tinta">{f.ticket ?? "—"}</td>
-                      <td>{moduloPorClave(f.modulo)?.nombre ?? f.modulo}</td>
+                      <td className="whitespace-nowrap font-semibold tabular-nums text-tinta">{f.ticket ?? "—"}</td>
+                      <td className="whitespace-nowrap">{moduloPorClave(f.modulo)?.nombre ?? f.modulo}</td>
                       <td>
                         <p className="text-tinta">{f.usuario_nombre}</p>
                         <p className="text-xs text-tinta-3">{f.usuario_email}</p>
