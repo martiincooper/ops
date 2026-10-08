@@ -70,7 +70,6 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
   const [confirmar, setConfirmar] = useState<null | "generar" | "finalizar">(null);
   const ultimoLatido = useRef(0);
   const entrada = useRef<HTMLTextAreaElement>(null);
-  const fin = useRef<HTMLDivElement>(null);
 
   /** Errores que cierran la sesión (expiró o ya terminó) pasan a la pantalla de cierre. */
   const manejarError = useCallback((e: unknown) => {
@@ -103,9 +102,11 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
     entrar();
   }, [entrar]);
 
+  // Al final del documento (no de la lista): así el último mensaje queda sobre la barra fija inferior en vez de
+  // debajo de ella, y al generar se ve la tarjeta del requerimiento.
   useEffect(() => {
-    fin.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [vista?.mensajes.length, ocupado]);
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+  }, [vista?.mensajes.length, ocupado, fase]);
 
   // Liberación por inactividad: al vencer el plazo, la sala ya no es de la persona.
   useEffect(() => {
@@ -305,7 +306,6 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                 </li>
               )}
             </ol>
-            <div ref={fin} />
 
             {fase === "cerrada" && (
               <section className="tarjeta mt-5 p-5">
