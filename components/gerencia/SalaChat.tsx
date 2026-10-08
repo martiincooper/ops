@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui";
 import { MENSAJE_SALA_OCUPADA, NOMBRE_PRIORIDAD, type Modulo, type Prioridad, moduloPorClave } from "@/lib/chat/modulos";
 import { ErrorApi, api, cx, horaDe } from "@/lib/cliente";
@@ -68,8 +68,29 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
   const [cierre, setCierre] = useState<string | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [confirmar, setConfirmar] = useState<null | "generar" | "finalizar">(null);
+  // Bajo 640 px (como `sm:` de Tailwind) la barra inferior se compacta (#13)
+  const [angosto, setAngosto] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639.98px)");
+    const cambio = () => setAngosto(mq.matches);
+    cambio();
+    mq.addEventListener("change", cambio);
+    return () => mq.removeEventListener("change", cambio);
+  }, []);
   const ultimoLatido = useRef(0);
   const entrada = useRef<HTMLTextAreaElement>(null);
+
+  // El campo crece con el texto (hasta max-h-32, unas 4 líneas) y vuelve a su alto mínimo al enviar. Si la
+  // persona está al final de la conversación, la página baja con él para que la barra no tape el último mensaje.
+  useLayoutEffect(() => {
+    const el = entrada.current;
+    if (!el) return;
+    const doc = document.documentElement;
+    const alFinal = window.innerHeight + window.scrollY >= doc.scrollHeight - 80;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+    if (alFinal) window.scrollTo({ top: doc.scrollHeight });
+  }, [texto, angosto]);
 
   /** Errores que cierran la sesión (expiró o ya terminó) pasan a la pantalla de cierre. */
   const manejarError = useCallback((e: unknown) => {
@@ -354,7 +375,7 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                   </div>
                 )}
 
-                <div className="mb-3 flex items-center gap-3">
+                <div className="mb-2 flex items-center gap-3 sm:mb-3">
                   <div
                     className="h-2 flex-1 overflow-hidden rounded-full bg-indigo-suave"
                     role="progressbar"
@@ -374,21 +395,41 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                   </p>
                 )}
                 {faltantes.length > 0 && (
-                  <p className="mb-3 text-xs text-tinta-3">
-                    <span className="font-semibold">Falta conocer:</span> {faltantes.join(" · ")}
-                  </p>
+                  <>
+                    {/* Celular: plegado en una línea para dejar espacio a la conversación (#13) */}
+                    <details className="mb-2 text-xs text-tinta-3 sm:hidden">
+                      <summary className="cursor-pointer font-semibold">Falta conocer ({faltantes.length})</summary>
+                      <p className="mt-1">{faltantes.join(" · ")}</p>
+                    </details>
+                    <p className="mb-3 hidden text-xs text-tinta-3 sm:block">
+                      <span className="font-semibold">Falta conocer:</span> {faltantes.join(" · ")}
+                    </p>
+                  </>
                 )}
 
-                <div className="mb-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => enviar("siguiente")} disabled={!!ocupado || !hayRespuestas || alTope} className="boton-suave bg-superficie">
-                    <SkipForward size={15} aria-hidden /> Pasar a la siguiente pregunta
-                  </button>
-                  <button type="button" onClick={() => enviar("mas_detalles")} disabled={!!ocupado || !hayRespuestas || alTope} className="boton-suave bg-superficie">
-                    <MessageSquarePlus size={15} aria-hidden /> Agregar más detalles
-                  </button>
-                  <button type="button" onClick={() => setConfirmar("generar")} disabled={!!ocupado || !hayRespuestas} className="boton">
-                    <FileText size={15} aria-hidden /> Finalizar y generar requerimiento
-                  </button>
+                {/* Celular: una fila con textos cortos (el texto completo queda como nombre accesible y tooltip) */}
+                <div className="mb-2 grid grid-cols-3 gap-1.5 sm:mb-3 sm:flex sm:flex-wrap sm:gap-2">
+                  {(
+                    [
+                      { accion: () => enviar("siguiente"), Icono: SkipForward, corto: "Siguiente", largo: "Pasar a la siguiente pregunta", clase: "boton-suave bg-superficie", off: alTope },
+                      { accion: () => enviar("mas_detalles"), Icono: MessageSquarePlus, corto: "Más detalles", largo: "Agregar más detalles", clase: "boton-suave bg-superficie", off: alTope },
+                      { accion: () => setConfirmar("generar"), Icono: FileText, corto: "Generar", largo: "Finalizar y generar requerimiento", clase: "boton", off: false },
+                    ] as const
+                  ).map((b) => (
+                    <button
+                      key={b.largo}
+                      type="button"
+                      onClick={b.accion}
+                      disabled={!!ocupado || !hayRespuestas || b.off}
+                      aria-label={b.largo}
+                      title={b.largo}
+                      className={cx(b.clase, "min-w-0 gap-1 px-1.5 text-[13px] sm:gap-1.5 sm:px-4 sm:text-sm")}
+                    >
+                      <b.Icono size={15} aria-hidden className="shrink-0" />
+                      <span className="truncate sm:hidden">{b.corto}</span>
+                      <span className="hidden sm:inline">{b.largo}</span>
+                    </button>
+                  ))}
                 </div>
 
                 {confirmar && (
@@ -420,7 +461,7 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                   <textarea
                     id="respuesta"
                     ref={entrada}
-                    rows={2}
+                    rows={angosto ? 1 : 2}
                     maxLength={4000}
                     value={texto}
                     onChange={(e) => {
@@ -433,12 +474,18 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                         enviar("mensaje");
                       }
                     }}
-                    placeholder={alTope ? "Se alcanzó el máximo de respuestas de esta conversación" : "Escribe tu respuesta… (Enter para enviar, Mayús+Enter para nueva línea)"}
+                    placeholder={
+                      alTope
+                        ? "Se alcanzó el máximo de respuestas de esta conversación"
+                        : angosto
+                          ? "Escribe tu respuesta…"
+                          : "Escribe tu respuesta… (Enter para enviar, Mayús+Enter para nueva línea)"
+                    }
                     disabled={alTope}
-                    className="campo min-h-[3.25rem] resize-none bg-superficie"
+                    className="campo max-h-32 min-h-11 resize-none bg-superficie py-2.5 sm:min-h-[3.25rem] sm:py-3"
                     autoFocus
                   />
-                  <button type="submit" disabled={!!ocupado || !texto.trim() || alTope} aria-label="Enviar" title="Enviar" className="boton-icono h-[3.25rem] w-[3.25rem] bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50">
+                  <button type="submit" disabled={!!ocupado || !texto.trim() || alTope} aria-label="Enviar" title="Enviar" className="boton-icono h-11 w-11 bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50 sm:h-[3.25rem] sm:w-[3.25rem]">
                     <SendHorizontal size={20} />
                   </button>
                 </form>
