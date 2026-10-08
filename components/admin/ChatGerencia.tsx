@@ -13,8 +13,8 @@ import {
 } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
 import { type EstadoSincronizacion, type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
-import { CUPO_POR_MINUTO, type ConsumoMes } from "@/lib/chat/uso";
-import { api, cx, miles } from "@/lib/cliente";
+import { CUPO_POR_MINUTO } from "@/lib/chat/uso";
+import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, fechaHora, useAccion, useDatos } from "./comun";
 
 interface Fila {
@@ -42,21 +42,9 @@ interface Fila {
 interface Datos {
   salas: EstadoSala[];
   historial: Fila[];
-  consumo: ConsumoMes;
   seguimiento: EstadoSincronizacion;
-  config: { github: boolean; repositorio: string; ia: boolean; inactividad_min: number; turnos_max: number };
+  config: { github: boolean; repositorio: string; inactividad_min: number; turnos_max: number };
 }
-
-const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
-/** "2026-10" → "octubre" */
-const nombreMes = (mes: string) => MESES[Number(mes.slice(5, 7)) - 1] ?? mes;
-/** Tokens en forma compacta: 1.234 · 45,6 mil · 1,2 M */
-const tokens = (n: number) =>
-  n >= 1_000_000
-    ? `${(n / 1_000_000).toLocaleString("es-CL", { maximumFractionDigits: 1 })} M`
-    : n >= 10_000
-      ? `${(n / 1000).toLocaleString("es-CL", { maximumFractionDigits: 1 })} mil`
-      : miles(n);
 
 interface Detalle {
   requerimiento: { resumen: string; alcance: string[]; criterios_aceptacion: string[] } | null;
@@ -137,86 +125,36 @@ export default function ChatGerencia() {
     <div className="space-y-6">
       <Aviso aviso={aviso} />
 
-      {(!datos.config.github || !datos.config.ia) && (
+      {!datos.config.github && (
         <div className="flex gap-3 rounded-2xl bg-alerta-fondo px-4 py-3 text-sm text-alerta-tinta">
           <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden />
-          <div>
-            {!datos.config.github && (
-              <p>
-                <b>GitHub sin configurar:</b> define <code>GITHUB_TOKEN</code> (permiso «Issues: write» sobre{" "}
-                <code>{datos.config.repositorio}</code>). Los requerimientos se guardan y se envían con «Reintentar».
-              </p>
-            )}
-            {!datos.config.ia && (
-              <p>
-                <b>IA sin configurar:</b> define <code>ANTHROPIC_API_KEY</code>. Mientras tanto, el asistente usa una entrevista guiada.
-              </p>
-            )}
-          </div>
+          <p>
+            <b>GitHub sin configurar:</b> define <code>GITHUB_TOKEN</code> (permiso «Issues: write» sobre{" "}
+            <code>{datos.config.repositorio}</code>). Los requerimientos se guardan y se envían con «Reintentar».
+          </p>
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="tarjeta p-4">
-          <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.ocupada).length}/7</p>
-          <p className="text-sm text-tinta-3">salas en uso ahora</p>
-        </div>
-        <div className="tarjeta p-4">
-          <p className="text-3xl font-bold text-tinta">{generados.length}</p>
-          <p className="text-sm text-tinta-3">requerimientos generados</p>
-        </div>
-        <div className="tarjeta p-4">
-          <p className={cx("text-3xl font-bold", pendientes.length ? "text-alerta-tinta" : "text-tinta")}>{pendientes.length}</p>
-          <p className="text-sm text-tinta-3">Issues pendientes de envío</p>
-        </div>
-        <div className="tarjeta p-4">
-          <p className="text-3xl font-bold text-tinta">{tokens(datos.consumo.total.entrada + datos.consumo.total.salida)}</p>
-          <p className="text-sm text-tinta-3">tokens de IA en {nombreMes(datos.consumo.mes)}</p>
-        </div>
-      </div>
-
-      <section className="tarjeta p-5">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="titulo-seccion">Consumo de IA en {nombreMes(datos.consumo.mes)}</h2>
-          <p className="text-xs text-tinta-3">
-            Tope de {datos.config.turnos_max} respuestas por conversación y {CUPO_POR_MINUTO.mensaje} turnos por minuto por cuenta
-          </p>
-        </div>
-        {datos.consumo.por_modulo.length === 0 ? (
-          <p className="text-sm text-tinta-3">
-            {datos.config.ia ? "Aún no hay consumo este mes." : "Sin consumo: el asistente está en modo de entrevista guiada (sin IA)."}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="tabla min-w-[520px]">
-              <thead>
-                <tr>
-                  <th>Módulo</th>
-                  <th className="text-right">Conversaciones</th>
-                  <th className="text-right">Tokens de entrada</th>
-                  <th className="text-right">Tokens de salida</th>
-                </tr>
-              </thead>
-              <tbody>
-                {datos.consumo.por_modulo.map((x) => (
-                  <tr key={x.modulo}>
-                    <td>{moduloPorClave(x.modulo)?.nombre ?? x.modulo}</td>
-                    <td className="text-right tabular-nums">{x.conversaciones}</td>
-                    <td className="text-right tabular-nums">{miles(x.entrada)}</td>
-                    <td className="text-right tabular-nums">{miles(x.salida)}</td>
-                  </tr>
-                ))}
-                <tr className="font-semibold text-tinta">
-                  <td>Total</td>
-                  <td className="text-right tabular-nums">{datos.consumo.total.conversaciones}</td>
-                  <td className="text-right tabular-nums">{miles(datos.consumo.total.entrada)}</td>
-                  <td className="text-right tabular-nums">{miles(datos.consumo.total.salida)}</td>
-                </tr>
-              </tbody>
-            </table>
+      <div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="tarjeta p-4">
+            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.ocupada).length}/7</p>
+            <p className="text-sm text-tinta-3">salas en uso ahora</p>
           </div>
-        )}
-      </section>
+          <div className="tarjeta p-4">
+            <p className="text-3xl font-bold text-tinta">{generados.length}</p>
+            <p className="text-sm text-tinta-3">requerimientos generados</p>
+          </div>
+          <div className="tarjeta p-4">
+            <p className={cx("text-3xl font-bold", pendientes.length ? "text-alerta-tinta" : "text-tinta")}>{pendientes.length}</p>
+            <p className="text-sm text-tinta-3">Issues pendientes de envío</p>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-tinta-3">
+          Entrevistas guiadas por el árbol de preguntas de cada sala. Tope de {datos.config.turnos_max} respuestas por
+          conversación y {CUPO_POR_MINUTO.mensaje} turnos por minuto por cuenta.
+        </p>
+      </div>
 
       <section>
         <div className="mb-3 flex items-center justify-between gap-3">

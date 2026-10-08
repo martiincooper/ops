@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Bot,
+  Check,
   CircleCheck,
   ExternalLink,
   FileText,
@@ -15,11 +16,14 @@ import {
   MessageSquarePlus,
   SendHorizontal,
   SkipForward,
+  Square,
+  SquareCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui";
+import type { PreguntaVista } from "@/lib/chat/flujo";
 import { MENSAJE_SALA_OCUPADA, NOMBRE_PRIORIDAD, type Modulo, type Prioridad, moduloPorClave } from "@/lib/chat/modulos";
 import { ErrorApi, api, cx, horaDe } from "@/lib/cliente";
 import { CabeceraPortal, IconoModulo } from "./comun";
@@ -43,6 +47,8 @@ interface Vista {
   issue_error: string | null;
   turnos: number;
   turnos_max: number;
+  /** Pregunta en curso del árbol de la sala: botones de respuesta (#17). */
+  pregunta: PreguntaVista | null;
   mensajes: Mensaje[];
 }
 
@@ -149,31 +155,42 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
       .catch(manejarError);
   }, [vista, fase, manejarError]);
 
+  // Opciones marcadas en una pregunta de selección múltiple (se reinician al cambiar de pregunta)
+  const [seleccion, setSeleccion] = useState<string[]>([]);
+  const preguntaId = vista?.pregunta?.id;
+  useEffect(() => setSeleccion([]), [preguntaId]);
+
+  /**
+   * Envía un turno. Sin `opcion`: el texto del campo (respuesta escrita, fecha u «Otra»), junto con las opciones
+   * marcadas si la pregunta es de selección múltiple. Con `opcion`: un botón de respuesta.
+   */
   const enviar = useCallback(
-    async (accion: Accion) => {
+    async (accion: Accion, opcion?: { valores: string[]; etiqueta: string }) => {
       if (!vista || ocupado) return;
-      const t = texto.trim();
-      if (accion === "mensaje" && !t) return;
+      const t = opcion ? "" : texto.trim();
+      const valores = opcion?.valores ?? (vista.pregunta?.tipo === "multiple" ? seleccion : []);
+      if (accion === "mensaje" && !t && !valores.length) return;
+      const visible = opcion?.etiqueta ?? [...(vista.pregunta?.opciones ?? []).filter((o) => valores.includes(o.valor)).map((o) => o.etiqueta), ...(t ? [t] : [])].join(", ");
       setOcupado(accion);
       setError(null);
-      // Muestra al tiro lo que escribió la persona; si falla, se repone en el campo.
+      // Muestra al tiro la respuesta de la persona; si falla, se repone lo escrito.
       if (accion === "mensaje") {
-        setTexto("");
+        if (!opcion) setTexto("");
         setVista((v) =>
-          v ? { ...v, mensajes: [...v.mensajes, { id: -1, autor: "usuario", texto: t, meta: null, creado_en: new Date().toISOString() }] } : v,
+          v ? { ...v, mensajes: [...v.mensajes, { id: -1, autor: "usuario", texto: visible, meta: null, creado_en: new Date().toISOString() }] } : v,
         );
       }
       try {
         const v = await api<Vista>(`/api/chat/conversaciones/${vista.id}/mensaje`, {
           method: "POST",
-          json: accion === "mensaje" ? { accion, texto: t } : { accion },
+          json: accion === "mensaje" ? { accion, ...(t ? { texto: t } : {}), ...(valores.length ? { valores } : {}) } : { accion },
         });
         setVista(v);
         ultimoLatido.current = Date.now();
         if (accion === "mas_detalles") setTimeout(() => entrada.current?.focus(), 50);
       } catch (e) {
         if (accion === "mensaje") {
-          setTexto(t);
+          if (!opcion) setTexto(t);
           setVista((v) => (v ? { ...v, mensajes: v.mensajes.filter((m) => m.id !== -1) } : v));
         }
         manejarError(e);
@@ -181,7 +198,7 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
         setOcupado(null);
       }
     },
-    [vista, ocupado, texto, manejarError],
+    [vista, ocupado, texto, seleccion, manejarError],
   );
 
   const generar = useCallback(async () => {
@@ -222,6 +239,12 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
   // Tope de respuestas del asistente (#4): solo queda generar el requerimiento o finalizar
   const alTope = !!vista && vista.turnos >= vista.turnos_max;
   const activa = fase === "activa";
+  const pregunta = vista?.pregunta ?? null;
+  const varias = pregunta?.tipo === "multiple";
+  const conOpciones = !!pregunta && pregunta.opciones.length > 0;
+  const esFecha = pregunta?.tipo === "fecha";
+  // El campo de texto sirve para respuestas escritas, fechas y «Otra»; en preguntas solo de opciones queda deshabilitado
+  const soloOpciones = conOpciones && !pregunta.otra;
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -322,11 +345,45 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                   </span>
                   <span className="flex items-center gap-2 rounded-3xl rounded-bl-md bg-superficie px-4 py-3 text-sm text-tinta-3 shadow-tarjeta">
                     <LoaderCircle size={14} className="animate-spin" aria-hidden />
-                    {ocupado === "generar" ? "Redactando el requerimiento y creando el ticket…" : "El asistente está escribiendo…"}
+                    {ocupado === "generar" ? "Generando el requerimiento y creando el ticket…" : "El asistente está escribiendo…"}
                   </span>
                 </li>
               )}
             </ol>
+
+            {/* Botones de respuesta de la pregunta en curso (#17): un toque responde; en selección múltiple, marcar y confirmar */}
+            {activa && pregunta && pregunta.opciones.length > 0 && !ocupado && !alTope && (
+              <div role="group" aria-label="Respuestas posibles" className="mt-3 flex flex-wrap gap-2 pl-11">
+                {pregunta.opciones.map((o) => {
+                  const marcada = seleccion.includes(o.valor);
+                  return varias ? (
+                    <button
+                      key={o.valor}
+                      type="button"
+                      aria-pressed={marcada}
+                      onClick={() => setSeleccion((s) => (marcada ? s.filter((x) => x !== o.valor) : [...s, o.valor]))}
+                      className={cx("boton-suave", marcada ? "bg-indigo text-white hover:bg-indigo-hondo" : "bg-superficie")}
+                    >
+                      {marcada ? <SquareCheck size={15} aria-hidden /> : <Square size={15} aria-hidden />} {o.etiqueta}
+                    </button>
+                  ) : (
+                    <button
+                      key={o.valor}
+                      type="button"
+                      onClick={() => enviar("mensaje", { valores: [o.valor], etiqueta: o.etiqueta })}
+                      className="boton-suave bg-superficie text-left"
+                    >
+                      {o.etiqueta}
+                    </button>
+                  );
+                })}
+                {varias && (
+                  <button type="button" onClick={() => enviar("mensaje")} disabled={!seleccion.length && !texto.trim()} className="boton">
+                    <Check size={15} aria-hidden /> Confirmar{seleccion.length ? ` (${seleccion.length})` : ""}
+                  </button>
+                )}
+              </div>
+            )}
 
             {fase === "cerrada" && (
               <section className="tarjeta mt-5 p-5">
@@ -411,7 +468,7 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                 <div className="mb-2 grid grid-cols-3 gap-1.5 sm:mb-3 sm:flex sm:flex-wrap sm:gap-2">
                   {(
                     [
-                      { accion: () => enviar("siguiente"), Icono: SkipForward, corto: "Siguiente", largo: "Pasar a la siguiente pregunta", clase: "boton-suave bg-superficie", off: alTope },
+                      { accion: () => enviar("siguiente"), Icono: SkipForward, corto: "Siguiente", largo: "Pasar a la siguiente pregunta", clase: "boton-suave bg-superficie", off: alTope || !pregunta || pregunta.obligatorio },
                       { accion: () => enviar("mas_detalles"), Icono: MessageSquarePlus, corto: "Más detalles", largo: "Agregar más detalles", clase: "boton-suave bg-superficie", off: alTope },
                       { accion: () => setConfirmar("generar"), Icono: FileText, corto: "Generar", largo: "Finalizar y generar requerimiento", clase: "boton", off: false },
                     ] as const
@@ -457,35 +514,61 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                     enviar("mensaje");
                   }}
                 >
-                  <label htmlFor="respuesta" className="sr-only">Tu respuesta</label>
-                  <textarea
-                    id="respuesta"
-                    ref={entrada}
-                    rows={angosto ? 1 : 2}
-                    maxLength={4000}
-                    value={texto}
-                    onChange={(e) => {
-                      setTexto(e.target.value);
-                      latido();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        enviar("mensaje");
+                  <label htmlFor="respuesta" className="sr-only">{esFecha ? "Fecha" : "Tu respuesta"}</label>
+                  {esFecha ? (
+                    <input
+                      id="respuesta"
+                      type="date"
+                      value={texto}
+                      onChange={(e) => {
+                        setTexto(e.target.value);
+                        latido();
+                      }}
+                      disabled={alTope}
+                      className="campo min-h-11 bg-superficie py-2.5 sm:min-h-[3.25rem] sm:py-3"
+                    />
+                  ) : (
+                    <textarea
+                      id="respuesta"
+                      ref={entrada}
+                      rows={angosto ? 1 : 2}
+                      maxLength={4000}
+                      value={texto}
+                      onChange={(e) => {
+                        setTexto(e.target.value);
+                        latido();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          enviar("mensaje");
+                        }
+                      }}
+                      placeholder={
+                        alTope
+                          ? "Se alcanzó el máximo de respuestas de esta conversación"
+                          : soloOpciones
+                            ? angosto
+                              ? "Elige una respuesta de arriba"
+                              : "Elige una de las respuestas de arriba"
+                            : conOpciones
+                              ? "O escribe otra respuesta…"
+                              : angosto
+                                ? "Escribe tu respuesta…"
+                                : "Escribe tu respuesta… (Enter para enviar, Mayús+Enter para nueva línea)"
                       }
-                    }}
-                    placeholder={
-                      alTope
-                        ? "Se alcanzó el máximo de respuestas de esta conversación"
-                        : angosto
-                          ? "Escribe tu respuesta…"
-                          : "Escribe tu respuesta… (Enter para enviar, Mayús+Enter para nueva línea)"
-                    }
-                    disabled={alTope}
-                    className="campo max-h-32 min-h-11 resize-none bg-superficie py-2.5 sm:min-h-[3.25rem] sm:py-3"
-                    autoFocus
-                  />
-                  <button type="submit" disabled={!!ocupado || !texto.trim() || alTope} aria-label="Enviar" title="Enviar" className="boton-icono h-11 w-11 bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50 sm:h-[3.25rem] sm:w-[3.25rem]">
+                      disabled={alTope || soloOpciones}
+                      className="campo max-h-32 min-h-11 resize-none bg-superficie py-2.5 disabled:opacity-60 sm:min-h-[3.25rem] sm:py-3"
+                      autoFocus
+                    />
+                  )}
+                  <button
+                    type="submit"
+                    disabled={!!ocupado || alTope || soloOpciones || (!texto.trim() && !(varias && seleccion.length))}
+                    aria-label="Enviar"
+                    title="Enviar"
+                    className="boton-icono h-11 w-11 bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50 sm:h-[3.25rem] sm:w-[3.25rem]"
+                  >
                     <SendHorizontal size={20} />
                   </button>
                 </form>

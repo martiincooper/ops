@@ -870,7 +870,7 @@ async function main() {
     assert.equal((await admin.pedir(q("/api/admin/tareas", A), { metodo: "POST", json: { usuario_id: "no-existe", descripcion: "x" } })).status, 404);
   });
 
-  // ── Portal gerencial (/gerencia): sin ANTHROPIC_API_KEY ni GITHUB_TOKEN (entrevista guiada, Issues pendientes)
+  // ── Portal gerencial (/gerencia): entrevista por árbol de decisión, sin GITHUB_TOKEN (Issues pendientes)
   console.log("Portal gerencial");
   const DENEGADO = "Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com";
   const OCUPADA = "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde";
@@ -919,24 +919,48 @@ async function main() {
     const vista = (await gEquipo.pedir("/api/chat/salas")).datos.salas.find((x) => x.clave === "c-legal");
     assert.deepEqual([vista.ocupada, vista.propia, vista.usuario_email], [true, false, undefined]); // no ve quién la usa
   });
-  await prueba("entrevista guiada: repregunta, botones y latido", async () => {
+  await prueba("entrevista con árbol de decisión (#17): repregunta, botones de respuesta, ramas, fecha y saltos", async () => {
+    const responder = (cuerpo) => gGerente.pedir(`/api/chat/conversaciones/${convLegal}/mensaje`, { metodo: "POST", json: { accion: "mensaje", ...cuerpo } });
     let r = await turnoChat(gGerente, convLegal, "mensaje", "Informe DS 594");
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.match(r.datos.mensajes.at(-1).texto, /más de detalle/);
+    assert.equal(r.datos.pregunta.id, "inicio");
     r = await turnoChat(gGerente, convLegal, "mensaje", "Necesitamos evaluar el cumplimiento del DS 594 en la faena norte antes de la fiscalización de diciembre");
     assert.ok(r.datos.completitud > 0);
-    r = await turnoChat(gGerente, convLegal, "siguiente");
+    assert.equal(r.datos.pregunta.id, "legal.ambito");
+    assert.deepEqual(r.datos.pregunta.opciones.map((o) => o.valor), ["identificar", "evaluar", "informe", "incidente"]);
+    r = await turnoChat(gGerente, convLegal, "siguiente"); // obligatoria: no se salta
     assert.equal(r.datos.mensajes.at(-2).texto, "Pasar a la siguiente pregunta");
+    assert.match(r.datos.mensajes.at(-1).texto, /no la puedo saltar/);
+    r = await responder({ valores: ["evaluar"] });
+    assert.equal(r.datos.mensajes.at(-2).texto, "Evaluar el cumplimiento de una norma");
+    assert.equal(r.datos.pregunta.id, "legal.norma");
+    const ajena = await responder({ valores: ["si"] }); // botón que no corresponde a una pregunta de texto
+    assert.equal(ajena.status, 400);
+    assert.match(ajena.datos.error, /no corresponde/);
+    await responder({ texto: "DS 594" });
+    await responder({ texto: "Faena norte" });
+    await responder({ valores: ["si"] }); // fiscalización programada: prioridad mínima alta
+    r = await responder({ texto: "2026-12-15" });
+    assert.equal(r.datos.mensajes.at(-2).texto, "15 de diciembre de 2026");
+    await responder({ valores: ["nueva"] });
+    r = await responder({ valores: ["operacion"] });
+    assert.equal(r.datos.pregunta.id, "comun.plazo");
+    await turnoChat(gGerente, convLegal, "siguiente"); // opcional
+    await turnoChat(gGerente, convLegal, "siguiente");
+    await responder({ texto: "Un informe por artículo con el estado de cumplimiento y las evidencias" });
+    r = await turnoChat(gGerente, convLegal, "siguiente");
+    assert.deepEqual([r.datos.pregunta, r.datos.completitud, r.datos.mensajes.at(-1).meta.listo], [null, 100, true]);
     r = await turnoChat(gGerente, convLegal, "mas_detalles");
     assert.match(r.datos.mensajes.at(-1).texto, /Por supuesto/);
-    assert.equal(r.datos.turnos, 4);
     assert.equal((await turnoChat(gGerente, convLegal, "latido")).status, 200);
   });
   await prueba("finalizar y generar: ticket GER-0001, sala libre, Issue pendiente sin GITHUB_TOKEN", async () => {
     const r = await turnoChat(gGerente, convLegal, "generar");
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     assert.equal(r.datos.resultado.ticket, "GER-0001");
-    assert.equal(r.datos.resultado.prioridad, "alta"); // menciona una fiscalización
+    assert.equal(r.datos.resultado.prioridad, "alta"); // fiscalización programada (mínimo alta) sobre urgencia media
+    assert.equal(r.datos.resultado.titulo, "Informe DS 594");
     assert.equal(r.datos.resultado.issue.ok, false);
     assert.match(r.datos.issue_error, /GITHUB_TOKEN/);
     assert.equal((await turnoChat(gGerente, convLegal, "generar")).status, 410);
@@ -955,18 +979,18 @@ async function main() {
       return c;
     })();
   });
-  await prueba("límite de 10 turnos por minuto por cuenta (#4)", async () => {
-    // cuenta sin turnos previos: los 11 pedidos caen en la misma ventana de un minuto
+  await prueba("límite de 30 turnos por minuto por cuenta (#4)", async () => {
+    // cuenta sin turnos previos: los 31 pedidos caen en la misma ventana de un minuto
     const id = (await gAdmin.pedir("/api/chat/salas/c-lidera", { metodo: "POST" })).datos.id;
     let r;
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       r = await turnoChat(gAdmin, id, "mas_detalles");
       assert.equal(r.status, 200, JSON.stringify(r.datos));
     }
     r = await turnoChat(gAdmin, id, "mas_detalles");
     assert.equal(r.status, 429);
     assert.equal(r.datos.error, "Vas muy rápido. Espera unos segundos y vuelve a intentar.");
-    assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera", { metodo: "POST" })).datos.turnos, 10); // el rechazado no se guardó
+    assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera", { metodo: "POST" })).datos.turnos, 30); // el rechazado no se guardó
     assert.equal((await turnoChat(gAdmin, id, "finalizar")).status, 200);
   });
   await prueba("panel del portal: solo administradores @datasheq.com; liberar sala y reintentar Issue", async () => {

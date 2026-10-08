@@ -172,11 +172,19 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   de administrador (si la cuenta no lo es, vuelve al portal con un aviso).
 - **7 salas**, una por módulo: C-Legal (Cumplimiento Legal), C-Controla (Control Documental), C-Previene (Gestor
   Documental), C-Lidera (Programas de Liderazgo), C-Acredita (Gestión del personal), C-Capacita (Gestor del
-  conocimiento) y C-Investiga (Reportabilidad e Incidentes). El asistente conoce el propósito de cada una
-  (`lib/chat/modulos.ts`) y, si el tema corresponde a otra, lo dice y ofrece el botón para cambiar de sala.
-- **Entrevista conversacional**: saludo personalizado, una pregunta a la vez, repreguntas amables si falta
-  información y una barra de «% reunido» con lo que aún falta. Botones: **Pasar a la siguiente pregunta**, **Agregar
-  más detalles**, **Finalizar y generar requerimiento** y **Finalizar conversación** (sin generar).
+  conocimiento) y C-Investiga (Reportabilidad e Incidentes). Algunas respuestas indican que el tema corresponde a
+  otra sala: el asistente lo dice y ofrece el botón para ir allá (la entrevista puede seguir donde está).
+- **Entrevista guiada por un árbol de decisión, sin IA** (`lib/chat/arboles.ts`, motor en `lib/chat/flujo.ts`; ver
+  [`docs/arboles-de-decision.md`](docs/arboles-de-decision.md)): saludo personalizado, una pregunta a la vez y las
+  respuestas eligen la rama siguiente. Las preguntas de opciones se responden con **botones** (en las de varias
+  opciones se marcan y se confirman; algunas aceptan además una respuesta escrita), las de fecha con un selector y
+  las de texto con el campo; si una respuesta escrita es muy breve, se repregunta una vez. Barra de «% reunido» con
+  las preguntas obligatorias que faltan. Botones: **Pasar a la siguiente pregunta** (solo en las opcionales),
+  **Agregar más detalles** (se suma a la respuesta anterior), **Finalizar y generar requerimiento** y **Finalizar
+  conversación** (sin generar). El requerimiento se arma con reglas fijas: título desde la primera respuesta,
+  clasificación según el tipo de solicitud y prioridad según la urgencia, que algunas respuestas suben a un mínimo
+  (por ejemplo, una fiscalización programada → al menos alta). Los árboles se editan en código y el documento se
+  regenera con `npm run arboles:doc`.
 - **Una persona por sala**: al entrar, la sala queda reservada para esa persona; quien intente entrar ve «El módulo
   se encuentra en uso por otro usuario. Por favor intenta más tarde». Se libera al finalizar (con o sin
   requerimiento) o tras `CHAT_INACTIVIDAD_MIN` minutos sin actividad (por defecto 15; escribir cuenta como
@@ -196,13 +204,10 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   **Estado en GitHub**; en el portal, **Mis requerimientos** muestra a cada persona solo los suyos (el enlace al Issue
   solo a administradores, porque el resto puede no tener acceso al repositorio). Si GitHub no responde, se muestra el
   último estado conocido con su fecha.
-- **IA**: Claude (`CHAT_MODELO`, por defecto `claude-opus-5-5`) con `ANTHROPIC_API_KEY`. Sin clave (o con
-  `CHAT_IA=off`) funciona con una entrevista guiada por temas, sin IA.
-- **Límites de uso** (cada turno es una llamada a la IA): cada cuenta puede enviar hasta 10 turnos por minuto y
+- **Límites de uso** (protegen el servidor): cada cuenta puede enviar hasta 30 turnos por minuto y
   generar hasta 3 requerimientos por minuto; si se pasa, ve «Vas muy rápido. Espera unos segundos y vuelve a
   intentar» sin perder lo escrito. Cada conversación admite hasta `CHAT_TURNOS_MAX` respuestas del asistente (por
-  defecto 40): con la última, el asistente invita a generar el requerimiento y el chat solo permite finalizar. El panel
-  muestra los tokens de IA del mes, en total y por módulo.
+  defecto 40): con la última, el asistente invita a generar el requerimiento y el chat solo permite finalizar.
 
 ## Contenido de esta versión
 
@@ -496,11 +501,8 @@ producción.
 | `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
-| `ANTHROPIC_API_KEY` | — (entrevista guiada sin IA) | Asistente del portal gerencial con Claude |
-| `CHAT_MODELO` | `claude-opus-5-5` | Modelo de Claude del asistente |
-| `CHAT_IA` | — | `off` fuerza la entrevista guiada aunque haya clave |
 | `CHAT_INACTIVIDAD_MIN` | `15` | Minutos sin actividad tras los que una sala se libera |
-| `CHAT_TURNOS_MAX` | `40` | Respuestas del asistente por conversación (tope de uso de la IA) |
+| `CHAT_TURNOS_MAX` | `40` | Respuestas del asistente por conversación |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token con permiso «Issues: write» sobre el repositorio de los Issues |
 | `GITHUB_REPO` | `martiincooper/ops` | Repositorio donde se crean los Issues de los requerimientos |
 | `GITHUB_API_URL` | `https://api.github.com` | API de GitHub (GitHub Enterprise o un GitHub simulado en pruebas) |
@@ -515,7 +517,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, consumo, seguimiento de Issues con un GitHub simulado, entrevista guiada) (64 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, seguimiento de Issues con un GitHub simulado, árboles de decisión y su motor) (68 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares, portal gerencial (69 pruebas)
@@ -537,7 +539,7 @@ components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, M
 components/equipo/  jornada del integrante (comenzar, terminar, tablero)
 components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores, portal gerencial)
 components/gerencia/ portal gerencial: salas, chat con el asistente, acceso denegado
-lib/chat/           portal gerencial: módulos, bloqueo de salas, entrevista (Claude o guiada), Issues de GitHub
+lib/chat/           portal gerencial: módulos, bloqueo de salas, árboles de decisión y su motor, Issues de GitHub
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)

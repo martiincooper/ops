@@ -5,8 +5,8 @@ import { type Usuario, requireUsuario } from "../auth";
 import { type DB, getDbControl } from "../db";
 import { HttpError } from "../http";
 import { crearIssue, ErrorGithub } from "./github";
-import type { Linea, Requerimiento } from "./guion";
-import { redactar } from "./ia";
+import { type Arbol, arbolDe } from "./arboles";
+import { type Linea, type Requerimiento, preguntaActual, requerimientoDesdeFlujo } from "./flujo";
 import { MENSAJE_ACCESO_DENEGADO, codigoTicket, esDominioGerencia, moduloPorClave, type Modulo } from "./modulos";
 import {
   type Conversacion,
@@ -17,7 +17,7 @@ import {
   expiraEn,
   mensajes,
 } from "./salas";
-import { TURNOS_MAX, sumarConsumo, turnosDelAsistente } from "./uso";
+import { TURNOS_MAX, turnosDelAsistente } from "./uso";
 
 /** Cualquier cuenta @datasheq.com (equipo, gerencia o administración); el resto, acceso denegado. */
 export async function requireGerencia(req: NextRequest): Promise<{ u: Usuario; p: Persona; db: DB }> {
@@ -67,8 +67,16 @@ export function vistaConversacion(db: DB, id: string) {
     issue_error: c.issue_error,
     turnos: turnosDelAsistente(db, id),
     turnos_max: TURNOS_MAX,
+    // Pregunta en curso del árbol (botones de respuesta), solo mientras la conversación está abierta
+    pregunta: c.estado === "activa" ? preguntaActual(arbolDe(c.modulo) as Arbol, lineas(db, id)) : null,
     mensajes: mensajes(db, id),
   };
+}
+
+export function arbolDeConversacion(c: Conversacion): Arbol {
+  const a = arbolDe(c.modulo);
+  if (!a) throw new HttpError(500, `La sala ${c.modulo} no tiene árbol de preguntas`);
+  return a;
 }
 
 /** Intenta crear el Issue de una conversación ya generada y guarda el resultado (número/URL o error). */
@@ -103,15 +111,14 @@ export async function publicarIssue(db: DB, id: string): Promise<{ ok: boolean; 
 }
 
 /**
- * Cierra la entrevista: la IA clasifica y redacta, se asigna el ticket, se libera la sala y se crea el Issue.
- * Si GitHub falla, el requerimiento queda guardado con el error y se reintenta desde /admin.
+ * Cierra la entrevista: el requerimiento se arma con las respuestas del árbol (reglas fijas, sin IA), se asigna el
+ * ticket, se libera la sala y se crea el Issue. Si GitHub falla, queda guardado con el error y se reintenta desde /admin.
  */
 export async function generarRequerimiento(db: DB, c: Conversacion, p: Persona) {
   const m = moduloDe(c);
   const l = lineas(db, c.id);
   if (!l.some((x) => x.autor === "usuario")) throw new HttpError(400, "Cuéntame primero qué necesitas para poder generar el requerimiento.");
-  const { requerimiento: r, consumo } = await redactar(m, p, l);
-  sumarConsumo(db, c.id, consumo); // lo gastado cuenta aunque el requerimiento ya se hubiera generado en otra pestaña
+  const r = requerimientoDesdeFlujo(arbolDeConversacion(c), m, l);
 
   const ahora = new Date().toISOString();
   const ticket = db.transaction(() => {

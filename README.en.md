@@ -134,11 +134,18 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   back in the portal with a notice).
 - **7 rooms**, one per module: C-Legal (legal compliance), C-Controla (document control), C-Previene (preventive
   documents), C-Lidera (safety leadership programs), C-Acredita (worker and contractor accreditation), C-Capacita
-  (training and knowledge) and C-Investiga (incident reporting and investigation). The assistant knows each room's
-  purpose (`lib/chat/modulos.ts`) and suggests switching rooms when a topic belongs elsewhere.
-- **Conversational interview**: personalized greeting, one question at a time, polite follow-ups when something is
-  missing and a "% gathered" bar listing what is still unknown. Buttons: **Pasar a la siguiente pregunta**,
-  **Agregar más detalles**, **Finalizar y generar requerimiento** and **Finalizar conversación** (no requirement).
+  (training and knowledge) and C-Investiga (incident reporting and investigation). Some answers mean the topic
+  belongs to another room: the assistant says so and offers a button to go there (the interview can continue).
+- **Interview guided by a decision tree, no AI** (`lib/chat/arboles.ts`, engine in `lib/chat/flujo.ts`; see
+  [`docs/arboles-de-decision.md`](docs/arboles-de-decision.md)): personalized greeting, one question at a time, and
+  the answers pick the next branch. Option questions are answered with **buttons** (multi-select ones are ticked and
+  confirmed; some also accept a written answer), date questions with a date picker and text questions with the
+  input; a too-short written answer gets one follow-up. A "% gathered" bar lists the required questions still
+  missing. Buttons: **Pasar a la siguiente pregunta** (optional questions only), **Agregar más detalles** (appended to
+  the previous answer), **Finalizar y generar requerimiento** and **Finalizar conversación**. The requirement is built
+  with fixed rules: title from the first answer, type from the request-type question, priority from the urgency
+  question, raised to a minimum by some answers (e.g. a scheduled inspection → at least high). Trees are edited in
+  code; regenerate the document with `npm run arboles:doc`.
 - **One person per room**: others see "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde".
   The room is released when the person finishes (with or without a requirement), signs out, or after
   `CHAT_INACTIVIDAD_MIN` minutes without activity (default 15; typing counts). Re-entering resumes the
@@ -152,15 +159,12 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   States: Pendiente de envío, Abierto, En curso (has an assignee), Cerrado and Descartado (closed as not planned).
   **Mis requerimientos** in the portal shows each person only their own (the Issue link only to admins, since others
   may not have access to the repository). If GitHub does not respond, the last known state is shown with its date.
-- **Usage limits** (every turn is an AI call): 10 turns and 3 "generate" actions per account per minute ("Vas muy
+- **Usage limits** (they protect the server): 30 turns and 3 "generate" actions per account per minute ("Vas muy
   rápido…", nothing typed is lost), and `CHAT_TURNOS_MAX` assistant replies per conversation (default 40): the last
   one asks the person to generate the requirement and the chat only allows finishing.
 - **Admin panel** (`/admin` → Portal gerencial, `@datasheq.com` admins only; the rest of `/admin` is unchanged): the
   7 rooms (who, since when, when it frees up, a button to release it), conversation history with ticket, priority,
-  state, GitHub state (column and filter), transcript and Issue link (or **Reintentar**), and the month's AI tokens
-  per module.
-- **AI**: Claude (`CHAT_MODELO`, default `claude-opus-5-5`) with `ANTHROPIC_API_KEY`. Without a key (or with
-  `CHAT_IA=off`) it runs a guided, topic-by-topic interview without AI.
+  conversation state, GitHub state (column and filter), transcript and Issue link (or **Reintentar**).
 - Data lives in `control.db` (`chat_conversaciones`, `chat_mensajes`, `chat_salas`; automatic migrations).
 
 ## Run
@@ -198,7 +202,7 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (rooms, inactivity, sign-out, tickets, usage limits, token usage, Issue tracking against a mock GitHub, guided interview) (64)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (rooms, inactivity, sign-out, tickets, usage limits, Issue tracking against a mock GitHub, decision trees and their engine) (68)
 # end-to-end against a server with an EMPTY data dir, started with TIPO_CAMBIO_USD=950 (69, executive portal included)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
@@ -218,11 +222,8 @@ every pull request and push to `main`; pushes to `main` also publish the `amd64`
 | `TZ_NEGOCIO` | `America/Santiago` | Defines which date is "today" (one jornada per day) |
 | `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
 | `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
-| `ANTHROPIC_API_KEY` | — (guided interview without AI) | Executive portal assistant with Claude |
-| `CHAT_MODELO` | `claude-opus-5-5` | Claude model for the assistant |
-| `CHAT_IA` | — | `off` forces the guided interview even with a key |
 | `CHAT_INACTIVIDAD_MIN` | `15` | Minutes without activity before a room is released |
-| `CHAT_TURNOS_MAX` | `40` | Assistant replies per conversation (AI usage cap) |
+| `CHAT_TURNOS_MAX` | `40` | Assistant replies per conversation |
 | `GITHUB_TOKEN` | — (Issues stay pending) | Token with "Issues: write" on the Issues repository |
 | `GITHUB_REPO` | `martiincooper/ops` | Repository where requirement Issues are created |
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub API (GitHub Enterprise or a mock GitHub in tests) |

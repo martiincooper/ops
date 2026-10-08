@@ -2,7 +2,7 @@
 // «gerencia»): no hay que configurar nada en el repositorio. Requiere GITHUB_TOKEN con permiso «Issues: write»
 // sobre GITHUB_REPO (por defecto martiincooper/ops).
 import "server-only";
-import type { Requerimiento } from "./guion";
+import type { Requerimiento } from "./flujo";
 import type { ConfigGithub } from "./seguimiento";
 import { NOMBRE_CLASIFICACION, NOMBRE_PRIORIDAD, codigoTicket, type Modulo } from "./modulos";
 

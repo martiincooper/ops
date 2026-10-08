@@ -10,12 +10,12 @@ import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio 
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
-import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, largos, validarArbol } from "../lib/chat/arboles";
-import { type Linea, requerimientoGuiado, turnoGuiado } from "../lib/chat/guion";
+import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, arbolDe, largos, validarArbol } from "../lib/chat/arboles";
+import { type Entrada, type Linea, type PreguntaVista, type ResultadoTurno, avanzar, preguntaActual, requerimientoDesdeFlujo } from "../lib/chat/flujo";
 import { RUTA_DOC, documento as documentoArboles } from "./arboles-md";
-import { CUPO_POR_MINUTO, consumirCupo, consumoDelMes, reiniciarCupos, sumarConsumo, turnosDelAsistente } from "../lib/chat/uso";
+import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos, turnosDelAsistente } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
-import { MENSAJE_SALA_OCUPADA, MODULOS, codigoTicket, esDominioGerencia } from "../lib/chat/modulos";
+import { MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTicket, esDominioGerencia, moduloPorClave } from "../lib/chat/modulos";
 import {
   ErrorSala,
   INACTIVIDAD_MIN,
@@ -862,7 +862,7 @@ async function main() {
     assert.equal(asignarTicket(d, a.id), 1); // no cambia si ya tiene
     assert.equal(codigoTicket(7), "GER-0007");
   });
-  await prueba("cupo por minuto por cuenta: 10 turnos y 3 «generar», se renueva al minuto", () => {
+  await prueba("cupo por minuto por cuenta: 30 turnos y 3 «generar», se renueva al minuto", () => {
     reiniciarCupos();
     const t = Date.parse("2026-10-08T15:00:00Z");
     for (let i = 0; i < CUPO_POR_MINUTO.mensaje; i++) assert.equal(consumirCupo("ana@datasheq.com", "mensaje", t + i * 1000), true);
@@ -875,24 +875,14 @@ async function main() {
     assert.equal(consumirCupo("ana@datasheq.com", "mensaje", t + 61_000), true); // pasó el minuto
     reiniciarCupos();
   });
-  await prueba("turnos del asistente (sin el saludo) y consumo de tokens del mes por módulo", () => {
+  await prueba("turnos del asistente sin el saludo; el saludo deja la sala en la primera pregunta del árbol", () => {
     const d = dbControl();
-    const a = entrarSala(d, "c-legal", ana, t0).conversacion; // t0 = 7-oct-2026
+    const a = entrarSala(d, "c-legal", ana, t0).conversacion;
     assert.equal(turnosDelAsistente(d, a.id), 0);
+    assert.equal(mensajesChat(d, a.id)[0].meta?.nodo, "inicio");
     agregarMensaje(d, a.id, "usuario", "x", undefined, mas(1));
     agregarMensaje(d, a.id, "robot", "y", undefined, mas(1));
     assert.equal(turnosDelAsistente(d, a.id), 1);
-    sumarConsumo(d, a.id, { entrada: 1200, salida: 300 });
-    sumarConsumo(d, a.id, { entrada: 800, salida: 200 });
-    const b = entrarSala(d, "c-previene", beto, t0).conversacion;
-    sumarConsumo(d, b.id, { entrada: 500, salida: 100 });
-    // conversación del mes anterior (30-sep 23:30 en Chile = 1-oct 02:30 UTC): no cuenta para octubre
-    const vieja = entrarSala(d, "c-lidera", { ...beto, email: "eva@datasheq.com" }, new Date("2026-10-01T02:30:00Z")).conversacion;
-    sumarConsumo(d, vieja.id, { entrada: 9999, salida: 9999 });
-    const c = consumoDelMes(d, t0);
-    assert.equal(c.mes, "2026-10");
-    assert.deepEqual(c.total, { entrada: 2500, salida: 600, conversaciones: 2 });
-    assert.deepEqual(c.por_modulo.map((x) => [x.modulo, x.entrada, x.salida]), [["c-legal", 2000, 500], ["c-previene", 500, 100]]);
   });
   await prueba("estado visible del requerimiento: pendiente, abierto, en curso, cerrado y descartado", () => {
     const e = (issue_numero: number | null, issue_estado: string | null, issue_motivo: string | null = null, issue_asignado: string | null = null) =>
@@ -1016,26 +1006,117 @@ async function main() {
     otra.nodos[0].otra = true;
     assert.match(validarArbol(otra).join(), /necesita un destino por defecto/);
   });
-  await prueba("entrevista guiada: repregunta si es breve, avanza y termina lista para generar", () => {
-    const m = MODULOS[0];
-    const lineas: Linea[] = [{ autor: "robot", texto: "Hola", meta: { tema: 0 } }];
-    const t1 = turnoGuiado(m, lineas, "mensaje", "Informe");
-    assert.equal(t1.meta.repregunta, true);
-    assert.equal(t1.meta.tema, 0);
-    lineas.push({ autor: "usuario", texto: "Informe" }, { autor: "robot", texto: t1.mensaje, meta: t1.meta });
-    const t2 = turnoGuiado(m, lineas, "mensaje", "Ok"); // segunda respuesta breve: ya no insiste
-    assert.equal(t2.meta.tema, 1);
-    let ultimo = t2;
-    lineas.push({ autor: "robot", texto: t2.mensaje, meta: t2.meta });
-    for (let i = 0; i < m.temas.length; i++) {
-      ultimo = turnoGuiado(m, lineas, "siguiente", "");
-      lineas.push({ autor: "robot", texto: ultimo.mensaje, meta: ultimo.meta });
+  // ── Motor del flujo (#17): conversación simulada sobre el árbol de una sala
+  const charla = (modulo: string) => {
+    const a = arbolDe(modulo) as Arbol;
+    const m = moduloPorClave(modulo) as Modulo;
+    const lineas: Linea[] = [{ autor: "robot", texto: "Hola", meta: { nodo: a.raiz } }];
+    const turno = (entrada: Entrada) => {
+      const r = avanzar(a, lineas, entrada);
+      if (r.usuario) lineas.push({ autor: "usuario", texto: r.usuario.texto, meta: r.usuario.meta });
+      else if (entrada.accion !== "mensaje") lineas.push({ autor: "sistema", texto: entrada.accion });
+      lineas.push({ autor: "robot", texto: r.mensaje, meta: r.meta });
+      return r;
+    };
+    return { a, m, lineas, turno, nodo: () => lineas.at(-1)?.meta?.nodo };
+  };
+
+  await prueba("flujo: recorrido de C-Legal con repreguntas, ramas, sugerencia de sala, fecha y saltos", () => {
+    const c = charla("c-legal");
+    let r = c.turno({ accion: "mensaje", texto: "Informe DS 594" }); // 14 < 25 caracteres
+    assert.deepEqual([c.nodo(), r.meta.repregunta], ["inicio", true]);
+    assert.match(r.mensaje, /más de detalle/);
+    r = c.turno({ accion: "mensaje", texto: "Para la faena norte" }); // sigue breve, pero ya no insiste
+    assert.equal(c.nodo(), "legal.ambito");
+    assert.ok(r.completitud > 0 && r.completitud < 100);
+    assert.ok(r.faltantes.includes("Qué necesitas en materia de cumplimiento legal"));
+    assert.deepEqual(preguntaActual(c.a, c.lineas)?.opciones.map((o) => o.valor), ["identificar", "evaluar", "informe", "incidente"]);
+
+    r = c.turno({ accion: "mensaje", texto: "quiero evaluar" }); // texto libre en una pregunta solo de opciones
+    assert.deepEqual([c.nodo(), r.mensaje], ["legal.ambito", "Elige una de las opciones, por favor."]);
+    assert.throws(() => avanzar(c.a, c.lineas, { accion: "mensaje", valores: ["no-existe"] }), /no corresponde/);
+    r = c.turno({ accion: "siguiente" }); // obligatoria: no se salta
+    assert.match(r.mensaje, /no la puedo saltar/);
+    assert.equal(c.nodo(), "legal.ambito");
+
+    r = c.turno({ accion: "mensaje", valores: ["incidente"] });
+    assert.deepEqual([c.nodo(), r.sala_sugerida], ["legal.norma", "c-investiga"]);
+    assert.match(r.mensaje, /sala C-Investiga/);
+    assert.equal(c.lineas.at(-2)?.texto, "Ocurrió un incidente o accidente"); // lo que dijo la persona: la etiqueta
+    c.turno({ accion: "mensaje", texto: "DS 594" });
+    c.turno({ accion: "mensaje", texto: "Faena norte" });
+    r = c.turno({ accion: "mensaje", valores: ["si"] });
+    assert.equal(c.nodo(), "legal.fiscalizacion_fecha");
+    r = c.turno({ accion: "mensaje", texto: "mañana" });
+    assert.deepEqual([c.nodo(), r.mensaje], ["legal.fiscalizacion_fecha", "Indica la fecha con el selector de fecha, por favor."]);
+    c.turno({ accion: "mensaje", texto: "2026-12-15" });
+    assert.equal(c.lineas.at(-2)?.texto, "15 de diciembre de 2026");
+    c.turno({ accion: "mensaje", valores: ["nueva"] });
+    c.turno({ accion: "mensaje", valores: ["operacion"] }); // urgencia: media
+    assert.equal(c.nodo(), "comun.plazo");
+    c.turno({ accion: "siguiente" }); // opcional
+    assert.equal(c.nodo(), "comun.interesados");
+    c.turno({ accion: "siguiente" });
+    r = c.turno({ accion: "mensaje", texto: "Ok" });
+    assert.deepEqual([c.nodo(), r.meta.repregunta], ["comun.resultado", true]);
+    c.turno({ accion: "mensaje", texto: "Un informe por artículo con el estado de cumplimiento y evidencias" });
+    r = c.turno({ accion: "siguiente" });
+    assert.deepEqual([c.nodo(), r.listo_para_generar, r.completitud, r.faltantes], [FIN, true, 100, []]);
+    assert.equal(preguntaActual(c.a, c.lineas), null);
+    r = c.turno({ accion: "mensaje", texto: "También aplica a la faena sur" }); // al final: se suma como comentario
+    assert.equal(c.nodo(), FIN);
+    r = c.turno({ accion: "mas_detalles" });
+    assert.equal(r.meta.ampliar, "comun.resultado");
+    c.turno({ accion: "mensaje", texto: "Exportable a PDF" });
+
+    const q = requerimientoDesdeFlujo(c.a, c.m, c.lineas);
+    assert.equal(q.titulo, "Informe DS 594");
+    assert.equal(q.necesidad, "Informe DS 594. Para la faena norte");
+    assert.equal(q.clasificacion, "nueva_funcionalidad");
+    assert.equal(q.prioridad, "alta"); // urgencia media, pero la fiscalización programada fija mínimo alta
+    assert.match(q.justificacion_prioridad, /Urgencia indicada: «Afecta el trabajo diario»\. Además, «Hay una fiscalización o auditoría programada: Sí» fija una prioridad mínima alta/);
+    assert.equal(q.plazo, "15 de diciembre de 2026");
+    assert.match(q.contexto, /Qué ley, decreto o norma está involucrada: DS 594/);
+    assert.match(q.contexto, /Comentario adicional: También aplica a la faena sur/);
+    assert.ok(q.alcance.includes("Qué necesitas en materia de cumplimiento legal: Ocurrió un incidente o accidente"));
+    assert.equal(q.criterios_aceptacion[0], "Ok. Un informe por artículo con el estado de cumplimiento y evidencias. Exportable a PDF");
+  });
+  await prueba("flujo: selección múltiple con «Otra», sugerencia de sala y entradas inválidas", () => {
+    const c = charla("c-controla");
+    c.turno({ accion: "mensaje", texto: "Necesitamos controlar las versiones de los procedimientos críticos" });
+    let r = c.turno({ accion: "mensaje", valores: ["procedimientos", "preventivos"], texto: "Manuales de equipos" });
+    assert.deepEqual([c.nodo(), r.sala_sugerida], ["controla.problema", "c-previene"]);
+    assert.equal(c.lineas.at(-2)?.texto, "Procedimientos, Matrices de riesgo, PTS o planes de emergencia, Manuales de equipos");
+    r = c.turno({ accion: "mensaje", valores: ["versiones", "aprobacion"] }); // una sola en «opciones»
+    assert.equal(c.nodo(), "controla.problema");
+    assert.match(r.mensaje, /Elige una de las opciones/);
+    c.turno({ accion: "mensaje", valores: ["vigencias"] });
+    c.turno({ accion: "mensaje", texto: "Cada 18 meses" }); // «Otra» en una pregunta de opciones
+    assert.equal(c.nodo(), "controla.notificar");
+    // Botón de la pregunta anterior en una pregunta de texto: se rechaza
+    assert.throws(() => avanzar(c.a, c.lineas, { accion: "mensaje", valores: ["anual"], texto: "y además" }), /no corresponde/);
+    assert.equal(c.nodo(), "controla.notificar");
+  });
+  await prueba("flujo: los 7 árboles se recorren de punta a punta (primeras y últimas opciones)", () => {
+    for (const elegir of [(n: number) => 0, (n: number) => n - 1]) {
+      for (const a of ARBOLES) {
+        const c = charla(a.modulo);
+        let r: ResultadoTurno | null = null;
+        let preguntas = 0;
+        while (c.nodo() !== FIN) {
+          const p = preguntaActual(c.a, c.lineas) as PreguntaVista;
+          preguntas++;
+          assert.ok(preguntas <= MAX_PREGUNTAS, `${a.modulo}: el recorrido no termina`);
+          if (p.tipo === "texto") r = c.turno({ accion: "mensaje", texto: "Respuesta suficientemente detallada para la pregunta" });
+          else if (p.tipo === "fecha") r = c.turno({ accion: "mensaje", texto: "2026-12-01" });
+          else r = c.turno({ accion: "mensaje", valores: [p.opciones[elegir(p.opciones.length)].valor] });
+        }
+        assert.equal(r?.listo_para_generar, true, a.modulo);
+        const q = requerimientoDesdeFlujo(c.a, c.m, c.lineas);
+        assert.ok(q.titulo && q.necesidad && q.criterios_aceptacion.length >= 2, a.modulo);
+        assert.ok(["critica", "alta", "media", "baja"].includes(q.prioridad), a.modulo);
+      }
     }
-    assert.equal(ultimo.listo_para_generar, true);
-    assert.equal(ultimo.completitud, 100);
-    const r = requerimientoGuiado(m, [...lineas, { autor: "usuario", texto: "Es urgente por una fiscalización" }]);
-    assert.equal(r.prioridad, "alta");
-    assert.equal(r.titulo, "Informe");
   });
 
   console.log(`\n${ok} pruebas OK${process.exitCode ? " — HAY FALLOS" : ""}`);
