@@ -313,15 +313,9 @@ El contenedor **no arranca** sin un `JWT_SECRET` de al menos 32 caracteres.
 
 ### Imagen ya construida (GitHub Container Registry, opcional)
 
-`ci/github-actions.yml` es un flujo de GitHub Actions que, en cada push a `main`, ejecuta las pruebas
-(typecheck, lógica y las 54 pruebas extremo a extremo contra el contenedor) y publica la imagen para
-`amd64` y `arm64` en `ghcr.io`. Viene desactivado; para activarlo:
-
-```bash
-mkdir -p .github/workflows
-git mv ci/github-actions.yml .github/workflows/ci.yml
-git commit -m "Activar CI" && git push
-```
+`.github/workflows/ci.yml` es un flujo de GitHub Actions que, en cada pull request y en cada push a `main`,
+ejecuta las pruebas (typecheck, lógica y las pruebas extremo a extremo contra el contenedor, incluido el portal
+gerencial) y, en los push a `main`, publica la imagen para `amd64` y `arm64` en `ghcr.io`.
 
 Como el repositorio es privado, el servidor necesita iniciar sesión una vez con un token personal de GitHub
 con permiso `read:packages`:
@@ -507,7 +501,7 @@ npm run typecheck
 npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, consumo, entrevista guiada) (62 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares (57 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares, portal gerencial (68 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false -e TIPO_CAMBIO_USD=950 aether-ops:test
@@ -542,6 +536,6 @@ lib/reparto.ts      reparto del monto de una compra entre proyectos
 lib/auth.ts, jwt.ts, pin.ts, limites.ts   sesiones, hash de códigos, bloqueo por intentos
 middleware.ts       enrutamiento de páginas por rol (las rutas /api se autentican solas)
 scripts/            local.sh, backup.mjs, test-logica.ts, e2e.mjs
-ci/                 flujo de GitHub Actions (desactivado hasta moverlo a .github/workflows/)
+.github/workflows/  CI: pruebas y extremo a extremo en cada pull request; imagen en ghcr.io desde main
 docs/               REVISION.md y capturas de pantalla
 ```
