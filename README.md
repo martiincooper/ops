@@ -153,6 +153,15 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 Chatbot para que la gerencia levante requerimientos sobre la plataforma DataSheq. Al terminar la entrevista, el
 asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** con su ticket.
 
+Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
+[salas y mis requerimientos](docs/capturas/v09-22-portal-salas.png) ·
+[conversación](docs/capturas/v09-23-portal-sala-conversacion.png) ·
+[conversación en el celular](docs/capturas/v09-24-portal-sala-movil.png) ·
+[sala ocupada](docs/capturas/v09-25-portal-sala-ocupada.png) ·
+[acceso denegado](docs/capturas/v09-26-portal-acceso-denegado.png) ·
+[requerimiento generado](docs/capturas/v09-27-portal-requerimiento-generado.png) ·
+[panel del administrador](docs/capturas/v09-28-admin-portal-gerencial.png)
+
 - **Solo `@datasheq.com`**: cualquier cuenta de ese dominio (equipo, gerencia o administración) entra a hacer sus
   entrevistas, sin necesitar permisos de administración. Cualquier otra cuenta (Gmail, Hotmail, otro dominio) ve
   «Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com», en la página y en la API. El

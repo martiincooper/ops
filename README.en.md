@@ -110,6 +110,59 @@ Stage changes are recorded with the day's date (`proyecto_etapas`, schema v5) an
 corrected in `/admin` → Proyectos → Etapas. Daily objectives and blockers left the executive view (still in the
 admin standup).
 
+## Executive portal with assistant (`/gerencia`)
+
+A chatbot where management raises requirements about the DataSheq platform. At the end of the interview the
+assistant classifies the requirement, writes it up and creates a **GitHub Issue** with a ticket number.
+
+Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
+[rooms and my requirements](docs/capturas/v09-22-portal-salas.png) ·
+[conversation](docs/capturas/v09-23-portal-sala-conversacion.png) ·
+[conversation on a phone](docs/capturas/v09-24-portal-sala-movil.png) ·
+[room in use](docs/capturas/v09-25-portal-sala-ocupada.png) ·
+[access denied](docs/capturas/v09-26-portal-acceso-denegado.png) ·
+[requirement generated](docs/capturas/v09-27-portal-requerimiento-generado.png) ·
+[admin panel](docs/capturas/v09-28-admin-portal-gerencial.png)
+
+- **`@datasheq.com` only**: any account with that domain (team, executive or admin) can run interviews, no admin
+  rights needed. Any other account (Gmail, Hotmail, other domains) gets "Acceso denegado: Este sistema es de uso
+  exclusivo para personal de @datasheq.com" on the page and the API. Direct sign-in: `/login?portal=gerencia`
+  (other domains are rejected before asking for the code); Datasheq executives also get a **Portal gerencial**
+  button in `/exec`.
+- **Acceso Administrador**: a button in the portal and room headers. A `@datasheq.com` admin goes straight to the
+  panel (`/admin?vista=chat`); anyone else is signed out and sent to `/login?portal=admin` (non-admin accounts land
+  back in the portal with a notice).
+- **7 rooms**, one per module: C-Legal (legal compliance), C-Controla (document control), C-Previene (preventive
+  documents), C-Lidera (safety leadership programs), C-Acredita (worker and contractor accreditation), C-Capacita
+  (training and knowledge) and C-Investiga (incident reporting and investigation). The assistant knows each room's
+  purpose (`lib/chat/modulos.ts`) and suggests switching rooms when a topic belongs elsewhere.
+- **Conversational interview**: personalized greeting, one question at a time, polite follow-ups when something is
+  missing and a "% gathered" bar listing what is still unknown. Buttons: **Pasar a la siguiente pregunta**,
+  **Agregar más detalles**, **Finalizar y generar requerimiento** and **Finalizar conversación** (no requirement).
+- **One person per room**: others see "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde".
+  The room is released when the person finishes (with or without a requirement), signs out, or after
+  `CHAT_INACTIVIDAD_MIN` minutes without activity (default 15; typing counts). Re-entering resumes the
+  conversation; entering another room releases the previous one.
+- **Automatic Issue**: title `[GER-0001][C-Legal] …`, labels for the module (`C-Legal`), priority
+  (`prioridad: alta`), type (`tipo: mejora`) and `gerencia` (created if missing), and a body with the ticket, the
+  requester, summary, context, scope, acceptance criteria and the transcript. If GitHub is down or `GITHUB_TOKEN`
+  is missing, the requirement is stored and can be resent from the panel.
+- **Requirement tracking**: each Issue's state is fetched from GitHub (Issues labeled `gerencia`) at most every
+  10 minutes when the panel or the portal is opened; **Actualizar** in the panel forces it (at most once a minute).
+  States: Pendiente de envío, Abierto, En curso (has an assignee), Cerrado and Descartado (closed as not planned).
+  **Mis requerimientos** in the portal shows each person only their own (the Issue link only to admins, since others
+  may not have access to the repository). If GitHub does not respond, the last known state is shown with its date.
+- **Usage limits** (every turn is an AI call): 10 turns and 3 "generate" actions per account per minute ("Vas muy
+  rápido…", nothing typed is lost), and `CHAT_TURNOS_MAX` assistant replies per conversation (default 40): the last
+  one asks the person to generate the requirement and the chat only allows finishing.
+- **Admin panel** (`/admin` → Portal gerencial, `@datasheq.com` admins only; the rest of `/admin` is unchanged): the
+  7 rooms (who, since when, when it frees up, a button to release it), conversation history with ticket, priority,
+  state, GitHub state (column and filter), transcript and Issue link (or **Reintentar**), and the month's AI tokens
+  per module.
+- **AI**: Claude (`CHAT_MODELO`, default `claude-opus-5-5`) with `ANTHROPIC_API_KEY`. Without a key (or with
+  `CHAT_IA=off`) it runs a guided, topic-by-topic interview without AI.
+- Data lives in `control.db` (`chat_conversaciones`, `chat_mensajes`, `chat_salas`; automatic migrations).
+
 ## Run
 
 ```bash
@@ -121,6 +174,12 @@ docker compose up -d --build  # http://localhost:3000 → ADMIN_EMAIL / 000000
 ADMIN_EMAIL=martin@aether-tech.dev ./scripts/local.sh
 ```
 
+To use a backup locally (e.g. production's, made with `node scripts/backup.mjs`): copy its `AAAAMMDD-HHMMSS`
+folder, stop the server and run `npm run restaurar -- <folder>`. It checks the databases first, moves the current
+data to `data-anterior-<date>/` and puts the backup in `./data`. Accounts keep their production codes.
+
+Upgrading to the executive portal: `control.db` migrates on start (new `chat_*` tables and columns); nothing else
+changes.
 Upgrading from 0.8: automatic migration (`usuarios.admin_id` for inherited records); one-tap start with objectives
 edited on the dashboard; Equipo's "Quitar" becomes Desactivar / Eliminar.
 Upgrading from 0.7: adds `proyecto_etapas` (automatic migration): existing projects get "concepto" from their start
@@ -139,10 +198,13 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown (42)
-# end-to-end against a server with an EMPTY data dir (54)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (rooms, inactivity, sign-out, tickets, usage limits, token usage, Issue tracking against a mock GitHub, guided interview) (64)
+# end-to-end against a server with an EMPTY data dir, started with TIPO_CAMBIO_USD=950 (69, executive portal included)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
+
+CI (`.github/workflows/ci.yml`) runs typecheck, the logic tests and the end-to-end tests against the Docker image on
+every pull request and push to `main`; pushes to `main` also publish the `amd64` + `arm64` image to `ghcr.io`.
 
 ## Configuration
 
@@ -155,5 +217,14 @@ BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 | `DATA_DIR` | `/data` (Docker), `./data` (local) | SQLite databases |
 | `TZ_NEGOCIO` | `America/Santiago` | Defines which date is "today" (one jornada per day) |
 | `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
+| `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
+| `ANTHROPIC_API_KEY` | — (guided interview without AI) | Executive portal assistant with Claude |
+| `CHAT_MODELO` | `claude-opus-5-5` | Claude model for the assistant |
+| `CHAT_IA` | — | `off` forces the guided interview even with a key |
+| `CHAT_INACTIVIDAD_MIN` | `15` | Minutes without activity before a room is released |
+| `CHAT_TURNOS_MAX` | `40` | Assistant replies per conversation (AI usage cap) |
+| `GITHUB_TOKEN` | — (Issues stay pending) | Token with "Issues: write" on the Issues repository |
+| `GITHUB_REPO` | `martiincooper/ops` | Repository where requirement Issues are created |
+| `GITHUB_API_URL` | `https://api.github.com` | GitHub API (GitHub Enterprise or a mock GitHub in tests) |
 
 Production (reverse proxy, backups, first-day checklist): see the Spanish README, sections 3–4.
