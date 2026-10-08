@@ -78,6 +78,11 @@ export const MIGRACIONES_CONTROL: string[] = [
     desde TEXT NOT NULL DEFAULT ${ISO_AHORA}
   );
   `,
+  // v3 — consumo de tokens del asistente por conversación (límites de uso, #4)
+  `
+  ALTER TABLE chat_conversaciones ADD COLUMN tokens_entrada INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_conversaciones ADD COLUMN tokens_salida INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

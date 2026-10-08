@@ -50,6 +50,8 @@ export interface Conversacion {
   issue_numero: number | null;
   issue_url: string | null;
   issue_error: string | null;
+  tokens_entrada: number;
+  tokens_salida: number;
 }
 
 export interface Mensaje {

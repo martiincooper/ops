@@ -16,6 +16,7 @@ import {
 } from "./guion";
 import { MODULOS, type Modulo, moduloPorClave } from "./modulos";
 import type { Persona } from "./salas";
+import { type Consumo, SIN_CONSUMO } from "./uso";
 
 const MODELO = process.env.CHAT_MODELO || "claude-opus-5-5";
 
@@ -85,7 +86,11 @@ const INSTRUCCION_ACCION: Record<Accion, string> = {
     "La persona presionó «Agregar más detalles»: invítala a ampliar el punto actual y sugiere qué información adicional sería útil.",
 };
 
-async function pedir<T extends z.ZodType>(esquema: T, contenido: string, effort: "low" | "medium"): Promise<z.infer<T>> {
+async function pedir<T extends z.ZodType>(
+  esquema: T,
+  contenido: string,
+  effort: "low" | "medium",
+): Promise<{ datos: z.infer<T>; consumo: Consumo }> {
   try {
     const r = await anthropic().beta.messages.parse({
       model: MODELO,
@@ -98,7 +103,12 @@ async function pedir<T extends z.ZodType>(esquema: T, contenido: string, effort:
     });
     if (r.stop_reason === "refusal") throw new HttpError(422, "El asistente no pudo procesar este mensaje. Intenta reformularlo.");
     if (!r.parsed_output) throw new Error(`Respuesta sin formato (stop_reason=${r.stop_reason})`);
-    return r.parsed_output as z.infer<T>;
+    const u = r.usage;
+    const consumo = {
+      entrada: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
+      salida: u.output_tokens,
+    };
+    return { datos: r.parsed_output as z.infer<T>, consumo };
   } catch (e) {
     if (e instanceof HttpError) throw e;
     if (e instanceof Anthropic.RateLimitError) {
@@ -118,11 +128,11 @@ export async function responder(
   lineas: Linea[],
   accion: Accion,
   texto: string,
-): Promise<TurnoRobot & { meta: Record<string, unknown> }> {
+): Promise<TurnoRobot & { meta: Record<string, unknown>; consumo: Consumo }> {
   const conNuevo = accion === "mensaje" ? [...lineas, { autor: "usuario" as const, texto }] : lineas;
-  if (!iaActiva()) return turnoGuiado(m, lineas, accion, texto);
+  if (!iaActiva()) return { ...turnoGuiado(m, lineas, accion, texto), consumo: SIN_CONSUMO };
 
-  const t = await pedir(
+  const { datos: t, consumo } = await pedir(
     esquemaTurno,
     `Sala actual: ${m.nombre} (${m.area}). Persona: ${p.nombre}.\n\n<transcripcion>\n${transcripcion(conNuevo, p.nombre)}\n</transcripcion>\n\n${INSTRUCCION_ACCION[accion]}`,
     "low",
@@ -136,13 +146,14 @@ export async function responder(
     sala_sugerida: sugerida,
     listo_para_generar: t.listo_para_generar,
     meta: { completitud, faltantes: t.faltantes.slice(0, 6), sala_sugerida: sugerida, listo: t.listo_para_generar },
+    consumo,
   };
 }
 
 /** Clasifica y redacta el requerimiento estructurado a partir de la entrevista. */
-export async function redactar(m: Modulo, p: Persona, lineas: Linea[]): Promise<Requerimiento> {
-  if (!iaActiva()) return requerimientoGuiado(m, lineas);
-  const r = await pedir(
+export async function redactar(m: Modulo, p: Persona, lineas: Linea[]): Promise<{ requerimiento: Requerimiento; consumo: Consumo }> {
+  if (!iaActiva()) return { requerimiento: requerimientoGuiado(m, lineas), consumo: SIN_CONSUMO };
+  const { datos: r, consumo } = await pedir(
     esquemaRequerimiento,
     `Sala: ${m.nombre} (${m.area}). Solicitante: ${p.nombre}.\n\n<transcripcion>\n${transcripcion(lineas, p.nombre)}\n</transcripcion>\n\n` +
       "La entrevista terminó. Clasifica el requerimiento y redáctalo de forma estructurada para el equipo de desarrollo, " +
@@ -150,5 +161,5 @@ export async function redactar(m: Modulo, p: Persona, lineas: Linea[]): Promise<
       "impacto y la urgencia expresados: crítica solo si hay riesgo para las personas o un incumplimiento legal inminente.",
     "medium",
   );
-  return { ...r, titulo: r.titulo.trim().slice(0, 120) };
+  return { requerimiento: { ...r, titulo: r.titulo.trim().slice(0, 120) }, consumo };
 }
