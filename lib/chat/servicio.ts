@@ -89,7 +89,10 @@ export async function publicarIssue(db: DB, id: string): Promise<{ ok: boolean; 
       fecha: c.terminada_en ?? c.iniciada_en,
       transcripcion,
     });
-    db.prepare("UPDATE chat_conversaciones SET issue_numero = ?, issue_url = ?, issue_error = NULL WHERE id = ?").run(issue.numero, issue.url, id);
+    // Recién creado: abierto y sin asignar hasta la próxima consulta a GitHub
+    db.prepare(
+      "UPDATE chat_conversaciones SET issue_numero = ?, issue_url = ?, issue_error = NULL, issue_estado = 'open', issue_actualizado_en = ? WHERE id = ?",
+    ).run(issue.numero, issue.url, new Date().toISOString(), id);
     return { ok: true };
   } catch (e) {
     const error = e instanceof ErrorGithub ? e.message : "Error inesperado al crear el Issue";

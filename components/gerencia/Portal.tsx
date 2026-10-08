@@ -7,6 +7,7 @@ import { MODULOS } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
 import { api, cx } from "@/lib/cliente";
 import { IconoModulo } from "./comun";
+import MisRequerimientos from "./MisRequerimientos";
 
 const REFRESCO_MS = 15_000;
 
@@ -95,6 +96,8 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
           );
         })}
       </ul>
+
+      <MisRequerimientos />
     </main>
   );
 }

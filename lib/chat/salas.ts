@@ -52,6 +52,10 @@ export interface Conversacion {
   issue_error: string | null;
   tokens_entrada: number;
   tokens_salida: number;
+  issue_estado: "open" | "closed" | null;
+  issue_motivo: string | null;
+  issue_asignado: string | null;
+  issue_actualizado_en: string | null;
 }
 
 export interface Mensaje {

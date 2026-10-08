@@ -1,5 +1,6 @@
 // Pruebas de reglas puras: zona horaria, Say-Do por objetivos, tableros, migraciones, códigos. Ejecutar: npm run test:logica
 import assert from "node:assert/strict";
+import http from "node:http";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
@@ -10,6 +11,7 @@ import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCa
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { type Linea, requerimientoGuiado, turnoGuiado } from "../lib/chat/guion";
 import { CUPO_POR_MINUTO, consumirCupo, consumoDelMes, reiniciarCupos, sumarConsumo, turnosDelAsistente } from "../lib/chat/uso";
+import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
 import { MENSAJE_SALA_OCUPADA, MODULOS, codigoTicket, esDominioGerencia } from "../lib/chat/modulos";
 import {
   ErrorSala,
@@ -888,6 +890,86 @@ async function main() {
     assert.equal(c.mes, "2026-10");
     assert.deepEqual(c.total, { entrada: 2500, salida: 600, conversaciones: 2 });
     assert.deepEqual(c.por_modulo.map((x) => [x.modulo, x.entrada, x.salida]), [["c-legal", 2000, 500], ["c-previene", 500, 100]]);
+  });
+  await prueba("estado visible del requerimiento: pendiente, abierto, en curso, cerrado y descartado", () => {
+    const e = (issue_numero: number | null, issue_estado: string | null, issue_motivo: string | null = null, issue_asignado: string | null = null) =>
+      estadoVisible({ issue_numero, issue_estado, issue_motivo, issue_asignado });
+    assert.equal(e(null, null), "pendiente");
+    assert.equal(e(5, "open"), "abierto");
+    assert.equal(e(5, null), "abierto"); // creado y aún sin consultar
+    assert.equal(e(5, "open", "reopened", "dev1"), "en_curso");
+    assert.equal(e(5, "closed", "completed", "dev1"), "cerrado");
+    assert.equal(e(5, "closed", "not_planned"), "descartado");
+  });
+  await prueba("seguimiento con un GitHub simulado: paginación, sin PR, since, frecuencia y error", async () => {
+    const pedidos: URL[] = [];
+    let falla = false;
+    const issues = [
+      ...Array.from({ length: 100 }, (_, i) => ({ number: 1000 + i, state: "open", assignees: [] })), // página 1 completa
+      { number: 1, state: "closed", state_reason: "completed", assignees: [{ login: "dev1" }] },
+      { number: 2, state: "open", assignees: [{ login: "dev2" }] },
+      { number: 3, state: "closed", state_reason: "not_planned", assignees: [] },
+      { number: 4, state: "open", pull_request: {} }, // un PR con la etiqueta: se ignora
+    ];
+    const servidor = http.createServer((req, res) => {
+      const url = new URL(req.url ?? "/", "http://x");
+      pedidos.push(url);
+      if (falla) return res.writeHead(502).end("{}");
+      assert.equal(req.headers.authorization, "Bearer t0k3n");
+      const pagina = Number(url.searchParams.get("page"));
+      const por = Number(url.searchParams.get("per_page"));
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(issues.slice((pagina - 1) * por, pagina * por)));
+    });
+    await new Promise<void>((ok) => servidor.listen(0, "127.0.0.1", ok));
+    const cfg = { api: `http://127.0.0.1:${(servidor.address() as { port: number }).port}`, repo: "dueno/repo", token: "t0k3n" };
+    try {
+      reiniciarSincronizacion();
+      const d = dbControl();
+      const ids = [1, 2, 3, 99].map((n, i) => {
+        const id = entrarSala(d, MODULOS[i].clave, { ...ana, email: `p${i}@datasheq.com` }, t0).conversacion.id;
+        d.prepare("UPDATE chat_conversaciones SET issue_numero = ? WHERE id = ?").run(n, id);
+        return id;
+      });
+      const fila = (id: string) =>
+        d.prepare("SELECT issue_estado, issue_motivo, issue_asignado, issue_actualizado_en FROM chat_conversaciones WHERE id = ?").get(id) as {
+          issue_estado: string | null; issue_motivo: string | null; issue_asignado: string | null; issue_actualizado_en: string | null;
+        };
+      const h0 = Date.parse("2026-10-08T15:00:00Z");
+
+      assert.equal((await sincronizar(d, null, { ahora: h0 })).sincronizado_en, null); // sin token: no consulta
+      assert.equal(pedidos.length, 0);
+
+      const s1 = await sincronizar(d, cfg, { ahora: h0 });
+      assert.deepEqual(s1, { sincronizado_en: new Date(h0).toISOString(), error: null });
+      assert.equal(pedidos.length, 2); // dos páginas
+      assert.equal(pedidos[0].pathname, "/repos/dueno/repo/issues");
+      assert.deepEqual([pedidos[0].searchParams.get("labels"), pedidos[0].searchParams.get("state"), pedidos[0].searchParams.get("since")], ["gerencia", "all", null]);
+      assert.deepEqual(fila(ids[0]), { issue_estado: "closed", issue_motivo: "completed", issue_asignado: "dev1", issue_actualizado_en: new Date(h0).toISOString() });
+      assert.equal(fila(ids[1]).issue_asignado, "dev2");
+      assert.equal(fila(ids[2]).issue_motivo, "not_planned");
+      assert.equal(fila(ids[3]).issue_estado, null); // #99 no vino: sin cambios, pero consultado
+      assert.equal(fila(ids[3]).issue_actualizado_en, new Date(h0).toISOString());
+
+      await sincronizar(d, cfg, { ahora: h0 + 5 * 60_000 }); // antes de 10 minutos: no consulta
+      assert.equal(pedidos.length, 2);
+      await sincronizar(d, cfg, { ahora: h0 + 30_000, forzar: true }); // forzada antes de 1 minuto desde el último intento: tampoco
+      assert.equal(pedidos.length, 2);
+
+      falla = true;
+      const s2 = await sincronizar(d, cfg, { ahora: h0 + 11 * 60_000 });
+      assert.equal(pedidos.length, 3);
+      assert.equal(pedidos[2].searchParams.get("since"), new Date(h0 - 60_000).toISOString()); // desde la última correcta, con margen
+      assert.match(s2.error ?? "", /HTTP 502/);
+      assert.equal(s2.sincronizado_en, new Date(h0).toISOString()); // último estado conocido y su fecha
+      assert.equal(fila(ids[0]).issue_estado, "closed");
+
+      falla = false;
+      const s3 = await sincronizar(d, cfg, { ahora: h0 + 12 * 60_000 + 1, forzar: true }); // «Actualizar» pasado 1 minuto
+      assert.deepEqual(s3, { sincronizado_en: new Date(h0 + 12 * 60_000 + 1).toISOString(), error: null });
+    } finally {
+      servidor.close();
+      reiniciarSincronizacion();
+    }
   });
   await prueba("entrevista guiada: repregunta si es breve, avanza y termina lista para generar", () => {
     const m = MODULOS[0];

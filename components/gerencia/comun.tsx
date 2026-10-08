@@ -1,10 +1,11 @@
 // Piezas compartidas del portal gerencial (portal, sala y panel del administrador).
-import { FileCheck, Footprints, GraduationCap, IdCard, Scale, ShieldAlert, Siren } from "lucide-react";
+import { CircleCheck, CircleDot, CircleSlash, Clock, FileCheck, Footprints, GraduationCap, IdCard, Scale, ShieldAlert, Siren, Wrench } from "lucide-react";
 import Link from "next/link";
 import BotonSalir from "@/components/BotonSalir";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
 import type { ClaveModulo } from "@/lib/chat/modulos";
+import { type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
 import { cx } from "@/lib/cliente";
 import BotonAccesoAdmin from "./BotonAccesoAdmin";
 
@@ -27,6 +28,24 @@ export function IconoModulo({ clave, color, tamano = 22, className }: { clave: C
       style={{ background: `#${color}1a`, color: `#${color}`, width: tamano * 2, height: tamano * 2 }}
     >
       <Icono size={tamano} />
+    </span>
+  );
+}
+
+const ESTADO_ISSUE: Record<EstadoVisible, { clase: string; Icono: typeof Clock }> = {
+  pendiente: { clase: "bg-alerta-fondo text-alerta-tinta", Icono: Clock },
+  abierto: { clase: "bg-indigo-suave text-indigo-tinta", Icono: CircleDot },
+  en_curso: { clase: "bg-pastel-azul text-[#1d5f99]", Icono: Wrench },
+  cerrado: { clase: "bg-ok-fondo text-ok-tinta", Icono: CircleCheck },
+  descartado: { clase: "bg-suave text-tinta-2", Icono: CircleSlash },
+};
+
+/** Estado del requerimiento en GitHub (ícono y texto, nunca solo color). */
+export function ChipEstadoIssue({ estado }: { estado: EstadoVisible }) {
+  const { clase, Icono } = ESTADO_ISSUE[estado];
+  return (
+    <span className={cx("chip whitespace-nowrap", clase)}>
+      <Icono size={12} aria-hidden /> {NOMBRE_ESTADO[estado]}
     </span>
   );
 }

@@ -180,6 +180,13 @@ asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** c
   `/admin` no cambia): estado de las 7 salas (quién la usa, desde cuándo,
   cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
   enlace directo al Issue (o **Reintentar** si quedó pendiente).
+- **Seguimiento de requerimientos**: el estado de cada Issue se trae de GitHub (Issues con la etiqueta `gerencia`)
+  como máximo cada 10 minutos, al abrir el panel o el portal; el botón **Actualizar** del panel fuerza la consulta
+  (como máximo una vez por minuto). Estados: **Pendiente de envío**, **Abierto**, **En curso** (tiene persona
+  asignada), **Cerrado** y **Descartado** (cerrado como «no planificado»). El panel tiene la columna y el filtro
+  **Estado en GitHub**; en el portal, **Mis requerimientos** muestra a cada persona solo los suyos (el enlace al Issue
+  solo a administradores, porque el resto puede no tener acceso al repositorio). Si GitHub no responde, se muestra el
+  último estado conocido con su fecha.
 - **IA**: Claude (`CHAT_MODELO`, por defecto `claude-opus-5-5`) con `ANTHROPIC_API_KEY`. Sin clave (o con
   `CHAT_IA=off`) funciona con una entrevista guiada por temas, sin IA.
 - **Límites de uso** (cada turno es una llamada a la IA): cada cuenta puede enviar hasta 10 turnos por minuto y
@@ -487,6 +494,7 @@ producción.
 | `CHAT_TURNOS_MAX` | `40` | Respuestas del asistente por conversación (tope de uso de la IA) |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token con permiso «Issues: write» sobre el repositorio de los Issues |
 | `GITHUB_REPO` | `martiincooper/ops` | Repositorio donde se crean los Issues de los requerimientos |
+| `GITHUB_API_URL` | `https://api.github.com` | API de GitHub (GitHub Enterprise o un GitHub simulado en pruebas) |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.
 No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
@@ -498,10 +506,10 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, consumo, entrevista guiada) (62 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, consumo, seguimiento de Issues con un GitHub simulado, entrevista guiada) (64 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
-# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares, portal gerencial (68 pruebas)
+# comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares, portal gerencial (69 pruebas)
 docker build -t aether-ops:test .
 docker run -d --name aether-test -p 127.0.0.1:3100:3000 \
   -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false -e TIPO_CAMBIO_USD=950 aether-ops:test
