@@ -36,11 +36,14 @@ export function CabeceraPortal({
   nombre,
   subtitulo,
   esAdmin,
+  enSala = false,
   volver,
 }: {
   nombre: string;
   subtitulo: string;
   esAdmin: boolean;
+  /** Hay una conversación activa en esta página (para confirmar antes de cerrar sesión). */
+  enSala?: boolean;
   volver?: React.ReactNode;
 }) {
   return (
@@ -55,7 +58,7 @@ export function CabeceraPortal({
           <p className="truncate text-base font-semibold text-tinta">Portal gerencial DataSheq</p>
           <p className="truncate text-xs text-tinta-3">{subtitulo}</p>
         </div>
-        <BotonAccesoAdmin esAdmin={esAdmin} />
+        <BotonAccesoAdmin esAdmin={esAdmin} enSala={enSala} />
         <BotonSalir conTexto={false} className="bg-superficie" />
         <span className="hidden sm:block">
           <Avatar nombre={nombre} tamano={40} />

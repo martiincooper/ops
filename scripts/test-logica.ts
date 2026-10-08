@@ -21,6 +21,7 @@ import {
   estadoSalas,
   exigirActiva,
   liberarSala,
+  liberarSalasDe,
   mensajes as mensajesChat,
   tocar,
 } from "../lib/chat/salas";
@@ -823,6 +824,20 @@ async function main() {
     assert.equal(entrarSala(d, "c-lidera", beto, mas(2)).nueva, true);
     assert.equal(liberarSala(d, "c-lidera", mas(3)), true);
     assert.equal(estadoSalas(d, null, true, mas(3)).some((s) => s.ocupada), false);
+  });
+  await prueba("al cerrar sesión se liberan las salas de la cuenta (y solo las suyas)", () => {
+    const d = dbControl();
+    const c = entrarSala(d, "c-legal", ana, t0).conversacion;
+    agregarMensaje(d, c.id, "usuario", "Necesitamos un informe", undefined, mas(1));
+    entrarSala(d, "c-previene", beto, mas(1));
+    assert.equal(liberarSalasDe(d, "ANA@datasheq.com", mas(2)), 1);
+    assert.equal(conversacionChat(d, c.id)?.estado, "finalizada"); // tuvo respuestas: queda en el historial
+    // C-Legal queda libre de inmediato (sin esperar la inactividad) y la sala de Beto no se toca
+    const ocupadas = estadoSalas(d, null, true, mas(2)).filter((s) => s.ocupada);
+    assert.deepEqual(ocupadas.map((s) => [s.clave, s.usuario_email]), [["c-previene", "beto@datasheq.com"]]);
+    const carla = { id: "g3", rol: "team", email: "carla@datasheq.com", nombre: "Carla Soto" };
+    assert.equal(entrarSala(d, "c-legal", carla, mas(3)).nueva, true);
+    assert.equal(liberarSalasDe(d, "nadie@datasheq.com", mas(4)), 0);
   });
   await prueba("una sala a la vez: entrar a otra libera la anterior", () => {
     const d = dbControl();

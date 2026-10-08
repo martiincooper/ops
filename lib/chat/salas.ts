@@ -147,10 +147,7 @@ export function entrarSala(db: DB, clave: string, p: Persona, ahora = new Date()
       return { conversacion: conversacion(db, ocupada.conversacion_id) as Conversacion, nueva: false };
     }
 
-    const otras = db.prepare("SELECT conversacion_id FROM chat_salas WHERE usuario_email = ? COLLATE NOCASE").all(p.email) as {
-      conversacion_id: string;
-    }[];
-    for (const o of otras) cerrarConversacion(db, o.conversacion_id, "finalizada", ahora);
+    liberarSalasDe(db, p.email, ahora);
 
     const id = randomUUID();
     db.prepare(
@@ -224,6 +221,15 @@ export function estadoSalas(db: DB, p: Persona | null, conDetalle = false, ahora
         : {}),
     };
   });
+}
+
+/** Libera todas las salas que ocupa una cuenta (al cerrar sesión o al entrar a otra sala). Devuelve cuántas. */
+export function liberarSalasDe(db: DB, email: string, ahora = new Date()): number {
+  const propias = db.prepare("SELECT conversacion_id FROM chat_salas WHERE usuario_email = ? COLLATE NOCASE").all(email) as {
+    conversacion_id: string;
+  }[];
+  for (const s of propias) cerrarConversacion(db, s.conversacion_id, "finalizada", ahora);
+  return propias.length;
 }
 
 /** Liberación forzada por un administrador. */

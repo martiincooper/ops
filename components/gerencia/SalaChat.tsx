@@ -203,6 +203,7 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
         nombre={nombre}
         subtitulo={`Sala ${modulo.nombre} · ${modulo.area}`}
         esAdmin={esAdmin}
+        enSala={fase === "activa"}
         volver={
           <Link href="/gerencia" aria-label="Volver al portal" title="Volver al portal" className="boton-icono bg-superficie">
             <ArrowLeft size={18} />
