@@ -145,15 +145,23 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   the previous answer), **Finalizar y generar requerimiento** and **Finalizar conversación**. The requirement is built
   with fixed rules: title from the first answer, type from the request-type question, priority from the urgency
   question, raised to a minimum by some answers (e.g. a scheduled inspection → at least high). Trees are edited in
-  code; regenerate the document with `npm run arboles:doc`.
+  code; regenerate the document with `npm run arboles:doc`. They are validated against a **schema** (Zod: fields,
+  types, formats, lengths and allowed values; a misspelled field is an error) and for **structure** (no cycles,
+  everything reachable, every branch ends) in the tests, when generating the document and at server start: in
+  production the server does not start with an invalid tree.
 - **One person per room**: others see "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde".
   The room is released when the person finishes (with or without a requirement), signs out, or after
   `CHAT_INACTIVIDAD_MIN` minutes without activity (default 15; typing counts). Re-entering resumes the
   conversation; entering another room releases the previous one.
 - **Automatic Issue**: title `[GER-0001][C-Legal] …`, labels for the module (`C-Legal`), priority
   (`prioridad: alta`), type (`tipo: mejora`) and `gerencia` (created if missing), and a body with the ticket, the
-  requester, summary, context, scope, acceptance criteria and the transcript. If GitHub is down or `GITHUB_TOKEN`
-  is missing, the requirement is stored and can be resent from the panel.
+  requester, summary, context, scope, acceptance criteria and the transcript.
+- **Automatic retries**: on a transient GitHub failure (network, timeout, 5xx or rate limit) the request is retried up
+  to 3 times right away (honoring `Retry-After`); if it still fails, the server retries it on its own after 1, 2, 5,
+  15, 30 and 60 minutes, and the panel shows when the next attempt is due. Before each retry it looks for an existing
+  Issue with the same ticket so nothing is duplicated, and a requirement is never sent twice at the same time.
+  Permanent errors (missing `GITHUB_TOKEN`, token without permission, unknown repository) are not retried
+  automatically: the requirement is stored and can be resent from the panel with **Reintentar**.
 - **Requirement tracking**: each Issue's state is fetched from GitHub (Issues labeled `gerencia`) at most every
   10 minutes when the panel or the portal is opened; **Actualizar** in the panel forces it (at most once a minute).
   States: Pendiente de envío, Abierto, En curso (has an assignee), Cerrado and Descartado (closed as not planned).
@@ -202,7 +210,7 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (rooms, inactivity, sign-out, tickets, usage limits, Issue tracking against a mock GitHub, decision trees and their engine) (68)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (rooms, inactivity, sign-out, tickets, usage limits, Issue tracking and send retries against a mock GitHub, tree schema and structure, interview engine) (72)
 # end-to-end against a server with an EMPTY data dir, started with TIPO_CAMBIO_USD=950 (69, executive portal included)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```

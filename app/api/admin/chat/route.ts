@@ -7,6 +7,7 @@ import { codigoTicket } from "@/lib/chat/modulos";
 import { INACTIVIDAD_MIN, estadoSalas } from "@/lib/chat/salas";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
 import { TURNOS_MAX } from "@/lib/chat/uso";
+import { MAX_REINTENTOS } from "@/lib/chat/envio";
 
 interface Fila {
   ticket: number | null;
@@ -28,7 +29,7 @@ export const GET = manejar(async (req) => {
     .prepare(
       `SELECT c.id, c.modulo, c.usuario_nombre, c.usuario_email, c.estado, c.completitud, c.iniciada_en, c.terminada_en,
               c.ticket, c.titulo, c.prioridad, c.clasificacion, c.issue_numero, c.issue_url, c.issue_error,
-              c.issue_estado, c.issue_motivo, c.issue_asignado, c.issue_actualizado_en,
+              c.issue_estado, c.issue_motivo, c.issue_asignado, c.issue_actualizado_en, c.issue_intentos, c.issue_proximo_intento,
               (SELECT COUNT(*) FROM chat_mensajes m WHERE m.conversacion_id = c.id AND m.autor = 'usuario') AS respuestas
          FROM chat_conversaciones c
         ORDER BY c.iniciada_en DESC
@@ -48,6 +49,7 @@ export const GET = manejar(async (req) => {
       repositorio: repositorioIssues(),
       inactividad_min: INACTIVIDAD_MIN,
       turnos_max: TURNOS_MAX,
+      reintentos_max: MAX_REINTENTOS,
     },
   });
 });

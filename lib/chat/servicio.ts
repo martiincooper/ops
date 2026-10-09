@@ -4,7 +4,8 @@ import type { NextRequest } from "next/server";
 import { type Usuario, requireUsuario } from "../auth";
 import { type DB, getDbControl } from "../db";
 import { HttpError } from "../http";
-import { crearIssue, ErrorGithub } from "./github";
+import { type ResultadoEnvio, enviarIssue } from "./envio";
+import { configGithub } from "./github";
 import { type Arbol, arbolDe } from "./arboles";
 import { type Linea, type Requerimiento, preguntaActual, requerimientoDesdeFlujo } from "./flujo";
 import { MENSAJE_ACCESO_DENEGADO, codigoTicket, esDominioGerencia, moduloPorClave, type Modulo } from "./modulos";
@@ -79,35 +80,14 @@ export function arbolDeConversacion(c: Conversacion): Arbol {
   return a;
 }
 
-/** Intenta crear el Issue de una conversación ya generada y guarda el resultado (número/URL o error). */
-export async function publicarIssue(db: DB, id: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Crea el Issue de una conversación ya generada (con reintentos ante errores transitorios y, si sigue fallando,
+ * reintentos automáticos programados; ver ./envio) y guarda el resultado.
+ */
+export async function publicarIssue(db: DB, id: string): Promise<ResultadoEnvio> {
   const c = conversacion(db, id);
   if (!c || c.estado !== "generada" || !c.ticket || !c.requerimiento_json) throw new HttpError(409, "La conversación no tiene un requerimiento generado");
-  if (c.issue_numero) return { ok: true };
-  const transcripcion = lineas(db, id)
-    .filter((l) => l.autor !== "sistema")
-    .map((l) => ({ autor: l.autor === "robot" ? "Asistente" : c.usuario_nombre, texto: l.texto }));
-  try {
-    const issue = await crearIssue({
-      ticket: c.ticket,
-      modulo: moduloDe(c),
-      requerimiento: JSON.parse(c.requerimiento_json) as Requerimiento,
-      solicitante: { nombre: c.usuario_nombre, email: c.usuario_email },
-      conversacionId: c.id,
-      fecha: c.terminada_en ?? c.iniciada_en,
-      transcripcion,
-    });
-    // Recién creado: abierto y sin asignar hasta la próxima consulta a GitHub
-    db.prepare(
-      "UPDATE chat_conversaciones SET issue_numero = ?, issue_url = ?, issue_error = NULL, issue_estado = 'open', issue_actualizado_en = ? WHERE id = ?",
-    ).run(issue.numero, issue.url, new Date().toISOString(), id);
-    return { ok: true };
-  } catch (e) {
-    const error = e instanceof ErrorGithub ? e.message : "Error inesperado al crear el Issue";
-    if (!(e instanceof ErrorGithub)) console.error("[chat-github]", e);
-    db.prepare("UPDATE chat_conversaciones SET issue_error = ? WHERE id = ?").run(error, id);
-    return { ok: false, error };
-  }
+  return enviarIssue(db, id, configGithub());
 }
 
 /**

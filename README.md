@@ -184,15 +184,22 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   conversación** (sin generar). El requerimiento se arma con reglas fijas: título desde la primera respuesta,
   clasificación según el tipo de solicitud y prioridad según la urgencia, que algunas respuestas suben a un mínimo
   (por ejemplo, una fiscalización programada → al menos alta). Los árboles se editan en código y el documento se
-  regenera con `npm run arboles:doc`.
+  regenera con `npm run arboles:doc`. Se validan con un **esquema** (Zod: campos, tipos, formatos, largos y valores
+  permitidos; un campo mal escrito es un error) y su **estructura** (sin ciclos, todo alcanzable, toda rama termina)
+  en las pruebas, al generar el documento y al arrancar el servidor: en producción no arranca con un árbol inválido.
 - **Una persona por sala**: al entrar, la sala queda reservada para esa persona; quien intente entrar ve «El módulo
   se encuentra en uso por otro usuario. Por favor intenta más tarde». Se libera al finalizar (con o sin
   requerimiento) o tras `CHAT_INACTIVIDAD_MIN` minutos sin actividad (por defecto 15; escribir cuenta como
   actividad). Volver a entrar retoma la conversación; entrar a otra sala libera la anterior.
 - **Issue automático**: título `[GER-0001][C-Legal] …`, etiquetas del módulo (`C-Legal`), prioridad
   (`prioridad: alta`), tipo (`tipo: mejora`) y `gerencia` (se crean solas si no existen), y en el cuerpo el ticket,
-  los datos de quien lo pidió, resumen, contexto, alcance, criterios de aceptación y la transcripción. Si GitHub no
-  responde o falta `GITHUB_TOKEN`, el requerimiento queda guardado y se reenvía desde el panel.
+  los datos de quien lo pidió, resumen, contexto, alcance, criterios de aceptación y la transcripción.
+- **Reintentos automáticos del envío**: si GitHub falla por un problema pasajero (red, tiempo de espera, error 5xx o
+  límite de uso), la petición se reintenta hasta 3 veces en el momento (respetando `Retry-After`) y, si sigue
+  fallando, el servidor la reintenta solo a los 1, 2, 5, 15, 30 y 60 minutos; el panel muestra cuándo será el próximo.
+  Antes de cada reintento busca si el Issue ya existe, para no duplicarlo, y nunca envía el mismo requerimiento dos
+  veces a la vez. Los errores definitivos (falta `GITHUB_TOKEN`, token sin permiso, repositorio inexistente) no se
+  reintentan solos: el requerimiento queda guardado y se reenvía desde el panel con **Reintentar**.
 - **Panel del administrador** (`/admin` → **Portal gerencial**, solo administradores @datasheq.com; el resto de
   `/admin` no cambia): estado de las 7 salas (quién la usa, desde cuándo,
   cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
@@ -517,7 +524,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, seguimiento de Issues con un GitHub simulado, árboles de decisión y su motor) (68 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, seguimiento de Issues y reintentos del envío con un GitHub simulado, esquema y estructura de los árboles, motor del flujo) (72 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares, portal gerencial (69 pruebas)
@@ -539,7 +546,7 @@ components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, M
 components/equipo/  jornada del integrante (comenzar, terminar, tablero)
 components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores, portal gerencial)
 components/gerencia/ portal gerencial: salas, chat con el asistente, acceso denegado
-lib/chat/           portal gerencial: módulos, bloqueo de salas, árboles de decisión y su motor, Issues de GitHub
+lib/chat/           portal gerencial: módulos, bloqueo de salas, árboles de decisión y su motor, envío a GitHub con reintentos
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
