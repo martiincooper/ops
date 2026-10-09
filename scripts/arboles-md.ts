@@ -100,7 +100,7 @@ export function documento(): string {
     "",
     "**Estructura de cada entrevista**",
     "",
-    "1. **Inicio** (todas las salas): «¿En qué te puedo colaborar hoy? Cuéntame brevemente qué necesitas.»",
+    "1. **Inicio** (todas las salas): «¿En qué puedo colaborar contigo hoy? Cuéntame brevemente qué necesitas.»",
     "   (texto, obligatorio, mínimo 25 caracteres).",
     "2. **Rama del módulo**: preguntas propias de la sala; algunas respuestas llevan a otra rama o sugieren otra sala.",
     "3. **Cierre común** (todas las salas): tipo de solicitud, urgencia, plazo, interesados, resultado esperado y comentario.",

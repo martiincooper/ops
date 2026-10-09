@@ -127,11 +127,11 @@ function cierreComun(): Nodo[] {
   ];
 }
 
-/** Pregunta inicial (responde al saludo «¿En qué te puedo colaborar hoy?»). */
+/** Pregunta inicial (responde al saludo «¿En qué puedo colaborar contigo hoy?»). */
 function inicio(siguiente: string): Nodo {
   return {
     id: "inicio",
-    pregunta: "¿En qué te puedo colaborar hoy? Cuéntame brevemente qué necesitas.",
+    pregunta: "¿En qué puedo colaborar contigo hoy? Cuéntame brevemente qué necesitas.",
     tipo: "texto",
     campo: "necesidad",
     obligatorio: true,

@@ -327,7 +327,7 @@ export default function SalaChat({ modulo, nombre, esAdmin }: { modulo: Modulo; 
                     )}
                     <div
                       className={cx(
-                        "max-w-[85%] whitespace-pre-wrap rounded-3xl px-4 py-3 text-sm leading-relaxed sm:text-[15px]",
+                        "max-w-[85%] whitespace-pre-wrap rounded-3xl px-4 py-3 text-justify text-sm leading-relaxed hyphens-auto sm:text-[15px]",
                         m.autor === "robot" ? "rounded-bl-md bg-superficie text-tinta shadow-tarjeta" : "rounded-br-md bg-indigo text-white",
                       )}
                     >

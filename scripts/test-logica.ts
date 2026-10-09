@@ -797,7 +797,12 @@ async function main() {
     const d = dbControl();
     const { conversacion: c, nueva } = entrarSala(d, "c-legal", ana, t0);
     assert.equal(nueva, true);
-    assert.match(mensajesChat(d, c.id)[0].texto, /^Hola, Ana\. Bienvenido al portal gerencial de DataSheq\. Es un gusto saludarte\./);
+    assert.equal(
+      mensajesChat(d, c.id)[0].texto,
+      "Hola, Ana. Te damos la bienvenida al portal gerencial de DataSheq. Es un gusto saludarte. Estás en la sala C-Legal " +
+        "(Cumplimiento Legal), el módulo que identifica la normativa aplicable a la operación, evalúa su cumplimiento " +
+        "artículo por artículo y genera informes en PDF. ¿En qué puedo colaborar contigo hoy?",
+    );
     assert.throws(() => entrarSala(d, "c-legal", beto, mas(1)), (e: ErrorSala) => e.status === 409 && e.message === MENSAJE_SALA_OCUPADA);
     // otra sala sí está libre
     assert.equal(entrarSala(d, "c-previene", beto, mas(1)).nueva, true);

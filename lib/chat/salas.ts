@@ -76,9 +76,9 @@ export const expiraEn = (ultimaActividad: string) =>
 export function saludo(m: Modulo, nombre: string): string {
   const primerNombre = nombre.trim().split(/\s+/)[0] || nombre;
   return (
-    `Hola, ${primerNombre}. Bienvenido al portal gerencial de DataSheq. Es un gusto saludarte. ` +
-    `Estás en la sala ${m.nombre} (${m.area}): ${m.descripcion.charAt(0).toLowerCase()}${m.descripcion.slice(1)} ` +
-    "¿En qué te puedo colaborar hoy?"
+    `Hola, ${primerNombre}. Te damos la bienvenida al portal gerencial de DataSheq. Es un gusto saludarte. ` +
+    `Estás en la sala ${m.nombre} (${m.area}), el módulo que ${m.descripcion.charAt(0).toLowerCase()}${m.descripcion.slice(1)} ` +
+    "¿En qué puedo colaborar contigo hoy?"
   );
 }
 
