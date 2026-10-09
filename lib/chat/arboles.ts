@@ -4,7 +4,8 @@
 //
 // Cada sala: una pregunta inicial (lo que se necesita), una rama propia del módulo y un cierre común
 // (tipo de solicitud, urgencia, plazo, interesados, resultado esperado y comentario final).
-import type { Clasificacion, ClaveModulo, Prioridad } from "./modulos";
+import { z } from "zod";
+import { type Clasificacion, type ClaveModulo, MODULOS, type Prioridad } from "./modulos";
 
 export type TipoNodo = "opciones" | "multiple" | "si_no" | "texto" | "fecha";
 
@@ -639,8 +640,59 @@ export function arbolDe(modulo: string): Arbol | undefined {
   return ARBOLES.find((a) => a.modulo === modulo);
 }
 
-// ── Validación (la usan las pruebas; un árbol inválido no debe llegar a producción)
+// ── Validación (pruebas, arranque del servidor y generador del documento: un árbol inválido no llega a producción)
 export const MAX_PREGUNTAS = 12;
+
+const CLAVES = MODULOS.map((m) => m.clave) as [ClaveModulo, ...ClaveModulo[]];
+
+/** Esquema de los datos (forma y valores). Objetos estrictos: un campo mal escrito («obligatoria») es un error. */
+const esquemaOpcion = z.strictObject({
+  valor: z.string().regex(/^[a-z0-9_]{1,40}$/, "minúsculas, números o _ (máximo 40)"),
+  etiqueta: z.string().trim().min(1, "no puede estar vacía").max(80, "máximo 80 caracteres"),
+  siguiente: z.string().min(1).optional(),
+  sala_sugerida: z.enum(CLAVES).optional(),
+  prioridad: z.enum(["critica", "alta", "media", "baja"]).optional(),
+  clasificacion: z.enum(["nueva_funcionalidad", "mejora", "error", "consulta", "otro"]).optional(),
+});
+
+const esquemaNodo = z
+  .strictObject({
+    id: z.string().regex(/^[a-z]+(\.[a-z0-9_]+)?$/, "formato «modulo.nombre» en minúsculas"),
+    pregunta: z
+      .string()
+      .trim()
+      .min(5, "muy corta")
+      .max(300, "máximo 300 caracteres")
+      .refine((p) => /[?.)]$/.test(p), "debe terminar en «?», «.» o «)»"),
+    tipo: z.enum(["opciones", "multiple", "si_no", "texto", "fecha"]),
+    campo: z.enum(["necesidad", "contexto", "alcance", "interesados", "plazo", "resultado", "comentario", "clasificacion", "urgencia"]),
+    obligatorio: z.boolean(),
+    opciones: z.array(esquemaOpcion).min(2, "al menos 2 opciones").max(8, "máximo 8 opciones").optional(),
+    siguiente: z.string().min(1).optional(),
+    minimo: z.number().int().min(1).max(500).optional(),
+    repregunta: z.string().trim().min(10).max(300).optional(),
+    otra: z.boolean().optional(),
+  })
+  .refine((n) => n.tipo !== "si_no" || n.opciones?.length === 2, { message: "una pregunta de sí/no tiene exactamente 2 opciones" })
+  .refine((n) => !n.repregunta || n.minimo !== undefined, { message: "la repregunta solo aplica con un mínimo de caracteres" });
+
+export const esquemaArbol = z.strictObject({
+  modulo: z.enum(CLAVES),
+  raiz: z.string().min(1),
+  nodos: z.array(esquemaNodo).min(1).max(40),
+});
+
+/** Errores de forma del árbol según el esquema, con la ruta del dato («nodos[3].pregunta: …»). */
+export function erroresDeEsquema(a: unknown): string[] {
+  const r = esquemaArbol.safeParse(a);
+  if (r.success) return [];
+  const nodos = (a as Partial<Arbol>)?.nodos;
+  return r.error.issues.map((i) => {
+    const ruta = i.path.map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`)).join("").replace(/^\./, "");
+    const n = i.path[0] === "nodos" && typeof i.path[1] === "number" ? nodos?.[i.path[1]] : undefined;
+    return `${ruta}${n?.id ? ` (${n.id})` : ""}: ${i.message}`;
+  });
+}
 
 /** Destinos posibles desde un nodo: el de cada opción (o el del nodo) y, sin opciones o con «Otra», el del nodo. */
 export function salidas(n: Nodo): string[] {
@@ -653,8 +705,10 @@ export function salidas(n: Nodo): string[] {
   return [...d];
 }
 
-/** Errores del árbol (vacío si es válido). */
+/** Errores del árbol (vacío si es válido): primero el esquema de los datos, después la estructura del grafo. */
 export function validarArbol(a: Arbol): string[] {
+  const esquema = erroresDeEsquema(a);
+  if (esquema.length) return esquema;
   const e: string[] = [];
   const porId = new Map<string, Nodo>();
   for (const n of a.nodos) {

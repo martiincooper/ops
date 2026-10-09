@@ -57,6 +57,8 @@ export interface Conversacion {
   issue_motivo: string | null;
   issue_asignado: string | null;
   issue_actualizado_en: string | null;
+  issue_intentos: number;
+  issue_proximo_intento: string | null;
 }
 
 export interface Mensaje {

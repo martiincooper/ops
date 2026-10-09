@@ -10,12 +10,14 @@ import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio 
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
-import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, arbolDe, largos, validarArbol } from "../lib/chat/arboles";
+import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, arbolDe, erroresDeEsquema, largos, validarArbol } from "../lib/chat/arboles";
+import { ESPERAS_MIN, MAX_REINTENTOS, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
+import { type DatosIssue, ErrorGithub, crearIssueEn, olvidarEtiquetas } from "../lib/chat/githubApi";
 import { type Entrada, type Linea, type PreguntaVista, type ResultadoTurno, avanzar, preguntaActual, requerimientoDesdeFlujo } from "../lib/chat/flujo";
 import { RUTA_DOC, documento as documentoArboles } from "./arboles-md";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos, turnosDelAsistente } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
-import { MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTicket, esDominioGerencia, moduloPorClave } from "../lib/chat/modulos";
+import { type ClaveModulo, MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTicket, esDominioGerencia, moduloPorClave } from "../lib/chat/modulos";
 import {
   ErrorSala,
   INACTIVIDAD_MIN,
@@ -987,8 +989,8 @@ async function main() {
       modulo: "c-legal",
       raiz: "a",
       nodos: [
-        { id: "a", pregunta: "A", tipo: "si_no", campo: "alcance", obligatorio: true, opciones: [{ valor: "si", etiqueta: "Sí", siguiente: "b" }, { valor: "no", etiqueta: "No", siguiente: FIN }] },
-        { id: "b", pregunta: "B", tipo: "texto", campo: "contexto", obligatorio: true, siguiente: FIN },
+        { id: "a", pregunta: "¿Pregunta A?", tipo: "si_no", campo: "alcance", obligatorio: true, opciones: [{ valor: "si", etiqueta: "Sí", siguiente: "b" }, { valor: "no", etiqueta: "No", siguiente: FIN }] },
+        { id: "b", pregunta: "¿Pregunta B?", tipo: "texto", campo: "contexto", obligatorio: true, siguiente: FIN },
       ],
     });
     assert.deepEqual(validarArbol(base()), []);
@@ -996,7 +998,7 @@ async function main() {
     ciclo.nodos[1].siguiente = "a";
     assert.match(validarArbol(ciclo).join(), /ciclo: a → b → a/);
     const suelto = base();
-    suelto.nodos.push({ id: "c", pregunta: "C", tipo: "texto", campo: "contexto", obligatorio: false, siguiente: FIN });
+    suelto.nodos.push({ id: "c", pregunta: "¿Pregunta C?", tipo: "texto", campo: "contexto", obligatorio: false, siguiente: FIN });
     assert.match(validarArbol(suelto).join(), /c: no se alcanza/);
     const destino = base();
     destino.nodos[1].siguiente = "zz";
@@ -1011,6 +1013,156 @@ async function main() {
     otra.nodos[0].otra = true;
     assert.match(validarArbol(otra).join(), /necesita un destino por defecto/);
   });
+  await prueba("esquema de los árboles: campos mal escritos, tipos, formatos y valores inválidos", () => {
+    const base = (): Arbol => JSON.parse(JSON.stringify(arbolDe("c-legal")));
+    assert.deepEqual(erroresDeEsquema(base()), []);
+    const casos: [string, (a: Arbol) => void, RegExp][] = [
+      ["campo mal escrito", (a) => Object.assign(a.nodos[1], { obligatoria: true }), /nodos\[1\] \(legal\.ambito\): .*obligatoria/],
+      ["tipo inexistente", (a) => Object.assign(a.nodos[1], { tipo: "lista" }), /nodos\[1\]\.tipo \(legal\.ambito\)/],
+      ["pregunta vacía", (a) => (a.nodos[2].pregunta = "  "), /nodos\[2\]\.pregunta \(legal\.norma\): muy corta/],
+      ["pregunta sin cierre", (a) => (a.nodos[2].pregunta = "Qué norma aplica"), /debe terminar en «\?», «\.» o «\)»/],
+      ["id con mayúsculas", (a) => (a.nodos[2].id = "Legal.Norma"), /formato «modulo\.nombre»/],
+      ["sí/no con 3 opciones", (a) => a.nodos[5].opciones!.push({ valor: "talvez", etiqueta: "Tal vez" }), /exactamente 2 opciones/],
+      ["valor con espacios", (a) => (a.nodos[1].opciones![0].valor = "con espacios"), /minúsculas, números o _/],
+      ["sala inexistente", (a) => (a.nodos[1].opciones![0].sala_sugerida = "c-otra" as ClaveModulo), /sala_sugerida/],
+      ["prioridad inexistente", (a) => ((a.nodos[1].opciones![0] as { prioridad?: string }).prioridad = "urgente"), /prioridad/],
+      ["repregunta sin mínimo", (a) => (a.nodos[0].minimo = undefined), /la repregunta solo aplica con un mínimo/],
+      ["módulo desconocido", (a) => (a.modulo = "c-nada" as ClaveModulo), /^modulo:/],
+    ];
+    for (const [nombre, romper, esperado] of casos) {
+      const a = base();
+      romper(a);
+      const errores = validarArbol(a);
+      assert.ok(errores.length, `${nombre}: no detectado`);
+      assert.match(errores.join(" | "), esperado, nombre);
+    }
+  });
+
+  // ── Envío a GitHub con reintentos, contra un GitHub simulado
+  type Manejador = (req: http.IncomingMessage, url: URL, cuerpo: string) => { status: number; json?: unknown; headers?: Record<string, string> };
+  let manejar: Manejador = () => ({ status: 500 });
+  const pedidos: string[] = [];
+  const falso = http.createServer(async (req, res) => {
+    let cuerpo = "";
+    for await (const c of req) cuerpo += c;
+    const url = new URL(req.url ?? "/", "http://x");
+    pedidos.push(`${req.method} ${url.pathname}`);
+    const r = manejar(req, url, cuerpo);
+    res.writeHead(r.status, { "content-type": "application/json", ...r.headers }).end(JSON.stringify(r.json ?? {}));
+  });
+  await new Promise<void>((ok) => falso.listen(0, "127.0.0.1", ok));
+  const cfgFalso = { api: `http://127.0.0.1:${(falso.address() as { port: number }).port}`, repo: "dueno/repo", token: "t" };
+  const sinEspera = { dormir: async () => {} };
+  const issueCreado = { status: 201, json: { number: 41, html_url: "https://github.example/dueno/repo/issues/41" } };
+  const datosIssue = (ticket = 7): DatosIssue => ({
+    ticket,
+    modulo: moduloPorClave("c-legal") as Modulo,
+    requerimiento: {
+      titulo: "Informe DS 594", resumen: "r", clasificacion: "mejora", prioridad: "alta", justificacion_prioridad: "j",
+      contexto: "c", necesidad: "n", alcance: [], criterios_aceptacion: ["ok"], interesados: [], plazo: null,
+    },
+    solicitante: { nombre: "Ana", email: "ana@datasheq.com" },
+    conversacionId: "conv",
+    fecha: "2026-10-08",
+    transcripcion: [],
+  });
+  const posts = () => pedidos.filter((p) => p === "POST /repos/dueno/repo/issues").length;
+
+  await prueba("GitHub: reintenta errores transitorios (502, red, 429 con Retry-After) y no los definitivos (422)", async () => {
+    olvidarEtiquetas();
+    pedidos.length = 0;
+    let n = 0;
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : ++n === 1 ? { status: 502 } : issueCreado);
+    assert.deepEqual(await crearIssueEn(cfgFalso, datosIssue(), sinEspera), { numero: 41, url: "https://github.example/dueno/repo/issues/41" });
+    assert.equal(posts(), 2); // el 502 se reintentó una vez
+
+    pedidos.length = 0;
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 422, json: { message: "Validation Failed" } });
+    await assert.rejects(crearIssueEn(cfgFalso, datosIssue(), sinEspera), (e: ErrorGithub) => !e.transitorio && e.status === 422 && /Validation Failed/.test(e.message));
+    assert.equal(posts(), 1); // definitivo: sin reintento
+
+    const esperas: number[] = [];
+    n = 0;
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : ++n === 1 ? { status: 429, headers: { "retry-after": "2" } } : issueCreado);
+    await crearIssueEn(cfgFalso, datosIssue(), { dormir: async (ms) => void esperas.push(ms) });
+    assert.deepEqual(esperas, [2000]); // respeta Retry-After
+
+    const caido = { ...cfgFalso, api: "http://127.0.0.1:9" }; // nadie escucha: error de red
+    olvidarEtiquetas();
+    await assert.rejects(crearIssueEn(caido, datosIssue(), sinEspera), (e: ErrorGithub) => e.transitorio && /No se pudo conectar/.test(e.message));
+  });
+  await prueba("GitHub: al reintentar no duplica el Issue si el intento anterior ya lo creó", async () => {
+    pedidos.length = 0;
+    manejar = (req, url) =>
+      url.pathname.endsWith("/issues") && req.method === "GET"
+        ? { status: 200, json: [{ number: 40, html_url: "https://github.example/dueno/repo/issues/40", title: "[GER-0007][C-Legal] Informe DS 594" }] }
+        : issueCreado;
+    const r = await crearIssueEn(cfgFalso, datosIssue(7), { ...sinEspera, comprobarDuplicado: true });
+    assert.deepEqual(r, { numero: 40, url: "https://github.example/dueno/repo/issues/40", existente: true });
+    assert.equal(posts(), 0);
+  });
+  await prueba("envío con reintentos automáticos: 1, 2, 5… minutos, solo transitorios, sin duplicar y uno a la vez", async () => {
+    const d = dbControl();
+    const generar = (persona: typeof ana, sala: string) => {
+      const c = entrarSala(d, sala, persona, t0).conversacion;
+      d.prepare("UPDATE chat_conversaciones SET estado = 'generada', requerimiento_json = ? WHERE id = ?").run(JSON.stringify(datosIssue().requerimiento), c.id);
+      asignarTicket(d, c.id);
+      return c.id;
+    };
+    const fila = (id: string) => conversacionChat(d, id)!;
+    let reloj = t0.getTime();
+    const op = { ...sinEspera, ahora: () => new Date(reloj) };
+
+    // Sin token: error definitivo, sin reintento automático
+    const sinToken = generar(ana, "c-legal");
+    assert.deepEqual(await enviarIssue(d, sinToken, null, op), { ok: false, error: SIN_TOKEN, reintento_en: null });
+    assert.equal(fila(sinToken).issue_proximo_intento, null);
+
+    // GitHub caído: programa 1, 2, 5, 15, 30 y 60 minutos; después, solo manual
+    olvidarEtiquetas();
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 503 });
+    const id = generar(beto, "c-previene");
+    for (const [i, min] of ESPERAS_MIN.entries()) {
+      const r = await enviarIssue(d, id, cfgFalso, op);
+      assert.equal(r.reintento_en, new Date(reloj + min * 60_000).toISOString(), `intento ${i + 1}`);
+      assert.deepEqual(pendientesDeReintento(d, new Date(reloj + min * 60_000 - 1000)), []); // aún no vence
+      reloj += min * 60_000;
+      assert.deepEqual(pendientesDeReintento(d, new Date(reloj)), [id]);
+    }
+    const ultimo = await enviarIssue(d, id, cfgFalso, op);
+    assert.equal(ultimo.reintento_en, null);
+    assert.equal(fila(id).issue_intentos, MAX_REINTENTOS + 1); // el envío inicial y los 6 reintentos automáticos
+
+    // Vuelve GitHub: el reintento automático lo envía (buscando antes si ya existe) y limpia el error
+    const otro = generar({ ...ana, email: "carla@datasheq.com" }, "c-lidera");
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 503 });
+    await enviarIssue(d, otro, cfgFalso, op);
+    reloj += 61_000;
+    pedidos.length = 0;
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : req.method === "GET" ? { status: 200, json: [] } : issueCreado);
+    assert.equal(await procesarPendientes(d, cfgFalso, op), 1);
+    assert.ok(pedidos.includes("GET /repos/dueno/repo/issues")); // buscó duplicados antes de crear
+    assert.deepEqual([fila(otro).issue_numero, fila(otro).issue_error, fila(otro).issue_proximo_intento], [41, null, null]);
+
+    // Error definitivo (token sin permiso): no se reprograma
+    const prohibido = generar({ ...ana, email: "dora@datasheq.com" }, "c-acredita");
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 403, json: { message: "Resource not accessible" } });
+    const r403 = await enviarIssue(d, prohibido, cfgFalso, op);
+    assert.deepEqual([r403.ok, r403.reintento_en, fila(prohibido).issue_intentos], [false, null, 0]);
+
+    // Uno a la vez: el botón y el reintento automático no envían el mismo requerimiento en paralelo
+    const doble = generar({ ...ana, email: "eva@datasheq.com" }, "c-capacita");
+    let soltar: () => void = () => {};
+    const espera = new Promise<void>((ok) => (soltar = ok));
+    const lento = { ...op, dormir: () => espera };
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 503 });
+    const primero = enviarIssue(d, doble, cfgFalso, lento);
+    assert.deepEqual(await enviarIssue(d, doble, cfgFalso, op), { ok: false, error: "El requerimiento ya se está enviando a GitHub" });
+    soltar();
+    await primero;
+  });
+  falso.close();
+
   // ── Motor del flujo (#17): conversación simulada sobre el árbol de una sala
   const charla = (modulo: string) => {
     const a = arbolDe(modulo) as Arbol;

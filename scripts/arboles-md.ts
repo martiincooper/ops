@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, type Nodo, largos } from "../lib/chat/arboles";
+import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, type Nodo, largos, validarArbol } from "../lib/chat/arboles";
 import { MODULOS, NOMBRE_CLASIFICACION, NOMBRE_PRIORIDAD, moduloPorClave } from "../lib/chat/modulos";
 
 export const RUTA_DOC = "docs/arboles-de-decision.md";
@@ -145,6 +145,12 @@ export function documento(): string {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // No se documenta un árbol inválido: primero el esquema y la estructura
+  const errores = ARBOLES.flatMap((a) => validarArbol(a).map((e) => `${a.modulo}: ${e}`));
+  if (errores.length) {
+    console.error(`Árboles inválidos; no se generó ${RUTA_DOC}:\n${errores.map((e) => `  - ${e}`).join("\n")}`);
+    process.exit(1);
+  }
   fs.writeFileSync(RUTA_DOC, documento());
   console.log(`Escrito ${RUTA_DOC}`);
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Bot, ChevronDown, ExternalLink, Lock, LockOpen, RefreshCw, ScrollText } from "lucide-react";
+import { AlertTriangle, Bot, ChevronDown, Clock, ExternalLink, Lock, LockOpen, RefreshCw, ScrollText } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { ChipEstadoIssue, IconoModulo } from "@/components/gerencia/comun";
 import {
@@ -35,6 +35,8 @@ interface Fila {
   issue_error: string | null;
   issue_asignado: string | null;
   issue_actualizado_en: string | null;
+  issue_intentos: number;
+  issue_proximo_intento: string | null;
   estado_issue: EstadoVisible | null;
   respuestas: number;
 }
@@ -43,7 +45,7 @@ interface Datos {
   salas: EstadoSala[];
   historial: Fila[];
   seguimiento: EstadoSincronizacion;
-  config: { github: boolean; repositorio: string; inactividad_min: number; turnos_max: number };
+  config: { github: boolean; repositorio: string; inactividad_min: number; turnos_max: number; reintentos_max: number };
 }
 
 interface Detalle {
@@ -308,6 +310,16 @@ export default function ChatGerencia() {
                         ) : f.estado === "generada" ? (
                           <div className="space-y-1">
                             {f.issue_error && <p className="max-w-[14rem] text-xs text-error-tinta">{f.issue_error}</p>}
+                            {f.issue_proximo_intento ? (
+                              <p className="flex max-w-[14rem] items-center gap-1 text-xs text-tinta-3">
+                                <Clock size={12} aria-hidden className="shrink-0" /> Reintento automático {fechaHora(f.issue_proximo_intento)} (
+                                {f.issue_intentos} de {datos.config.reintentos_max})
+                              </p>
+                            ) : (
+                              f.issue_intentos >= datos.config.reintentos_max && (
+                                <p className="max-w-[14rem] text-xs text-tinta-3">Sin más reintentos automáticos</p>
+                              )
+                            )}
                             <button
                               type="button"
                               disabled={ocupado === f.id}
