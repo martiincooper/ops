@@ -670,6 +670,7 @@ export function validarArbol(a: Arbol): string[] {
     if (n.opciones?.some((o) => !o.siguiente) && !n.siguiente) e.push(`${n.id}: una opción no tiene destino`);
     if (!n.opciones && !n.siguiente) e.push(`${n.id}: sin destino`);
     if (n.otra && !n.siguiente) e.push(`${n.id}: la respuesta escrita («Otra») necesita un destino por defecto`);
+    if (!n.obligatorio && !n.siguiente) e.push(`${n.id}: una pregunta opcional necesita un destino por defecto (para saltarla)`);
     for (const o of n.opciones ?? []) if (o.sala_sugerida === a.modulo) e.push(`${n.id}: sugiere su propia sala`);
     const valores = (n.opciones ?? []).map((o) => o.valor);
     if (new Set(valores).size !== valores.length) e.push(`${n.id}: valores de opción repetidos`);

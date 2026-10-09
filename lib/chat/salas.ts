@@ -3,6 +3,7 @@
 // Sin "server-only" para poder probarlo con scripts/test-logica.ts.
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { arbolDe } from "./arboles";
 import { MENSAJE_SALA_OCUPADA, MODULOS, type ClaveModulo, type Modulo, moduloPorClave } from "./modulos";
 
 type DB = Database.Database;
@@ -166,7 +167,8 @@ export function entrarSala(db: DB, clave: string, p: Persona, ahora = new Date()
       p.email.toLowerCase(),
       iso(ahora),
     );
-    agregarMensaje(db, id, "robot", saludo(m, p.nombre), { tema: 0, completitud: 0 }, ahora);
+    // El saludo hace la primera pregunta del árbol de la sala (#17)
+    agregarMensaje(db, id, "robot", saludo(m, p.nombre), { nodo: arbolDe(m.clave)?.raiz ?? "inicio", completitud: 0 }, ahora);
     return { conversacion: conversacion(db, id) as Conversacion, nueva: true };
   })();
 }
