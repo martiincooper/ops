@@ -42,7 +42,7 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
         </span>
         <div>
           <h1 className="text-xl font-semibold text-tinta sm:text-2xl">Hola, {primerNombre}. Es un gusto saludarte.</h1>
-          <p className="mt-1 text-sm text-tinta-2 sm:text-base">
+          <p className="mt-1 text-justify text-sm text-tinta-2 hyphens-auto sm:text-base">
             Elige la sala del módulo sobre el que quieres levantar un requerimiento. Nuestro asistente te hará algunas
             preguntas y, al finalizar, enviará el requerimiento al equipo de desarrollo.
           </p>

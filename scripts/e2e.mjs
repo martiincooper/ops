@@ -910,8 +910,8 @@ async function main() {
     const r = await gGerente.pedir("/api/chat/salas/c-legal", { metodo: "POST" });
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     convLegal = r.datos.id;
-    assert.match(r.datos.mensajes[0].texto, /^Hola, Gonzalo\. Bienvenido al portal gerencial de DataSheq\. Es un gusto saludarte\./);
-    assert.match(r.datos.mensajes[0].texto, /¿En qué te puedo colaborar hoy\?$/);
+    assert.match(r.datos.mensajes[0].texto, /^Hola, Gonzalo\. Te damos la bienvenida al portal gerencial de DataSheq\. Es un gusto saludarte\./);
+    assert.match(r.datos.mensajes[0].texto, /\(Cumplimiento Legal\), el módulo que identifica la normativa .* ¿En qué puedo colaborar contigo hoy\?$/);
     const otra = await gEquipo.pedir("/api/chat/salas/c-legal", { metodo: "POST" });
     assert.equal(otra.status, 409);
     assert.equal(otra.datos.error, OCUPADA);

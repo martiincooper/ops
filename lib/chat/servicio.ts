@@ -143,8 +143,8 @@ export async function generarRequerimiento(db: DB, c: Conversacion, p: Persona) 
   const issue = await publicarIssue(db, c.id);
   const t = codigoTicket(ticket);
   const despedida = issue.ok
-    ? `Muchas gracias, ${p.nombre.split(/\s+/)[0]}. Generé el requerimiento ${t} y lo envié al equipo de desarrollo. Fue un gusto colaborarte; la sala ya quedó liberada.`
-    : `Muchas gracias, ${p.nombre.split(/\s+/)[0]}. Generé el requerimiento ${t} y quedó registrado; el envío a GitHub quedó pendiente y el administrador lo completará. La sala ya quedó liberada.`;
+    ? `Muchas gracias, ${p.nombre.split(/\s+/)[0]}. Generé el requerimiento ${t} y lo envié al equipo de desarrollo. Fue un gusto colaborar contigo; la sala ya está libre.`
+    : `Muchas gracias, ${p.nombre.split(/\s+/)[0]}. Generé el requerimiento ${t} y quedó registrado. El envío a GitHub está pendiente y el administrador lo completará. La sala ya está libre.`;
   db.prepare("INSERT INTO chat_mensajes (conversacion_id, autor, texto) VALUES (?, 'robot', ?)").run(c.id, despedida);
   return { ticket: t, requerimiento: r, issue };
 }
