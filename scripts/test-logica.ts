@@ -1,5 +1,6 @@
 // Pruebas de reglas puras: zona horaria, Say-Do por objetivos, tableros, migraciones, códigos. Ejecutar: npm run test:logica
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
@@ -9,7 +10,9 @@ import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio 
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
+import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, largos, validarArbol } from "../lib/chat/arboles";
 import { type Linea, requerimientoGuiado, turnoGuiado } from "../lib/chat/guion";
+import { RUTA_DOC, documento as documentoArboles } from "./arboles-md";
 import { CUPO_POR_MINUTO, consumirCupo, consumoDelMes, reiniciarCupos, sumarConsumo, turnosDelAsistente } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
 import { MENSAJE_SALA_OCUPADA, MODULOS, codigoTicket, esDominioGerencia } from "../lib/chat/modulos";
@@ -970,6 +973,48 @@ async function main() {
       servidor.close();
       reiniciarSincronizacion();
     }
+  });
+  await prueba("árboles de decisión (#17): las 7 salas, válidos y con su documento al día", () => {
+    assert.deepEqual(ARBOLES.map((a) => a.modulo), MODULOS.map((m) => m.clave));
+    for (const a of ARBOLES) {
+      assert.deepEqual(validarArbol(a), [], a.modulo);
+      assert.ok(largos(a).max <= MAX_PREGUNTAS, a.modulo);
+      assert.ok(a.nodos.some((n) => n.opciones?.some((o) => o.sala_sugerida)), `${a.modulo}: sin sugerencia de sala`);
+    }
+    assert.equal(
+      fs.readFileSync(RUTA_DOC, "utf8").replace(/\r\n/g, "\n"), // git en Windows puede convertir a CRLF
+      documentoArboles(),
+      `${RUTA_DOC} está desactualizado: ejecuta npm run arboles:doc`,
+    );
+  });
+  await prueba("árboles de decisión: el validador detecta ciclos, nodos sueltos, destinos y sugerencias inválidas", () => {
+    const base = (): Arbol => ({
+      modulo: "c-legal",
+      raiz: "a",
+      nodos: [
+        { id: "a", pregunta: "A", tipo: "si_no", campo: "alcance", obligatorio: true, opciones: [{ valor: "si", etiqueta: "Sí", siguiente: "b" }, { valor: "no", etiqueta: "No", siguiente: FIN }] },
+        { id: "b", pregunta: "B", tipo: "texto", campo: "contexto", obligatorio: true, siguiente: FIN },
+      ],
+    });
+    assert.deepEqual(validarArbol(base()), []);
+    const ciclo = base();
+    ciclo.nodos[1].siguiente = "a";
+    assert.match(validarArbol(ciclo).join(), /ciclo: a → b → a/);
+    const suelto = base();
+    suelto.nodos.push({ id: "c", pregunta: "C", tipo: "texto", campo: "contexto", obligatorio: false, siguiente: FIN });
+    assert.match(validarArbol(suelto).join(), /c: no se alcanza/);
+    const destino = base();
+    destino.nodos[1].siguiente = "zz";
+    assert.match(validarArbol(destino).join(), /destino inexistente zz/);
+    const propia = base();
+    propia.nodos[0].opciones![0].sala_sugerida = "c-legal";
+    assert.match(validarArbol(propia).join(), /sugiere su propia sala/);
+    const lineal = base();
+    lineal.nodos[0].opciones![1].siguiente = "b";
+    assert.match(validarArbol(lineal).join(), /ninguna rama condicional/);
+    const otra = base();
+    otra.nodos[0].otra = true;
+    assert.match(validarArbol(otra).join(), /necesita un destino por defecto/);
   });
   await prueba("entrevista guiada: repregunta si es breve, avanza y termina lista para generar", () => {
     const m = MODULOS[0];
