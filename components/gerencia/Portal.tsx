@@ -11,7 +11,10 @@ import MisRequerimientos from "./MisRequerimientos";
 
 const REFRESCO_MS = 15_000;
 
-/** Las 7 salas con su estado (libre, en uso, tuya), actualizado cada 15 segundos. */
+/**
+ * Las salas activas (las de módulos con repositorio de GitHub asignado) con su estado (libre, en uso, tuya),
+ * actualizado cada 15 segundos. Las demás no se muestran.
+ */
 export default function Portal({ nombre, aviso }: { nombre: string; aviso?: string }) {
   const [salas, setSalas] = useState<EstadoSala[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +36,7 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
   }, [cargar]);
 
   const primerNombre = nombre.trim().split(/\s+/)[0];
+  const visibles = salas ? MODULOS.filter((m) => salas.some((s) => s.clave === m.clave)) : [];
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6 lg:px-8">
@@ -56,8 +60,15 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
       )}
       {error && <p className="mb-5 rounded-2xl bg-error-fondo px-4 py-3 text-sm text-error-tinta">{error}</p>}
 
+      {!salas && !error && <p className="mb-5 text-sm text-tinta-3">Cargando las salas…</p>}
+      {salas && !visibles.length && (
+        <p className="mb-5 rounded-2xl bg-suave px-4 py-3 text-sm text-tinta-3">
+          Por ahora no hay salas disponibles. Vuelve a intentarlo más tarde.
+        </p>
+      )}
+
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {MODULOS.map((m) => {
+        {visibles.map((m) => {
           const s = salas?.find((x) => x.clave === m.clave);
           const ocupadaPorOtro = !!s?.ocupada && !s.propia;
           return (

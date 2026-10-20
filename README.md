@@ -174,6 +174,11 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   Documental), C-Lidera (Programas de Liderazgo), C-Acredita (Gestión del personal), C-Capacita (Gestor del
   conocimiento) y C-Investiga (Reportabilidad e Incidentes). Algunas respuestas indican que el tema corresponde a
   otra sala: el asistente lo dice y ofrece el botón para ir allá (la entrevista puede seguir donde está).
+- **Un repositorio de GitHub por módulo** (`lib/chat/repos.ts`): los requerimientos de cada sala se envían al
+  repositorio de su módulo. Por defecto solo C-Legal tiene uno (`datasheq-creator/clegal-railway`); los demás se
+  asignan con `GITHUB_REPOS` (`c-acredita=datasheq-creator/cacredita-railway,c-lidera=…`; `c-legal=-` lo quita).
+  **Las salas sin repositorio no se muestran en el portal**, no se puede entrar a ellas (404) y el asistente no las
+  sugiere; el panel las muestra como «Oculta». Cada Issue guarda el repositorio donde se creó.
 - **Entrevista guiada por un árbol de decisión, sin IA** (`lib/chat/arboles.ts`, motor en `lib/chat/flujo.ts`; ver
   [`docs/arboles-de-decision.md`](docs/arboles-de-decision.md)): saludo personalizado, una pregunta a la vez y las
   respuestas eligen la rama siguiente. Las preguntas de opciones se responden con **botones** (en las de varias
@@ -192,7 +197,7 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   requerimiento) o tras `CHAT_INACTIVIDAD_MIN` minutos sin actividad (por defecto 15; escribir cuenta como
   actividad). Volver a entrar retoma la conversación; entrar a otra sala libera la anterior.
 - **Issue automático**: título `[GER-0001][C-Legal] …`, etiquetas del módulo (`C-Legal`), prioridad
-  (`prioridad: alta`), tipo (`tipo: mejora`) y `gerencia` (se crean solas si no existen), y en el cuerpo el ticket,
+  (`prioridad: alta`), tipo (`tipo: mejora`), `gerencia` y `ready-for-human` (se crean solas si no existen), y en el cuerpo el ticket,
   los datos de quien lo pidió, resumen, contexto, alcance, criterios de aceptación y la transcripción.
 - **Reintentos automáticos del envío**: si GitHub falla por un problema pasajero (red, tiempo de espera, error 5xx o
   límite de uso), la petición se reintenta hasta 3 veces en el momento (respetando `Retry-After`) y, si sigue
@@ -200,8 +205,11 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   Antes de cada reintento busca si el Issue ya existe, para no duplicarlo, y nunca envía el mismo requerimiento dos
   veces a la vez. Los errores definitivos (falta `GITHUB_TOKEN`, token sin permiso, repositorio inexistente) no se
   reintentan solos: el requerimiento queda guardado y se reenvía desde el panel con **Reintentar**.
+- **Credenciales de DataSHEQ**: los Issues se crean con el token de la cuenta de GitHub de DataSHEQ
+  (`GITHUB_CUENTA`, por defecto `datasheq-creator`). Antes de enviar se comprueba de quién es el token
+  (`GET /user`); si es de otra cuenta, el envío se rechaza (error definitivo, sin reintentos).
 - **Panel del administrador** (`/admin` → **Portal gerencial**, solo administradores @datasheq.com; el resto de
-  `/admin` no cambia): estado de las 7 salas (quién la usa, desde cuándo,
+  `/admin` no cambia): estado de las 7 salas con su repositorio (quién la usa, desde cuándo,
   cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
   enlace directo al Issue (o **Reintentar** si quedó pendiente).
 - **Seguimiento de requerimientos**: el estado de cada Issue se trae de GitHub (Issues con la etiqueta `gerencia`)
@@ -510,8 +518,9 @@ producción.
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
 | `CHAT_INACTIVIDAD_MIN` | `15` | Minutos sin actividad tras los que una sala se libera |
 | `CHAT_TURNOS_MAX` | `40` | Respuestas del asistente por conversación |
-| `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token con permiso «Issues: write» sobre el repositorio de los Issues |
-| `GITHUB_REPO` | `martiincooper/ops` | Repositorio donde se crean los Issues de los requerimientos |
+| `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token de la cuenta de DataSHEQ con permiso «Issues: write» sobre los repositorios de los módulos |
+| `GITHUB_CUENTA` | `datasheq-creator` | Cuenta de GitHub de DataSHEQ: se rechazan los envíos con un token de otra cuenta |
+| `GITHUB_REPOS` | `c-legal=datasheq-creator/clegal-railway` | Repositorio de cada módulo (`clave=dueño/repo`, separados por `,`); las salas sin repositorio se ocultan |
 | `GITHUB_API_URL` | `https://api.github.com` | API de GitHub (GitHub Enterprise o un GitHub simulado en pruebas) |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.

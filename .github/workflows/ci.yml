@@ -54,7 +54,7 @@ jobs:
         run: |
           docker run -d --name aether -p 127.0.0.1:3100:3000 \
             -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false \
-            -e TIPO_CAMBIO_USD=950 \
+            -e TIPO_CAMBIO_USD=950 -e GITHUB_REPOS="c-previene=prueba/previene,c-lidera=prueba/lidera" \
             aether-ops:ci
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:3100/api/health && break; sleep 1; done
           BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs

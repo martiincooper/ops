@@ -32,6 +32,7 @@ interface Fila {
   clasificacion: Clasificacion | null;
   issue_numero: number | null;
   issue_url: string | null;
+  issue_repo: string | null;
   issue_error: string | null;
   issue_asignado: string | null;
   issue_actualizado_en: string | null;
@@ -45,7 +46,13 @@ interface Datos {
   salas: EstadoSala[];
   historial: Fila[];
   seguimiento: EstadoSincronizacion;
-  config: { github: boolean; repositorio: string; inactividad_min: number; turnos_max: number; reintentos_max: number };
+  config: {
+    github: boolean;
+    cuenta: string;
+    repositorios: Record<string, string | null>;
+    inactividad_min: number; turnos_max: number;
+    reintentos_max: number;
+  };
 }
 
 interface Detalle {
@@ -131,8 +138,9 @@ export default function ChatGerencia() {
         <div className="flex gap-3 rounded-2xl bg-alerta-fondo px-4 py-3 text-sm text-alerta-tinta">
           <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden />
           <p>
-            <b>GitHub sin configurar:</b> define <code>GITHUB_TOKEN</code> (permiso «Issues: write» sobre{" "}
-            <code>{datos.config.repositorio}</code>). Los requerimientos se guardan y se envían con «Reintentar».
+            <b>GitHub sin configurar:</b> define <code>GITHUB_TOKEN</code> con un token de la cuenta de DataSHEQ{" "}
+            <code>{datos.config.cuenta}</code> (permiso «Issues: write» sobre el repositorio de cada módulo). Los
+            requerimientos se guardan y se envían con «Reintentar».
           </p>
         </div>
       )}
@@ -140,7 +148,7 @@ export default function ChatGerencia() {
       <div>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="tarjeta p-4">
-            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.ocupada).length}/7</p>
+            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.ocupada).length}/{datos.salas.filter((s) => s.repo).length}</p>
             <p className="text-sm text-tinta-3">salas en uso ahora</p>
           </div>
           <div className="tarjeta p-4">
@@ -176,7 +184,9 @@ export default function ChatGerencia() {
                     <p className="font-semibold text-tinta">{m.nombre}</p>
                     <p className="truncate text-xs text-tinta-3">{m.area}</p>
                   </div>
-                  {s.ocupada ? (
+                  {!s.repo ? (
+                    <span className="chip bg-suave text-tinta-3">Oculta</span>
+                  ) : s.ocupada ? (
                     <span className="chip bg-alerta-fondo text-alerta-tinta">
                       <Lock size={12} aria-hidden /> En uso
                     </span>
@@ -186,6 +196,15 @@ export default function ChatGerencia() {
                     </span>
                   )}
                 </div>
+                <p className="truncate text-xs text-tinta-3">
+                  {s.repo ? (
+                    <>
+                      Repositorio: <code>{s.repo}</code>
+                    </>
+                  ) : (
+                    "Sin repositorio: no se muestra en el portal (asígnalo en GITHUB_REPOS)"
+                  )}
+                </p>
                 {s.ocupada && (
                   <>
                     <p className="text-sm text-tinta-2">
@@ -305,7 +324,8 @@ export default function ChatGerencia() {
                       <td>
                         {f.issue_url ? (
                           <a href={f.issue_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-indigo-tinta hover:underline">
-                            #{f.issue_numero} <ExternalLink size={13} aria-hidden />
+                            {f.issue_repo ? `${f.issue_repo}#` : "#"}
+                            {f.issue_numero} <ExternalLink size={13} aria-hidden />
                           </a>
                         ) : f.estado === "generada" ? (
                           <div className="space-y-1">

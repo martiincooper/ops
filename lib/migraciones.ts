@@ -95,6 +95,12 @@ export const MIGRACIONES_CONTROL: string[] = [
   ALTER TABLE chat_conversaciones ADD COLUMN issue_intentos INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE chat_conversaciones ADD COLUMN issue_proximo_intento TEXT;
   `,
+  // v6 — cada módulo envía sus requerimientos a su propio repositorio: issue_repo guarda dónde se creó cada Issue (el
+  //      número solo es único dentro de un repositorio). Los Issues anteriores se crearon todos en martiincooper/ops.
+  `
+  ALTER TABLE chat_conversaciones ADD COLUMN issue_repo TEXT;
+  UPDATE chat_conversaciones SET issue_repo = 'martiincooper/ops' WHERE issue_numero IS NOT NULL;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { arbolDe } from "./arboles";
 import { MENSAJE_SALA_OCUPADA, MODULOS, type ClaveModulo, type Modulo, moduloPorClave } from "./modulos";
+import { type Entorno, reposDeModulos } from "./repos";
 
 type DB = Database.Database;
 
@@ -59,6 +60,8 @@ export interface Conversacion {
   issue_actualizado_en: string | null;
   issue_intentos: number;
   issue_proximo_intento: string | null;
+  /** Repositorio donde se creó el Issue (dueño/repositorio). */
+  issue_repo: string | null;
 }
 
 export interface Mensaje {
@@ -142,9 +145,19 @@ export function expirarInactivas(db: DB, ahora = new Date()): number {
  * suya, retoma la conversación; si la ocupa otra persona, lanza 409. Al entrar a una sala se liberan las otras
  * salas que la persona tuviera ocupadas (una sala a la vez).
  */
-export function entrarSala(db: DB, clave: string, p: Persona, ahora = new Date()): { conversacion: Conversacion; nueva: boolean } {
+export const SALA_NO_DISPONIBLE = "Esta sala no está disponible";
+
+export function entrarSala(
+  db: DB,
+  clave: string,
+  p: Persona,
+  ahora = new Date(),
+  env: Entorno = process.env,
+): { conversacion: Conversacion; nueva: boolean } {
   const m = moduloPorClave(clave);
   if (!m) throw new ErrorSala(404, "Módulo desconocido");
+  // Solo las salas con repositorio de GitHub asignado admiten entrevistas
+  if (!reposDeModulos(env)[m.clave]) throw new ErrorSala(404, SALA_NO_DISPONIBLE);
   return db.transaction(() => {
     expirarInactivas(db, ahora);
     const ocupada = db.prepare("SELECT conversacion_id, usuario_email FROM chat_salas WHERE modulo = ?").get(m.clave) as
@@ -206,17 +219,30 @@ export interface EstadoSala {
   usuario_nombre?: string;
   usuario_email?: string;
   conversacion_id?: string;
+  /** Solo para administradores: repositorio de GitHub del módulo (null: sala oculta en el portal). */
+  repo?: string | null;
 }
 
-export function estadoSalas(db: DB, p: Persona | null, conDetalle = false, ahora = new Date()): EstadoSala[] {
+/**
+ * Estado de las salas. Sin detalle (portal) solo devuelve las activas, es decir, las de módulos con repositorio
+ * asignado; con detalle (panel de administración) devuelve todas, con su repositorio.
+ */
+export function estadoSalas(
+  db: DB,
+  p: Persona | null,
+  conDetalle = false,
+  ahora = new Date(),
+  env: Entorno = process.env,
+): EstadoSala[] {
   expirarInactivas(db, ahora);
+  const repos = reposDeModulos(env);
   const filas = db
     .prepare(
       `SELECT s.modulo, s.desde, s.usuario_email, c.id AS conversacion_id, c.usuario_nombre, c.ultima_actividad
          FROM chat_salas s JOIN chat_conversaciones c ON c.id = s.conversacion_id`,
     )
     .all() as { modulo: string; desde: string; usuario_email: string; conversacion_id: string; usuario_nombre: string; ultima_actividad: string }[];
-  return MODULOS.map((m) => {
+  return MODULOS.filter((m) => conDetalle || repos[m.clave]).map((m) => {
     const f = filas.find((x) => x.modulo === m.clave);
     const propia = !!f && !!p && f.usuario_email.toLowerCase() === p.email.toLowerCase();
     return {
@@ -229,6 +255,7 @@ export function estadoSalas(db: DB, p: Persona | null, conDetalle = false, ahora
       ...(conDetalle && f
         ? { usuario_nombre: f.usuario_nombre, usuario_email: f.usuario_email, conversacion_id: f.conversacion_id }
         : {}),
+      ...(conDetalle ? { repo: repos[m.clave] } : {}),
     };
   });
 }

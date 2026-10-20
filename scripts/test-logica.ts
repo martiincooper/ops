@@ -11,8 +11,9 @@ import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tar
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, arbolDe, erroresDeEsquema, largos, validarArbol } from "../lib/chat/arboles";
-import { ESPERAS_MIN, MAX_REINTENTOS, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
-import { type DatosIssue, ErrorGithub, crearIssueEn, olvidarEtiquetas } from "../lib/chat/githubApi";
+import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
+import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas } from "../lib/chat/githubApi";
+import { REPOS_POR_DEFECTO, modulosActivos, repoDe, reposDeModulos, salaActiva } from "../lib/chat/repos";
 import { type Entrada, type Linea, type PreguntaVista, type ResultadoTurno, avanzar, preguntaActual, requerimientoDesdeFlujo } from "../lib/chat/flujo";
 import { RUTA_DOC, documento as documentoArboles } from "./arboles-md";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos, turnosDelAsistente } from "../lib/chat/uso";
@@ -21,6 +22,7 @@ import { type ClaveModulo, MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTic
 import {
   ErrorSala,
   INACTIVIDAD_MIN,
+  SALA_NO_DISPONIBLE,
   agregarMensaje,
   asignarTicket,
   cerrarConversacion,
@@ -40,6 +42,9 @@ import { capacidad, comprasPorPago, equipoActivo, gastosEmpresa, metricasExec, s
 import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
 import { METAS_DEFECTO, esquemaMetas, guardarMetas, leerMetas } from "../lib/metas";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
+
+// Todas las salas con repositorio (las pruebas de salas usan varias); las de repositorios usan su propio entorno
+process.env.GITHUB_REPOS = MODULOS.map((m) => `${m.clave}=dueno/repo`).join(",");
 
 let ok = 0;
 async function prueba(nombre: string, fn: () => void | Promise<void>) {
@@ -921,13 +926,13 @@ async function main() {
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(issues.slice((pagina - 1) * por, pagina * por)));
     });
     await new Promise<void>((ok) => servidor.listen(0, "127.0.0.1", ok));
-    const cfg = { api: `http://127.0.0.1:${(servidor.address() as { port: number }).port}`, repo: "dueno/repo", token: "t0k3n" };
+    const cfg = { api: `http://127.0.0.1:${(servidor.address() as { port: number }).port}`, token: "t0k3n", cuenta: CUENTA_DATASHEQ };
     try {
       reiniciarSincronizacion();
       const d = dbControl();
       const ids = [1, 2, 3, 99].map((n, i) => {
         const id = entrarSala(d, MODULOS[i].clave, { ...ana, email: `p${i}@datasheq.com` }, t0).conversacion.id;
-        d.prepare("UPDATE chat_conversaciones SET issue_numero = ? WHERE id = ?").run(n, id);
+        d.prepare("UPDATE chat_conversaciones SET issue_numero = ?, issue_repo = 'dueno/repo' WHERE id = ?").run(n, id);
         return id;
       });
       const fila = (id: string) =>
@@ -1041,17 +1046,19 @@ async function main() {
   // ── Envío a GitHub con reintentos, contra un GitHub simulado
   type Manejador = (req: http.IncomingMessage, url: URL, cuerpo: string) => { status: number; json?: unknown; headers?: Record<string, string> };
   let manejar: Manejador = () => ({ status: 500 });
+  let loginFalso = CUENTA_DATASHEQ;
   const pedidos: string[] = [];
   const falso = http.createServer(async (req, res) => {
     let cuerpo = "";
     for await (const c of req) cuerpo += c;
     const url = new URL(req.url ?? "/", "http://x");
     pedidos.push(`${req.method} ${url.pathname}`);
-    const r = manejar(req, url, cuerpo);
+    // GET /user: la cuenta dueña del token
+    const r = url.pathname === "/user" ? { status: 200, json: { login: loginFalso } } : manejar(req, url, cuerpo);
     res.writeHead(r.status, { "content-type": "application/json", ...r.headers }).end(JSON.stringify(r.json ?? {}));
   });
   await new Promise<void>((ok) => falso.listen(0, "127.0.0.1", ok));
-  const cfgFalso = { api: `http://127.0.0.1:${(falso.address() as { port: number }).port}`, repo: "dueno/repo", token: "t" };
+  const cfgFalso = { api: `http://127.0.0.1:${(falso.address() as { port: number }).port}`, token: "t", cuenta: CUENTA_DATASHEQ };
   const sinEspera = { dormir: async () => {} };
   const issueCreado = { status: 201, json: { number: 41, html_url: "https://github.example/dueno/repo/issues/41" } };
   const datosIssue = (ticket = 7): DatosIssue => ({
@@ -1073,23 +1080,23 @@ async function main() {
     pedidos.length = 0;
     let n = 0;
     manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : ++n === 1 ? { status: 502 } : issueCreado);
-    assert.deepEqual(await crearIssueEn(cfgFalso, datosIssue(), sinEspera), { numero: 41, url: "https://github.example/dueno/repo/issues/41" });
+    assert.deepEqual(await crearIssueEn(cfgFalso, "dueno/repo", datosIssue(), sinEspera), { numero: 41, url: "https://github.example/dueno/repo/issues/41" });
     assert.equal(posts(), 2); // el 502 se reintentó una vez
 
     pedidos.length = 0;
     manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 422, json: { message: "Validation Failed" } });
-    await assert.rejects(crearIssueEn(cfgFalso, datosIssue(), sinEspera), (e: ErrorGithub) => !e.transitorio && e.status === 422 && /Validation Failed/.test(e.message));
+    await assert.rejects(crearIssueEn(cfgFalso, "dueno/repo", datosIssue(), sinEspera), (e: ErrorGithub) => !e.transitorio && e.status === 422 && /Validation Failed/.test(e.message));
     assert.equal(posts(), 1); // definitivo: sin reintento
 
     const esperas: number[] = [];
     n = 0;
     manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : ++n === 1 ? { status: 429, headers: { "retry-after": "2" } } : issueCreado);
-    await crearIssueEn(cfgFalso, datosIssue(), { dormir: async (ms) => void esperas.push(ms) });
+    await crearIssueEn(cfgFalso, "dueno/repo", datosIssue(), { dormir: async (ms) => void esperas.push(ms) });
     assert.deepEqual(esperas, [2000]); // respeta Retry-After
 
     const caido = { ...cfgFalso, api: "http://127.0.0.1:9" }; // nadie escucha: error de red
     olvidarEtiquetas();
-    await assert.rejects(crearIssueEn(caido, datosIssue(), sinEspera), (e: ErrorGithub) => e.transitorio && /No se pudo conectar/.test(e.message));
+    await assert.rejects(crearIssueEn(caido, "dueno/repo", datosIssue(), sinEspera), (e: ErrorGithub) => e.transitorio && /No se pudo conectar/.test(e.message));
   });
   await prueba("GitHub: al reintentar no duplica el Issue si el intento anterior ya lo creó", async () => {
     pedidos.length = 0;
@@ -1097,7 +1104,7 @@ async function main() {
       url.pathname.endsWith("/issues") && req.method === "GET"
         ? { status: 200, json: [{ number: 40, html_url: "https://github.example/dueno/repo/issues/40", title: "[GER-0007][C-Legal] Informe DS 594" }] }
         : issueCreado;
-    const r = await crearIssueEn(cfgFalso, datosIssue(7), { ...sinEspera, comprobarDuplicado: true });
+    const r = await crearIssueEn(cfgFalso, "dueno/repo", datosIssue(7), { ...sinEspera, comprobarDuplicado: true });
     assert.deepEqual(r, { numero: 40, url: "https://github.example/dueno/repo/issues/40", existente: true });
     assert.equal(posts(), 0);
   });
@@ -1160,6 +1167,114 @@ async function main() {
     assert.deepEqual(await enviarIssue(d, doble, cfgFalso, op), { ok: false, error: "El requerimiento ya se está enviando a GitHub" });
     soltar();
     await primero;
+  });
+  await prueba("repositorio por módulo: C-Legal por defecto, GITHUB_REPOS asigna, «-» oculta e ignora inválidos", () => {
+    assert.deepEqual(REPOS_POR_DEFECTO, { "c-legal": "datasheq-creator/clegal-railway" });
+    assert.deepEqual(modulosActivos({}), ["c-legal"]);
+    const env = { GITHUB_REPOS: "c-acredita=datasheq-creator/cacredita-railway; C-LEGAL=-\nc-lidera=no valido,c-nada=x/y" };
+    const r = reposDeModulos(env);
+    assert.equal(r["c-acredita"], "datasheq-creator/cacredita-railway");
+    assert.equal(r["c-legal"], null); // desactivada
+    assert.equal(r["c-lidera"], null); // inválido: se ignora
+    assert.deepEqual(modulosActivos(env), ["c-acredita"]);
+    assert.deepEqual([salaActiva("c-acredita", env), salaActiva("c-legal", env), repoDe("c-nada", env)], [true, false, null]);
+    assert.equal(configDesdeEntorno({}), null); // sin token
+    assert.deepEqual(configDesdeEntorno({ GITHUB_TOKEN: "x" }), { api: "https://api.github.com", token: "x", cuenta: CUENTA_DATASHEQ });
+  });
+  await prueba("GitHub: etiqueta «ready-for-human» y solo con el token de la cuenta de DataSHEQ", async () => {
+    olvidarEtiquetas();
+    pedidos.length = 0;
+    let etiquetas: string[] = [];
+    manejar = (req, url, cuerpo) => {
+      if (url.pathname.endsWith("/labels")) return { status: 201 };
+      etiquetas = (JSON.parse(cuerpo) as { labels: string[] }).labels;
+      return issueCreado;
+    };
+    await crearIssueEn(cfgFalso, "dueno/repo", datosIssue(), sinEspera);
+    assert.ok(etiquetas.includes(ETIQUETA_REVISION) && etiquetas.includes("gerencia"), etiquetas.join());
+    assert.ok(pedidos.includes("POST /repos/dueno/repo/labels"));
+    assert.equal(pedidos[0], "GET /user"); // verifica la cuenta antes de enviar
+
+    // Token de otra cuenta: error definitivo, sin crear nada ni reintentar
+    olvidarEtiquetas();
+    pedidos.length = 0;
+    loginFalso = "otra-persona";
+    try {
+      await assert.rejects(
+        crearIssueEn(cfgFalso, "dueno/repo", datosIssue(), sinEspera),
+        (e: ErrorGithub) => !e.transitorio && e.status === 403 && /es de «otra-persona», no de la cuenta de DataSHEQ «datasheq-creator»/.test(e.message),
+      );
+      assert.deepEqual(pedidos, ["GET /user"]);
+    } finally {
+      loginFalso = CUENTA_DATASHEQ;
+      olvidarEtiquetas();
+    }
+  });
+  await prueba("envío al repositorio de cada módulo: guarda issue_repo; sin repositorio, error definitivo", async () => {
+    const d = dbControl();
+    const env = { GITHUB_REPOS: "c-acredita=dueno/acredita,c-legal=-" };
+    const generar = (email: string, sala: string) => {
+      const c = entrarSala(d, sala, { ...ana, email }, t0).conversacion; // con el entorno de las pruebas: todas activas
+      d.prepare("UPDATE chat_conversaciones SET estado = 'generada', requerimiento_json = ? WHERE id = ?").run(JSON.stringify(datosIssue().requerimiento), c.id);
+      asignarTicket(d, c.id);
+      return c.id;
+    };
+    pedidos.length = 0;
+    manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : issueCreado);
+    const acredita = generar("a@datasheq.com", "c-acredita");
+    assert.deepEqual(await enviarIssue(d, acredita, cfgFalso, { ...sinEspera, env }), { ok: true });
+    assert.ok(pedidos.includes("POST /repos/dueno/acredita/issues"), pedidos.join());
+    assert.ok(!pedidos.some((p) => p.startsWith("POST /repos/dueno/repo/")));
+    assert.deepEqual([conversacionChat(d, acredita)!.issue_repo, conversacionChat(d, acredita)!.issue_numero], ["dueno/acredita", 41]);
+
+    const legal = generar("b@datasheq.com", "c-legal"); // c-legal desactivada en este entorno
+    assert.deepEqual(await enviarIssue(d, legal, cfgFalso, { ...sinEspera, env }), { ok: false, error: SIN_REPO, reintento_en: null });
+  });
+  await prueba("seguimiento por repositorio: el mismo número en dos repositorios no se confunde", async () => {
+    const d = dbControl();
+    reiniciarSincronizacion();
+    const ids = ["dueno/uno", "dueno/dos"].map((repo, i) => {
+      const id = entrarSala(d, MODULOS[i].clave, { ...ana, email: `s${i}@datasheq.com` }, t0).conversacion.id;
+      d.prepare("UPDATE chat_conversaciones SET issue_numero = 5, issue_repo = ? WHERE id = ?").run(repo, id);
+      return id;
+    });
+    pedidos.length = 0;
+    manejar = (req, url) =>
+      url.pathname === "/repos/dueno/uno/issues"
+        ? { status: 200, json: [{ number: 5, state: "closed", state_reason: "completed", assignees: [] }] }
+        : { status: 200, json: [{ number: 5, state: "open", assignees: [{ login: "dev9" }] }] };
+    try {
+      const s = await sincronizar(d, cfgFalso, { ahora: t0.getTime() });
+      assert.equal(s.error, null);
+      assert.deepEqual(pedidos.sort(), ["GET /repos/dueno/dos/issues", "GET /repos/dueno/uno/issues"]);
+      assert.deepEqual([conversacionChat(d, ids[0])!.issue_estado, conversacionChat(d, ids[1])!.issue_estado], ["closed", "open"]);
+      assert.equal(conversacionChat(d, ids[1])!.issue_asignado, "dev9");
+    } finally {
+      reiniciarSincronizacion();
+    }
+  });
+  await prueba("salas sin repositorio: ocultas en el portal, no se puede entrar y no se sugieren", () => {
+    const d = dbControl();
+    const env = { GITHUB_REPOS: "c-acredita=dueno/acredita" }; // + C-Legal por defecto
+    assert.deepEqual(estadoSalas(d, ana, false, t0, env).map((s) => s.clave), ["c-legal", "c-acredita"]);
+    const admin = estadoSalas(d, null, true, t0, env);
+    assert.equal(admin.length, MODULOS.length); // el panel las ve todas, con su repositorio
+    assert.deepEqual([admin.find((s) => s.clave === "c-acredita")?.repo, admin.find((s) => s.clave === "c-lidera")?.repo], ["dueno/acredita", null]);
+    assert.throws(() => entrarSala(d, "c-lidera", ana, t0, env), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
+    assert.equal(entrarSala(d, "c-acredita", ana, t0, env).nueva, true);
+
+    // C-Legal sugiere C-Investiga ante un incidente, solo si esa sala está activa
+    const previo = process.env.GITHUB_REPOS;
+    process.env.GITHUB_REPOS = "c-investiga=-";
+    try {
+      const a = arbolDe("c-legal") as Arbol;
+      const lineas: Linea[] = [{ autor: "robot", texto: "Hola", meta: { nodo: "legal.ambito" } }];
+      const r = avanzar(a, lineas, { accion: "mensaje", valores: ["incidente"] });
+      assert.equal(r.sala_sugerida, null);
+      assert.doesNotMatch(r.mensaje, /C-Investiga/);
+    } finally {
+      process.env.GITHUB_REPOS = previo;
+    }
   });
   falso.close();
 

@@ -3,16 +3,25 @@
 // parámetro; sin "server-only" para poder probarlo contra un GitHub simulado (scripts/test-logica.ts).
 import type { Requerimiento } from "./flujo";
 import { NOMBRE_CLASIFICACION, NOMBRE_PRIORIDAD, codigoTicket, type Modulo } from "./modulos";
-import { ETIQUETA_ISSUES, type ConfigGithub } from "./seguimiento";
+import { type ConfigCuenta, type ConfigGithub, ETIQUETA_ISSUES, paraRepo } from "./seguimiento";
 
-/** GITHUB_TOKEN, GITHUB_REPO (por defecto martiincooper/ops) y GITHUB_API_URL (GitHub Enterprise o pruebas). */
-export function configDesdeEntorno(env: NodeJS.ProcessEnv = process.env): ConfigGithub | null {
+/** Cuenta de GitHub de DataSHEQ por defecto: los envíos solo salen con un token de esta cuenta. */
+export const CUENTA_DATASHEQ = "datasheq-creator";
+
+/** Etiqueta que llevan todos los Issues nuevos del portal: listos para que una persona los revise. */
+export const ETIQUETA_REVISION = "ready-for-human";
+
+/**
+ * GITHUB_TOKEN (de la cuenta de DataSHEQ), GITHUB_CUENTA (su login, por defecto datasheq-creator) y GITHUB_API_URL
+ * (GitHub Enterprise o pruebas). El repositorio de cada módulo se elige al enviar (./repos).
+ */
+export function configDesdeEntorno(env: Record<string, string | undefined> = process.env): ConfigCuenta | null {
   const token = env.GITHUB_TOKEN;
   if (!token) return null;
   return {
     api: (env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, ""),
-    repo: env.GITHUB_REPO || "martiincooper/ops",
     token,
+    cuenta: (env.GITHUB_CUENTA || CUENTA_DATASHEQ).trim(),
   };
 }
 
@@ -50,6 +59,16 @@ function respuestaTransitoria(res: Response): boolean {
  * error definitivo, para que quien llama lo interprete); lanza ErrorGithub transitorio si agota los intentos.
  */
 export async function peticion(cfg: ConfigGithub, ruta: string, init: RequestInit = {}, op: OpcionesPeticion = {}): Promise<Response> {
+  return peticionApi(cfg, `/repos/${cfg.repo}${ruta}`, init, op);
+}
+
+/** Como `peticion`, con una ruta absoluta de la API (p. ej. `/user`). */
+async function peticionApi(
+  cfg: { api: string; token: string },
+  ruta: string,
+  init: RequestInit = {},
+  op: OpcionesPeticion = {},
+): Promise<Response> {
   const intentos = op.intentos ?? 3;
   const esperas = op.esperas ?? [500, 1500];
   const dormir = op.dormir ?? dormirReal;
@@ -59,7 +78,7 @@ export async function peticion(cfg: ConfigGithub, ruta: string, init: RequestIni
     if (i > 0) await dormir(espera);
     espera = esperas[Math.min(i, esperas.length - 1)] ?? 0;
     try {
-      const res = await fetch(`${cfg.api}/repos/${cfg.repo}${ruta}`, {
+      const res = await fetch(`${cfg.api}${ruta}`, {
         ...init,
         headers: {
           Accept: "application/vnd.github+json",
@@ -87,9 +106,31 @@ const PRIORIDAD_COLOR: Record<string, string> = { critica: "b60205", alta: "d93f
 
 const etiquetasListas = new Set<string>(); // etiquetas que ya existen (cache del proceso, por repositorio)
 
+const cuentasVerificadas = new Map<string, string>(); // token → login (cache del proceso)
+
 /** Solo para pruebas. */
 export function olvidarEtiquetas() {
   etiquetasListas.clear();
+  cuentasVerificadas.clear();
+}
+
+/**
+ * Confirma con GitHub que el token pertenece a la cuenta de DataSHEQ configurada. Si es de otra cuenta (por ejemplo,
+ * un token personal), lanza un error definitivo: el portal no envía requerimientos con credenciales ajenas.
+ */
+export async function verificarCuenta(c: ConfigCuenta, op: OpcionesPeticion = {}): Promise<string> {
+  let login = cuentasVerificadas.get(c.token);
+  if (!login) {
+    const res = await peticionApi(c, "/user", {}, op);
+    if (res.status === 401) throw new ErrorGithub("El token de GitHub no es válido o expiró", false, 401);
+    if (!res.ok) throw new ErrorGithub(`No se pudo verificar la cuenta de GitHub (HTTP ${res.status})`, false, res.status);
+    login = ((await res.json()) as { login?: string }).login ?? "";
+    cuentasVerificadas.set(c.token, login);
+  }
+  if (login.toLowerCase() !== c.cuenta.toLowerCase()) {
+    throw new ErrorGithub(`El token de GitHub es de «${login}», no de la cuenta de DataSHEQ «${c.cuenta}»`, false, 403);
+  }
+  return login;
 }
 
 async function asegurarEtiqueta(cfg: ConfigGithub, nombre: string, color: string, descripcion: string, op: OpcionesPeticion) {
@@ -185,12 +226,18 @@ export async function buscarIssuePorTicket(cfg: ConfigGithub, ticket: number, op
   return hallado ? { numero: hallado.number, url: hallado.html_url } : null;
 }
 
-/** Crea el Issue con sus etiquetas. Con `comprobarDuplicado`, primero busca uno existente con el mismo ticket. */
+/**
+ * Crea el Issue en el repositorio del módulo, con la cuenta de DataSHEQ (verificada antes de enviar) y sus etiquetas.
+ * Con `comprobarDuplicado`, primero busca uno existente con el mismo ticket.
+ */
 export async function crearIssueEn(
-  cfg: ConfigGithub,
+  cuenta: ConfigCuenta,
+  repo: string,
   d: DatosIssue,
   op: OpcionesPeticion & { comprobarDuplicado?: boolean } = {},
 ): Promise<{ numero: number; url: string; existente?: true }> {
+  await verificarCuenta(cuenta, op);
+  const cfg = paraRepo(cuenta, repo);
   if (op.comprobarDuplicado) {
     const ya = await buscarIssuePorTicket(cfg, d.ticket, op);
     if (ya) return { ...ya, existente: true };
@@ -201,6 +248,7 @@ export async function crearIssueEn(
     [`prioridad: ${NOMBRE_PRIORIDAD[r.prioridad].toLowerCase()}`, PRIORIDAD_COLOR[r.prioridad], "Prioridad asignada en el portal gerencial"],
     [`tipo: ${NOMBRE_CLASIFICACION[r.clasificacion].toLowerCase()}`, "c5def5", "Clasificación del requerimiento"],
     [ETIQUETA_ISSUES, "6f42c1", "Requerimiento levantado por gerencia en el portal"],
+    [ETIQUETA_REVISION, "0e8a16", "Listo para que una persona lo revise"],
   ];
   for (const [nombre, color, descripcion] of etiquetas) await asegurarEtiqueta(cfg, nombre, color, descripcion, op);
   const res = await peticion(
