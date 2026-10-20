@@ -1,6 +1,7 @@
 // Prueba de extremo a extremo contra un servidor en marcha con datos VACÍOS (dos empresas por defecto).
 // Uso: DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=... COOKIE_SECURE=false TIPO_CAMBIO_USD=950 \
-//        node .next/standalone/server.js        (en otra terminal, PORT=3100)
+//        GITHUB_TOKEN= GITHUB_REPOS="c-previene=prueba/previene,c-lidera=prueba/lidera" \
+//        node .next/standalone/server.js        (en otra terminal, PORT=3100; C-Legal tiene repositorio por defecto)
 //      BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
 import assert from "node:assert/strict";
 
@@ -903,10 +904,21 @@ async function main() {
       assert.equal(r.datos.error, DENEGADO, ruta);
     }
   });
-  await prueba("7 salas libres; al entrar, saludo personalizado y sala bloqueada para otra persona", async () => {
+  await prueba("solo las salas con repositorio (C-Legal, C-Previene, C-Lidera); las demás ocultas y sin acceso", async () => {
     const s = await gGerente.pedir("/api/chat/salas");
-    assert.equal(s.datos.salas.length, 7);
-    assert.ok(s.datos.salas.every((x) => !x.ocupada));
+    assert.deepEqual(s.datos.salas.map((x) => x.clave), ["c-legal", "c-previene", "c-lidera"]);
+    assert.ok(s.datos.salas.every((x) => !x.ocupada && x.repo === undefined)); // el repositorio solo lo ve el panel
+    const oculta = await gGerente.pedir("/api/chat/salas/c-controla", { metodo: "POST" });
+    assert.deepEqual([oculta.status, oculta.datos.error], [404, "Esta sala no está disponible"]);
+    assert.equal((await gGerente.pedir("/gerencia/c-controla")).status, 404);
+    const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
+    assert.equal(panel.salas.length, 7); // el panel las ve todas
+    assert.deepEqual(
+      [panel.salas.find((x) => x.clave === "c-legal").repo, panel.salas.find((x) => x.clave === "c-controla").repo, panel.config.cuenta],
+      ["datasheq-creator/clegal-railway", null, "datasheq-creator"],
+    );
+  });
+  await prueba("salas libres; al entrar, saludo personalizado y sala bloqueada para otra persona", async () => {
     const r = await gGerente.pedir("/api/chat/salas/c-legal", { metodo: "POST" });
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     convLegal = r.datos.id;

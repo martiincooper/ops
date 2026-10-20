@@ -12,6 +12,7 @@ import {
   type Prioridad,
   moduloPorClave,
 } from "./modulos";
+import { salaActiva } from "./repos";
 import type { Autor } from "./salas";
 
 export type Accion = "mensaje" | "siguiente" | "mas_detalles";
@@ -279,7 +280,8 @@ export function avanzar(a: Arbol, lineas: Linea[], entrada: Entrada): ResultadoT
   const etiquetas = [...ok.map((o) => o.etiqueta), ...(libre ? [libre] : [])];
   const usuario = { texto: etiquetas.join(", "), meta: { nodo: n.id, valores: ok.map((o) => o.valor), ...(libre ? { libre } : {}) } };
   const destino = !varias && ok[0]?.siguiente ? ok[0].siguiente : (n.siguiente as string);
-  const sala = ok.find((o) => o.sala_sugerida)?.sala_sugerida ?? null;
+  // Solo se sugieren salas disponibles (con repositorio de GitHub)
+  const sala = ok.find((o) => o.sala_sugerida && salaActiva(o.sala_sugerida))?.sala_sugerida ?? null;
   return ir(destino, acuse, usuario, sala);
 }
 

@@ -7,8 +7,9 @@ import type Database from "better-sqlite3";
 import type { Requerimiento } from "./flujo";
 import { type DatosIssue, ErrorGithub, type OpcionesPeticion, crearIssueEn } from "./githubApi";
 import { type Modulo, moduloPorClave } from "./modulos";
+import { type Entorno, repoDe } from "./repos";
 import { conversacion, mensajes } from "./salas";
-import type { ConfigGithub } from "./seguimiento";
+import type { ConfigCuenta } from "./seguimiento";
 
 type DB = Database.Database;
 
@@ -16,6 +17,7 @@ type DB = Database.Database;
 export const ESPERAS_MIN = [1, 2, 5, 15, 30, 60];
 export const MAX_REINTENTOS = ESPERAS_MIN.length;
 export const SIN_TOKEN = "GITHUB_TOKEN no está configurado en el servidor";
+export const SIN_REPO = "El módulo no tiene un repositorio de GitHub asignado (GITHUB_REPOS)";
 
 const enCurso = new Set<string>();
 
@@ -51,8 +53,8 @@ function datosDelIssue(db: DB, id: string): DatosIssue {
 export async function enviarIssue(
   db: DB,
   id: string,
-  cfg: ConfigGithub | null,
-  op: OpcionesPeticion & { ahora?: () => Date } = {},
+  cuenta: ConfigCuenta | null,
+  op: OpcionesPeticion & { ahora?: () => Date; env?: Entorno } = {},
 ): Promise<ResultadoEnvio> {
   const ahora = op.ahora ?? (() => new Date());
   const datos = datosDelIssue(db, id);
@@ -61,16 +63,19 @@ export async function enviarIssue(
   if (enCurso.has(id)) return { ok: false, error: "El requerimiento ya se está enviando a GitHub" };
   enCurso.add(id);
   try {
-    if (!cfg) throw new ErrorGithub(SIN_TOKEN, false);
+    if (!cuenta) throw new ErrorGithub(SIN_TOKEN, false);
+    // Cada módulo envía a su propio repositorio
+    const repo = repoDe(c.modulo, op.env);
+    if (!repo) throw new ErrorGithub(SIN_REPO, false);
     // Si hubo un intento anterior, pudo llegar a GitHub aunque se perdiera la respuesta: buscar antes de crear
-    const issue = await crearIssueEn(cfg, datos, { ...op, comprobarDuplicado: c.issue_intentos > 0 || !!c.issue_error });
+    const issue = await crearIssueEn(cuenta, repo, datos, { ...op, comprobarDuplicado: c.issue_intentos > 0 || !!c.issue_error });
     // Recién creado: abierto y sin asignar hasta la próxima consulta a GitHub (#6)
     db.prepare(
       `UPDATE chat_conversaciones
-          SET issue_numero = ?, issue_url = ?, issue_error = NULL, issue_estado = 'open', issue_actualizado_en = ?,
+          SET issue_numero = ?, issue_url = ?, issue_repo = ?, issue_error = NULL, issue_estado = 'open', issue_actualizado_en = ?,
               issue_proximo_intento = NULL
         WHERE id = ?`,
-    ).run(issue.numero, issue.url, ahora().toISOString(), id);
+    ).run(issue.numero, issue.url, repo, ahora().toISOString(), id);
     return { ok: true };
   } catch (e) {
     const transitorio = e instanceof ErrorGithub ? e.transitorio : false;
@@ -106,11 +111,15 @@ export function pendientesDeReintento(db: DB, ahora = new Date()): string[] {
 }
 
 /** Reintenta los envíos vencidos, de a uno. Devuelve cuántos se enviaron. */
-export async function procesarPendientes(db: DB, cfg: ConfigGithub | null, op: OpcionesPeticion & { ahora?: () => Date } = {}): Promise<number> {
-  if (!cfg) return 0;
+export async function procesarPendientes(
+  db: DB,
+  cuenta: ConfigCuenta | null,
+  op: OpcionesPeticion & { ahora?: () => Date; env?: Entorno } = {},
+): Promise<number> {
+  if (!cuenta) return 0;
   let enviados = 0;
   for (const id of pendientesDeReintento(db, (op.ahora ?? (() => new Date()))())) {
-    const r = await enviarIssue(db, id, cfg, op);
+    const r = await enviarIssue(db, id, cuenta, op);
     if (r.ok) enviados++;
   }
   return enviados;
@@ -119,7 +128,7 @@ export async function procesarPendientes(db: DB, cfg: ConfigGithub | null, op: O
 const global = globalThis as unknown as { __aetherReintentos?: ReturnType<typeof setInterval> };
 
 /** Revisa cada minuto los reintentos vencidos (una sola vez por proceso, también con recargas de `next dev`). */
-export function iniciarReintentos(obtenerDb: () => DB, obtenerCfg: () => ConfigGithub | null, cadaMs = 60_000) {
+export function iniciarReintentos(obtenerDb: () => DB, obtenerCfg: () => ConfigCuenta | null, cadaMs = 60_000) {
   if (global.__aetherReintentos) return;
   let ocupado = false;
   global.__aetherReintentos = setInterval(async () => {

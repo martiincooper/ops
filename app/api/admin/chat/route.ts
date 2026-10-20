@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { manejar } from "@/lib/http";
-import { configGithub, githubConfigurado, repositorioIssues } from "@/lib/chat/github";
+import { configGithub, githubConfigurado, repositoriosPorModulo } from "@/lib/chat/github";
+import { CUENTA_DATASHEQ } from "@/lib/chat/githubApi";
 import { codigoTicket } from "@/lib/chat/modulos";
 import { INACTIVIDAD_MIN, estadoSalas } from "@/lib/chat/salas";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
@@ -28,7 +29,7 @@ export const GET = manejar(async (req) => {
   const filas = db
     .prepare(
       `SELECT c.id, c.modulo, c.usuario_nombre, c.usuario_email, c.estado, c.completitud, c.iniciada_en, c.terminada_en,
-              c.ticket, c.titulo, c.prioridad, c.clasificacion, c.issue_numero, c.issue_url, c.issue_error,
+              c.ticket, c.titulo, c.prioridad, c.clasificacion, c.issue_numero, c.issue_url, c.issue_repo, c.issue_error,
               c.issue_estado, c.issue_motivo, c.issue_asignado, c.issue_actualizado_en, c.issue_intentos, c.issue_proximo_intento,
               (SELECT COUNT(*) FROM chat_mensajes m WHERE m.conversacion_id = c.id AND m.autor = 'usuario') AS respuestas
          FROM chat_conversaciones c
@@ -46,7 +47,8 @@ export const GET = manejar(async (req) => {
     seguimiento,
     config: {
       github: githubConfigurado(),
-      repositorio: repositorioIssues(),
+      cuenta: configGithub()?.cuenta ?? (process.env.GITHUB_CUENTA || CUENTA_DATASHEQ),
+      repositorios: repositoriosPorModulo(),
       inactividad_min: INACTIVIDAD_MIN,
       turnos_max: TURNOS_MAX,
       reintentos_max: MAX_REINTENTOS,

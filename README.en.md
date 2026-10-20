@@ -136,6 +136,11 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   documents), C-Lidera (safety leadership programs), C-Acredita (worker and contractor accreditation), C-Capacita
   (training and knowledge) and C-Investiga (incident reporting and investigation). Some answers mean the topic
   belongs to another room: the assistant says so and offers a button to go there (the interview can continue).
+- **One GitHub repository per module** (`lib/chat/repos.ts`): each room's requirements go to its module's
+  repository. By default only C-Legal has one (`datasheq-creator/clegal-railway`); `GITHUB_REPOS` assigns the rest
+  (`c-acredita=datasheq-creator/cacredita-railway,c-lidera=…`; `c-legal=-` removes it). **Rooms without a
+  repository are hidden from the portal**, cannot be entered (404) and are never suggested; the panel shows them as
+  "Oculta". Each Issue stores the repository it was created in.
 - **Interview guided by a decision tree, no AI** (`lib/chat/arboles.ts`, engine in `lib/chat/flujo.ts`; see
   [`docs/arboles-de-decision.md`](docs/arboles-de-decision.md)): personalized greeting, one question at a time, and
   the answers pick the next branch. Option questions are answered with **buttons** (multi-select ones are ticked and
@@ -154,7 +159,7 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   `CHAT_INACTIVIDAD_MIN` minutes without activity (default 15; typing counts). Re-entering resumes the
   conversation; entering another room releases the previous one.
 - **Automatic Issue**: title `[GER-0001][C-Legal] …`, labels for the module (`C-Legal`), priority
-  (`prioridad: alta`), type (`tipo: mejora`) and `gerencia` (created if missing), and a body with the ticket, the
+  (`prioridad: alta`), type (`tipo: mejora`), `gerencia` and `ready-for-human` (created if missing), and a body with the ticket, the
   requester, summary, context, scope, acceptance criteria and the transcript.
 - **Automatic retries**: on a transient GitHub failure (network, timeout, 5xx or rate limit) the request is retried up
   to 3 times right away (honoring `Retry-After`); if it still fails, the server retries it on its own after 1, 2, 5,
@@ -162,6 +167,9 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   Issue with the same ticket so nothing is duplicated, and a requirement is never sent twice at the same time.
   Permanent errors (missing `GITHUB_TOKEN`, token without permission, unknown repository) are not retried
   automatically: the requirement is stored and can be resent from the panel with **Reintentar**.
+- **DataSHEQ credentials**: Issues are created with the token of DataSHEQ's GitHub account (`GITHUB_CUENTA`,
+  default `datasheq-creator`). Before sending, the token's owner is checked (`GET /user`); a token from another
+  account is rejected (permanent error, no retries).
 - **Requirement tracking**: each Issue's state is fetched from GitHub (Issues labeled `gerencia`) at most every
   10 minutes when the panel or the portal is opened; **Actualizar** in the panel forces it (at most once a minute).
   States: Pendiente de envío, Abierto, En curso (has an assignee), Cerrado and Descartado (closed as not planned).
@@ -171,7 +179,7 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   rápido…", nothing typed is lost), and `CHAT_TURNOS_MAX` assistant replies per conversation (default 40): the last
   one asks the person to generate the requirement and the chat only allows finishing.
 - **Admin panel** (`/admin` → Portal gerencial, `@datasheq.com` admins only; the rest of `/admin` is unchanged): the
-  7 rooms (who, since when, when it frees up, a button to release it), conversation history with ticket, priority,
+  7 rooms with their repository (who, since when, when it frees up, a button to release it), conversation history with ticket, priority,
   conversation state, GitHub state (column and filter), transcript and Issue link (or **Reintentar**).
 - Data lives in `control.db` (`chat_conversaciones`, `chat_mensajes`, `chat_salas`; automatic migrations).
 
@@ -232,8 +240,9 @@ every pull request and push to `main`; pushes to `main` also publish the `amd64`
 | `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
 | `CHAT_INACTIVIDAD_MIN` | `15` | Minutes without activity before a room is released |
 | `CHAT_TURNOS_MAX` | `40` | Assistant replies per conversation |
-| `GITHUB_TOKEN` | — (Issues stay pending) | Token with "Issues: write" on the Issues repository |
-| `GITHUB_REPO` | `martiincooper/ops` | Repository where requirement Issues are created |
+| `GITHUB_TOKEN` | — (Issues stay pending) | DataSHEQ account token with "Issues: write" on the module repositories |
+| `GITHUB_CUENTA` | `datasheq-creator` | DataSHEQ's GitHub account: sends with another account's token are rejected |
+| `GITHUB_REPOS` | `c-legal=datasheq-creator/clegal-railway` | Repository per module (`key=owner/repo`, `,`-separated); rooms without one are hidden |
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub API (GitHub Enterprise or a mock GitHub in tests) |
 
 Production (reverse proxy, backups, first-day checklist): see the Spanish README, sections 3–4.
