@@ -38,6 +38,8 @@ import {
 } from "../lib/chat/asistente";
 import { markdownAHtml } from "../lib/markdown";
 import { detallePropuesto, documentosPropuesto, listarPropuestos, zipPropuesto } from "../lib/chat/propuestos";
+import { crearGitFalso } from "./github-git-falso.mjs";
+import { LINEA_DISENO, docsPendientes, estadoDocs, procesarDocs, publicarDocs, tituloPrDocs } from "../lib/chat/docs";
 import { MSG_REPO_EN_USO, activarModulo, guardarSala, normalizarRepo } from "../lib/chat/repos";
 import { ErrorModulo, MSG_CONVERSACION_ABIERTA, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, proponerModulo, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
@@ -1989,6 +1991,7 @@ async function main() {
     let n = 100;
     manejar = (req, url, cuerpo) => {
       if (url.pathname === "/repos/dueno/activa") return repoFalso();
+      if (url.pathname.endsWith("/commits")) return { status: 404 }; // los documentos iniciales se prueban aparte (#51)
       if (url.pathname.endsWith("/labels")) return { status: 201 };
       if (req.method === "POST" && url.pathname === "/repos/dueno/activa/issues") {
         creados.push(JSON.parse(cuerpo));
@@ -2024,6 +2027,7 @@ async function main() {
     let creados = 0;
     manejar = (req, url) => {
       if (url.pathname === "/repos/dueno/fallo") return repoFalso();
+      if (url.pathname.endsWith("/commits")) return { status: 404 };
       if (url.pathname.endsWith("/labels")) return { status: 201 };
       if (req.method === "POST" && url.pathname.endsWith("/issues")) return falla && creados === 1 ? { status: 422, json: { message: "no" } } : (creados++, { status: 201, json: { number: 200 + creados, html_url: `https://github.example/dueno/fallo/issues/${200 + creados}` } });
       return { status: 200, json: [] };
@@ -2048,6 +2052,119 @@ async function main() {
     d.prepare("UPDATE chat_solicitudes SET estado = 'terminada', terminado = 1 WHERE id = ?").run(sn.id);
     await correrCierre(d, sn.id, a.cliente, null, { ...sinEspera, ahora: () => mas(4) });
     assert.equal((d.prepare("SELECT contexto FROM chat_modulos WHERE clave = 'c-fallo'").get() as { contexto: string }).contexto, "previo");
+  });
+  // ── Documentos iniciales del módulo activado (#51), contra el GitHub simulado con repositorios git en memoria
+  const montarDocs = async (nombre: string, repo: string) => {
+    const d = dbControl();
+    olvidarEtiquetas();
+    proponerModulo(d, { nombre, descripcion: `Descripción de ${nombre}` }, "ana@datasheq.com");
+    const clave = slugSala(nombre);
+    d.prepare("UPDATE chat_modulos SET contexto = ?, adrs = ? WHERE clave = ?").run(
+      "# Contexto\n\nGlosario",
+      JSON.stringify([{ archivo: "0001-uno.md", titulo: "Uno", contenido: "# Uno" }, { archivo: "0002-dos.md", titulo: "Dos", contenido: "# Dos" }]),
+      clave,
+    );
+    terminada(d, clave, ana);
+    terminada(d, clave, beto);
+    const git = crearGitFalso();
+    let falla: ((url: URL) => { status: number; json?: unknown } | null) | null = null;
+    let n = 0;
+    manejar = (req, url, cuerpo) => {
+      if (url.pathname === `/repos/${repo}`) return repoFalso();
+      if (url.pathname.endsWith("/labels")) return { status: 201 };
+      if (req.method === "POST" && url.pathname === `/repos/${repo}/issues`) return { status: 201, json: { number: ++n, html_url: `https://github.example/${repo}/issues/${n}` } };
+      const f = falla?.(url);
+      if (f) return f;
+      return git.atender(req.method ?? "GET", url.pathname, url.search, cuerpo) ?? { status: 200, json: [] };
+    };
+    const control = async () => {
+      const dato = git.atender("GET", `/control/repos/${repo}`, "", "")!.json as { commits: { sha: string; message: string; parents: string[]; files: Record<string, string> }[]; refs: Record<string, string>; prs: { number: number; title: string; body: string; head: { ref: string }; base: { ref: string }; html_url: string; state?: string }[] };
+      return dato;
+    };
+    return { d, clave, git, control, activar: () => activarModulo(d, cfgFalso, clave, repo, sinEspera), poner: (f: typeof falla) => void (falla = f) };
+  };
+  const RUTAS_DOCS = [".claude/implement-all.cloud.json", ".claude/implement-all.json", "CLAUDE.md", "CONTEXT.md", "docs/adr/0001-uno.md", "docs/adr/0002-dos.md"];
+  await prueba("docs iniciales (#51): repositorio vacío → un solo commit en main con los archivos, CLAUDE.md con la línea del design system y los Issues, JSON de la flota; no se repite", async () => {
+    const { d, clave, control, activar } = await montarDocs("C-DocsVacio", "dueno/vacio-uno");
+    const r = await activar();
+    assert.equal(r.docs?.error, null);
+    const c = await control();
+    // historia de main: un único commit raíz con exactamente los archivos
+    const main = c.commits.find((x) => x.sha === c.refs.main)!;
+    assert.deepEqual(main.parents, []);
+    assert.deepEqual(Object.keys(main.files).sort(), RUTAS_DOCS);
+    assert.equal(main.files["CONTEXT.md"], "# Contexto\n\nGlosario");
+    assert.equal(main.files["docs/adr/0002-dos.md"], "# Dos");
+    assert.deepEqual(JSON.parse(main.files[".claude/implement-all.json"]), { permissions: "skip", chrome: false, review: true });
+    assert.deepEqual(JSON.parse(main.files[".claude/implement-all.cloud.json"]), { chrome: false });
+    const claude = main.files["CLAUDE.md"];
+    assert.ok(claude.includes("# C-DocsVacio") && claude.includes("Descripción de C-DocsVacio") && claude.includes(LINEA_DISENO));
+    for (const e of r.envios) assert.ok(claude.includes(`[${e.ticket}](${e.issue_url})`));
+    assert.deepEqual([r.docs?.numero, r.docs?.url?.includes(`/commit/${main.sha}`)], [null, true]);
+    assert.deepEqual(estadoDocs(d, clave), { url: r.docs!.url, numero: null, error: null, reintento_en: null });
+    // otra vez: no hace nada
+    const antes = (await control()).commits.length;
+    assert.equal((await publicarDocs(d, cfgFalso, clave, sinEspera)).ok, true);
+    assert.equal((await control()).commits.length, antes);
+  });
+  await prueba("docs iniciales (#51): repositorio con commits → rama + un commit + PR con título y cuerpo; repetirlo reutiliza la rama y el PR", async () => {
+    const { d, clave, control, activar } = await montarDocs("C-DocsPr", "dueno/docs-pr");
+    const r = await activar();
+    const c = await control();
+    assert.equal(c.prs.length, 1);
+    const pr = c.prs[0];
+    assert.equal(pr.title, tituloPrDocs("C-DocsPr"));
+    assert.equal(pr.title, "Documentación inicial del módulo C-DocsPr");
+    assert.deepEqual([pr.head.ref, pr.base.ref], ["modulo/docs-iniciales", "main"]);
+    for (const e of r.envios) assert.ok(pr.body.includes(e.issue_url!));
+    assert.deepEqual([r.docs?.numero, r.docs?.url], [1, pr.html_url]);
+    const rama = c.commits.find((x) => x.sha === c.refs["modulo/docs-iniciales"])!;
+    assert.deepEqual(rama.parents, [c.refs.main]);
+    assert.deepEqual(Object.keys(rama.files).sort(), ["README.md", ...RUTAS_DOCS].sort());
+    assert.deepEqual(Object.keys(c.commits.find((x) => x.sha === c.refs.main)!.files), ["README.md"]); // main intacta
+    // vuelve a correr el paso (como tras perder la respuesta): ni rama ni PR nuevos
+    d.prepare("UPDATE chat_modulos SET docs_url = NULL, docs_numero = NULL WHERE clave = ?").run(clave);
+    const r2 = await publicarDocs(d, cfgFalso, clave, sinEspera);
+    assert.deepEqual([r2.ok, r2.numero, r2.url], [true, 1, pr.html_url]);
+    const c2 = await control();
+    assert.deepEqual([c2.prs.length, c2.commits.length, Object.keys(c2.refs).sort()], [1, c.commits.length, ["main", "modulo/docs-iniciales"]]);
+    // la rama existe pero el PR se cerró/no se creó: se reutiliza la rama y se crea solo el PR
+    c2.prs[0].state = "closed";
+    d.prepare("UPDATE chat_modulos SET docs_url = NULL, docs_numero = NULL WHERE clave = ?").run(clave);
+    const r3 = await publicarDocs(d, cfgFalso, clave, sinEspera);
+    assert.equal(r3.ok, true);
+    const c3 = await control();
+    assert.deepEqual([c3.prs.length, c3.commits.length], [2, c.commits.length]);
+  });
+  await prueba("docs iniciales (#51): un 5xx programa el reintento (1, 2… min) y se reintenta solo; un error definitivo se muestra sin reintento; «Reintentar» corre ahora", async () => {
+    const { d, clave, control, activar, poner } = await montarDocs("C-DocsFalla", "dueno/docs-falla");
+    poner((url) => (url.pathname.endsWith("/git/blobs") ? { status: 503, json: { message: "boom" } } : null));
+    const r = await activar();
+    assert.equal(r.sala.estado_modulo, "activo"); // la activación no falla por los documentos
+    assert.match(r.docs?.error ?? "", /503/);
+    assert.equal(r.docs?.url, null);
+    assert.equal(r.docs?.reintento_en != null, true);
+    const e1 = d.prepare("SELECT docs_intentos, docs_reintento_en FROM chat_modulos WHERE clave = ?").get(clave) as { docs_intentos: number; docs_reintento_en: string };
+    assert.equal(e1.docs_intentos, 1);
+    assert.equal(new Date(e1.docs_reintento_en).getTime() - Date.now() > 30_000 && new Date(e1.docs_reintento_en).getTime() - Date.now() <= 60_000, true);
+    // antes de vencer no se reintenta; vencido y arreglado, sí
+    assert.deepEqual(docsPendientes(d), []);
+    const vencido = new Date(Date.now() + 61_000);
+    assert.deepEqual(docsPendientes(d, vencido), [clave]);
+    poner(null);
+    assert.equal(await procesarDocs(d, cfgFalso, { ...sinEspera, ahora: () => vencido }), 1);
+    assert.equal(estadoDocs(d, clave).error, null);
+    assert.equal((await control()).prs.length, 1);
+    // error definitivo: se muestra, sin reintento programado; «Reintentar» (publicarDocs) lo corre ya
+    const x = await montarDocs("C-DocsPerm", "dueno/docs-perm");
+    x.poner((url) => (url.pathname.endsWith("/git/blobs") ? { status: 403, json: { message: "sin permisos" } } : null));
+    const rx = await x.activar();
+    assert.match(rx.docs?.error ?? "", /403.*sin permisos/);
+    assert.equal(rx.docs?.reintento_en, null);
+    assert.deepEqual(docsPendientes(x.d, new Date(Date.now() + 10 * 3_600_000)), []);
+    x.poner(null);
+    const rr = await publicarDocs(x.d, cfgFalso, x.clave, sinEspera);
+    assert.deepEqual([rr.ok, rr.error, rr.numero], [true, null, 1]);
   });
   await prueba("«Mis requerimientos» (#33): lista las solicitudes en que la persona escribió, con su estado", async () => {
     const d = dbControl();

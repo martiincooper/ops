@@ -4,6 +4,7 @@ import { Archive, ArrowLeft, Download, ExternalLink, FileArchive, FileText, Ligh
 import { useState } from "react";
 import type { ResumenPropuesto } from "@/lib/chat/propuestos";
 import type { Modulo } from "@/lib/chat/modulos";
+import type { EstadoDocs } from "@/lib/chat/docs";
 import type { ResultadoActivacion } from "@/lib/chat/repos";
 import type { Mensaje, Participante } from "@/lib/chat/salas";
 import { api, cx } from "@/lib/cliente";
@@ -93,7 +94,45 @@ function Plegable({ titulo, children, abierto }: { titulo: React.ReactNode; chil
 type Envio = ResultadoActivacion["envios"][number];
 
 /** Resultado de la activación: cada especificación enviada, con su Issue y su estado, y «Reintentar» si falló. */
-function Activado({ nombre, envios: inicial, volver }: { nombre: string; envios: Envio[]; volver: () => void }) {
+/** Documentos iniciales en el repositorio: enlace al PR (o al primer commit), o el error con «Reintentar». */
+function DocsIniciales({ clave, inicial }: { clave: string; inicial: EstadoDocs | null }) {
+  const [docs, setDocs] = useState(inicial);
+  const { ocupado, aviso, ejecutar } = useAccion();
+  if (!docs) return null;
+  const reintentar = () =>
+    ejecutar("docs", async () => {
+      const r = await api<{ docs: EstadoDocs }>(`/api/admin/chat/propuestos/${clave}/docs`, { method: "POST" });
+      setDocs(r.docs);
+      return r.docs.url ? "Documentos escritos" : "Sigue fallando";
+    });
+  return (
+    <div className="space-y-2 border-t border-linea pt-3 text-sm" data-docs>
+      <Aviso aviso={aviso} />
+      <h3 className="font-semibold text-tinta">Documentos iniciales</h3>
+      {docs.url ? (
+        <p className="flex flex-wrap items-center gap-2 text-tinta-2">
+          <a href={docs.url} target="_blank" rel="noreferrer" className="boton-texto" data-docs-enlace>
+            <ExternalLink size={13} aria-hidden /> {docs.numero ? `Pull request #${docs.numero}` : "Primer commit"}
+          </a>
+          <span className="text-xs text-tinta-3">{docs.numero ? "Revísalo y mézclalo para dejar el repositorio listo para la flota." : "Ya están en main."}</span>
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="chip bg-error-fondo text-error-tinta">No escritos</span>
+          <span className="text-xs text-tinta-3" data-docs-error>
+            {docs.error}
+            {docs.reintento_en ? ` (reintento automático a las ${fechaHora(docs.reintento_en)})` : ""}
+          </span>
+          <button type="button" onClick={reintentar} disabled={ocupado === "docs"} className="boton-suave" data-reintentar-docs>
+            <RefreshCw size={13} aria-hidden /> Reintentar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Activado({ clave, nombre, envios: inicial, docs, volver }: { clave: string; nombre: string; envios: Envio[]; docs: EstadoDocs | null; volver: () => void }) {
   const [envios, setEnvios] = useState(inicial);
   const { ocupado, aviso, ejecutar } = useAccion();
   const reintentar = (e: Envio) =>
@@ -141,6 +180,7 @@ function Activado({ nombre, envios: inicial, volver }: { nombre: string; envios:
             </li>
           ))}
         </ul>
+        <DocsIniciales clave={clave} inicial={docs} />
         <button type="button" onClick={volver} className="boton-texto">
           <ArrowLeft size={15} aria-hidden /> Módulos propuestos
         </button>
@@ -149,7 +189,7 @@ function Activado({ nombre, envios: inicial, volver }: { nombre: string; envios:
   );
 }
 
-function Activar({ clave, nombre, bloqueado, alActivar }: { clave: string; nombre: string; bloqueado: boolean; alActivar: (envios: Envio[]) => void }) {
+function Activar({ clave, nombre, bloqueado, alActivar }: { clave: string; nombre: string; bloqueado: boolean; alActivar: (r: ResultadoActivacion) => void }) {
   const [repo, setRepo] = useState("");
   const [errorRepo, setErrorRepo] = useState<string | null>(null);
   const { ocupado, aviso, ejecutar } = useAccion();
@@ -163,7 +203,7 @@ function Activar({ clave, nombre, bloqueado, alActivar }: { clave: string; nombr
         void ejecutar("activar", async () => {
           const r = await api<ResultadoActivacion>(`/api/admin/chat/propuestos/${clave}/activar`, { method: "POST", json: { repo } });
           if (r.error_repo) return void setErrorRepo(r.error_repo);
-          alActivar(r.envios);
+          alActivar(r);
         });
       }}
     >
@@ -200,8 +240,8 @@ function Activar({ clave, nombre, bloqueado, alActivar }: { clave: string; nombr
 function DetallePropuesto({ clave, volver, irASalas }: { clave: string; volver: () => void; irASalas: () => void }) {
   const { datos, error, cargando, recargar } = useDatos<Detalle>(`/api/admin/chat/propuestos/${clave}`);
   const { ocupado, aviso, ejecutar } = useAccion();
-  const [activado, setActivado] = useState<Envio[] | null>(null);
-  if (activado) return <Activado nombre={datos?.modulo.nombre ?? clave} envios={activado} volver={volver} />;
+  const [activado, setActivado] = useState<ResultadoActivacion | null>(null);
+  if (activado) return <Activado clave={clave} nombre={datos?.modulo.nombre ?? clave} envios={activado.envios} docs={activado.docs} volver={volver} />;
   if (!datos) return <Cargando cargando={cargando} error={error} />;
   const { modulo: m } = datos;
   return (
