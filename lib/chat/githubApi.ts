@@ -130,6 +130,29 @@ export async function verificarCuenta(c: ConfigCuenta, op: OpcionesPeticion = {}
   return login;
 }
 
+export interface SaludToken {
+  ok: boolean;
+  /** Login dueño del token, si GitHub lo dijo. */
+  login?: string;
+  /** Por qué no está sano. */
+  motivo?: string;
+}
+
+/** Salud del token para el panel: consulta GitHub en vivo (sin la caché de `verificarCuenta`) y no lanza. */
+export async function saludToken(c: ConfigCuenta | null, op: OpcionesPeticion = { intentos: 1 }): Promise<SaludToken> {
+  if (!c) return { ok: false, motivo: "GITHUB_TOKEN no está configurado en el servidor" };
+  try {
+    const res = await peticionApi(c, "/user", {}, op);
+    if (res.status === 401) return { ok: false, motivo: "El token de GitHub no es válido o expiró" };
+    if (!res.ok) return { ok: false, motivo: `GitHub respondió HTTP ${res.status}` };
+    const login = ((await res.json()) as { login?: string }).login ?? "";
+    if (login.toLowerCase() !== c.cuenta.toLowerCase()) return { ok: false, login, motivo: `El token es de «${login}», no de ${c.cuenta}` };
+    return { ok: true, login };
+  } catch (e) {
+    return { ok: false, motivo: (e as Error).message };
+  }
+}
+
 async function asegurarEtiqueta(cfg: ConfigGithub, nombre: string, color: string, descripcion: string, op: OpcionesPeticion) {
   const clave = `${cfg.api}|${cfg.repo}|${nombre}`;
   if (etiquetasListas.has(clave)) return;

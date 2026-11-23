@@ -52,13 +52,14 @@ jobs:
 
       - name: Pruebas extremo a extremo contra el contenedor
         run: |
-          docker run -d --name aether -p 127.0.0.1:3100:3000 \
+          # GitHub simulado en el host (sin token real); el contenedor lo alcanza por host.docker.internal
+          GITHUB_FALSO_HOST=0.0.0.0 GITHUB_FALSO_PORT=3199 node scripts/github-falso.mjs &
+          sleep 1
+          docker run -d --name aether -p 127.0.0.1:3100:3000 --add-host=host.docker.internal:host-gateway \
             -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false \
-            -e TIPO_CAMBIO_USD=950 \
+            -e TIPO_CAMBIO_USD=950 -e GITHUB_TOKEN=token-falso -e GITHUB_API_URL=http://host.docker.internal:3199 \
             aether-ops:ci
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:3100/api/health && break; sleep 1; done
-          # Las salas se crean desde el panel; el repositorio aún no, así que la prueba lo asigna en la base del contenedor
-          E2E_EJECUTAR_SQL='docker exec -e SQL aether node -e "new (require(\"better-sqlite3\"))(\"/data/control.db\").exec(process.env.SQL)"' \
           BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
           # El contenedor inicia como root solo para preparar /data (scripts/arranque.cjs) y baja a uid 1001:
           # se verifica el usuario del proceso del servidor (PID 1), no el de la imagen.
