@@ -1,0 +1,17 @@
+{
+  "_comment": "Aether Ops (Next.js 15 standalone + SQLite). No database server and no docker needed: each run uses an empty temporary DATA_DIR. `ci` (scripts/ci.sh) runs typecheck, test:logica, the build and the end-to-end suite against the standalone server on $PORT.",
+  "permissions": "skip",
+  "chrome": false,
+  "maxTurns": 300,
+  "maxBudgetUsd": 25,
+  "setup": "npm ci --no-audit --no-fund --prefer-offline",
+  "ci": "bash scripts/ci.sh",
+  "ciSlots": 1,
+  "ciRunTimeoutMinutes": 20,
+  "review": true,
+  "workerEnv": {
+    "PORT": "4{r}{k}3",
+    "NEXT_BUILD_CPUS": "2",
+    "UV_THREADPOOL_SIZE": "4"
+  }
+}
