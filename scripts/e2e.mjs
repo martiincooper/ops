@@ -1526,6 +1526,15 @@ async function main() {
     assert.ok(issues[0].title.startsWith(`[${ok.datos.envios[0].ticket}][C-Activar]`));
     assert.ok(issues[1].title.startsWith(`[${ok.datos.envios[1].ticket}][C-Activar]`));
     for (const i of issues) assert.deepEqual(i.labels, ["C-Activar", "gerencia", "spec", "ready-for-human", "modulo-nuevo"]);
+    // documentos iniciales (#51): el repo falso tiene commits → rama + PR que enlaza los Issues
+    assert.equal(ok.datos.docs.numero, 1, JSON.stringify(ok.datos.docs));
+    assert.equal(ok.datos.docs.error, null);
+    const repoGit = await (await fetch(`${GH}/control/repos/prueba/c-activar`)).json();
+    assert.deepEqual([repoGit.prs.length, repoGit.prs[0].title, repoGit.prs[0].html_url], [1, "Documentación inicial del módulo C-Activar", ok.datos.docs.url]);
+    for (const e of ok.datos.envios) assert.ok(repoGit.prs[0].body.includes(e.issue_url));
+    // «Reintentar» sin error no toca GitHub
+    assert.equal((await gAdmin.pedir("/api/admin/chat/propuestos/c-activar/docs", { metodo: "POST" })).datos.docs.url, ok.datos.docs.url);
+    assert.equal((await gGerente.pedir("/api/admin/chat/propuestos/c-activar/docs", { metodo: "POST" })).status, 403);
     // sin duplicados al repetir, y ya no es propuesta
     assert.equal((await gAdmin.pedir(ruta, { metodo: "POST", json: { repo: "prueba/c-activar" } })).status, 409);
     assert.equal((await (await fetch(`${GH}/control/issues`)).json()).filter((i) => i.repo === "prueba/c-activar").length, 2);
@@ -1539,6 +1548,37 @@ async function main() {
     assert.equal((await escribir(gGerente, "c-activar", "Ahora sí, un requerimiento normal")).status, 200);
     const turno = await esperar(async () => ((await (await fetch(`${process.env.ASIENTO}/control`)).json()).turnos.filter((t) => t.repo === "prueba/c-activar").at(-1)), "turno con el repo");
     assert.equal(turno.kind, undefined);
+  });
+
+  await prueba("módulos propuestos (#51): activar sobre un repositorio vacío → un commit en main con los archivos, y el panel muestra su enlace", async () => {
+    const GH = process.env.GITHUB_FALSO;
+    assert.equal((await gGerente.pedir("/api/chat/salas", { metodo: "POST", json: { nombre: "C-Vacio", descripcion: "Repo vacío" } })).status, 201);
+    let v;
+    for (const t of ["Una función", "Lo usan tres personas cada semana", "Eso es todo"]) {
+      assert.equal((await escribir(gGerente, "c-vacio", t)).status, 200);
+      for (let i = 0; i < 100; i++) {
+        v = (await gGerente.pedir("/api/chat/salas/c-vacio")).datos;
+        if (v.asistente === "idle" && v.mensajes.at(-1).rol === "asistente") break;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      if (v.resumen) break;
+    }
+    assert.ok(v.resumen);
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-vacio/terminar", { metodo: "POST" })).status, 200);
+    for (let i = 0; i < 100; i++) {
+      if ((await gGerente.pedir("/api/chat/salas/c-vacio")).datos.solicitudes.at(-1).envio === "guardado") break;
+      await new Promise((f) => setTimeout(f, 100));
+    }
+    const r = await gAdmin.pedir("/api/admin/chat/propuestos/c-vacio/activar", { metodo: "POST", json: { repo: "prueba/c-vacio" } });
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.equal(r.datos.docs.numero, null);
+    assert.equal(r.datos.docs.error, null);
+    const git = await (await fetch(`${GH}/control/repos/prueba/c-vacio`)).json();
+    const main = git.commits.find((c) => c.sha === git.refs.main);
+    assert.deepEqual(main.parents, []);
+    assert.deepEqual(Object.keys(main.files).sort(), [".claude/implement-all.cloud.json", ".claude/implement-all.json", "CLAUDE.md", "CONTEXT.md"].concat(Object.keys(main.files).filter((f) => f.startsWith("docs/adr/"))).sort());
+    assert.ok(main.files["CLAUDE.md"].includes("Design system: follow martiincooper/ui-guidelines"));
+    assert.ok(r.datos.docs.url.endsWith(`/commit/${main.sha}`));
   });
 
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);
