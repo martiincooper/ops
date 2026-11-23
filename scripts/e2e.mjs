@@ -1324,6 +1324,7 @@ async function main() {
     const crear = (c, json) => c.pedir("/api/chat/salas", { metodo: "POST", json });
     const dup = await crear(gEquipo, { nombre: "c prueba", descripcion: "otra" });
     assert.deepEqual([dup.status, dup.datos.error], [409, "Ya existe una sala con ese nombre"]);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba/cerrar", { metodo: "POST" })).status, 200); // la conversación abierta bloquea archivar
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba/archivo", { metodo: "POST", json: { archivar: true } })).status, 200);
     assert.equal((await crear(gGerente, { nombre: "C-Prueba", descripcion: "otra" })).status, 409); // archivada también cuenta
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba/archivo", { metodo: "POST", json: { archivar: false } })).status, 200);
