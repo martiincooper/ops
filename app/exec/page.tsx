@@ -27,10 +27,11 @@ import { empresaDe, requirePagina } from "@/lib/auth";
 import { puedeUsarPortal } from "@/lib/chat/modulos";
 import { getDbEmpresa } from "@/lib/db";
 import { EMPRESAS } from "@/lib/empresas";
-import { type DiasPorEtapa, NOMBRE_ESTADO, diasEntre } from "@/lib/etapas";
+import { type DiasPorEtapa, ETAPAS_DESARROLLO, NOMBRE_ESTADO, diasEntre } from "@/lib/etapas";
 import { METAS_DEFECTO } from "@/lib/metas";
 import {
   type EstadoKpi,
+  type HitoExec,
   type MontoPorPeriodo,
   PERIODOS_COSTO,
   type PeriodoCosto,
@@ -149,6 +150,45 @@ function Muestra({ etapa }: { etapa: keyof DiasPorEtapa | "plan" }) {
       className={cx("inline-block h-2.5 w-2.5 shrink-0 rounded-[3px]", etapa === "plan" && "bg-indigo-suave ring-1 ring-indigo/25")}
       style={etapa === "plan" ? undefined : { background: ETAPA_COLOR[etapa] }}
     />
+  );
+}
+
+const MAX_HITOS_VISIBLES = 3;
+
+/** Un hito logrado: ícono de check, título y fecha corta; el detalle va en el tooltip. */
+function HitoItem({ h, fecha }: { h: HitoExec; fecha: (f: string) => string }) {
+  return (
+    <li className="flex items-start gap-1.5 text-xs text-tinta-2" title={h.detalle ?? undefined}>
+      <CircleCheck size={13} className="mt-px shrink-0 text-ok-tinta" aria-hidden />
+      <span className="min-w-0 flex-1 break-words">{h.titulo}</span>
+      <span className="shrink-0 tabular-nums text-tinta-3">{fecha(h.fecha)}</span>
+    </li>
+  );
+}
+
+/** Hitos de la etapa de un proyecto en el Pipeline: los más nuevos primero, 3 visibles y el resto en «+N más». */
+function HitosEtapa({ hitos, fecha }: { hitos: HitoExec[]; fecha: (f: string) => string }) {
+  if (hitos.length === 0) return null;
+  const nuevos = [...hitos].reverse();
+  const resto = nuevos.slice(MAX_HITOS_VISIBLES);
+  return (
+    <div className="mt-2 border-t border-linea pt-2">
+      <ul className="space-y-1" aria-label="Hitos logrados">
+        {nuevos.slice(0, MAX_HITOS_VISIBLES).map((h) => (
+          <HitoItem key={h.id} h={h} fecha={fecha} />
+        ))}
+      </ul>
+      {resto.length > 0 && (
+        <details className="mt-1 print:open">
+          <summary className="cursor-pointer text-xs font-semibold text-indigo-tinta">+{resto.length} más</summary>
+          <ul className="mt-1 space-y-1">
+            {resto.map((h) => (
+              <HitoItem key={h.id} h={h} fecha={fecha} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -806,7 +846,7 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
                     <div
                       className="relative order-last col-span-2 h-6 sm:order-none sm:col-span-1"
                       role="img"
-                      aria-label={`${p.codigo}: ${p.tramos.map((t) => `${NOMBRE_ESTADO[t.estado]} ${t.dias} d`).join(", ")}; entrega estimada ${fecha(p.fecha_entrega_estimada)}`}
+                      aria-label={`${p.codigo}: ${p.tramos.map((t) => `${NOMBRE_ESTADO[t.estado]} ${t.dias} d`).join(", ")}; entrega estimada ${fecha(p.fecha_entrega_estimada)}${p.hitos.length ? `; hitos: ${p.hitos.map((h) => `${h.titulo} (${NOMBRE_ESTADO[h.etapa]}, ${fecha(h.fecha)})`).join(", ")}` : ""}`}
                     >
                       {meses.map((x) => (
                         <span key={x.f} aria-hidden className="absolute inset-y-0 w-px bg-linea" style={{ left: `${pos(x.f)}%` }} />
@@ -833,6 +873,14 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
                           ))}
                       </span>
                       <span aria-hidden className="absolute inset-y-0 w-0.5 -translate-x-1/2 rounded-full bg-tinta/60" style={{ left: `${pos(hoy)}%` }} />
+                      {p.hitos.map((h) => (
+                        <span
+                          key={h.id}
+                          className="absolute top-1/2 z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] bg-white ring-2 ring-tinta"
+                          style={{ left: `${pos(h.fecha)}%` }}
+                          title={`${h.titulo} · ${NOMBRE_ESTADO[h.etapa]} · ${fecha(h.fecha)}`}
+                        />
+                      ))}
                       {p.situacion === "atrasado" && (
                         <span
                           className="absolute inset-y-0 w-[3px] rounded-full bg-error ring-2 ring-white"
@@ -849,6 +897,9 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
                 <Leyenda conPlan />
                 <span className="flex items-center gap-1.5 text-xs text-tinta-3">
                   <span aria-hidden className="inline-block h-3 w-[3px] rounded-full bg-error" /> Entrega estimada vencida
+                </span>
+                <span className="flex items-center gap-1.5 text-xs text-tinta-3">
+                  <span aria-hidden className="inline-block h-2.5 w-2.5 rotate-45 rounded-[2px] bg-white ring-2 ring-tinta" /> Hito logrado
                 </span>
               </div>
             </>
@@ -878,13 +929,16 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
                 </div>
                 <ul className="space-y-2">
                   {e.proyectos.map((p) => (
-                    <li key={p.id} className="flex items-center gap-2 rounded-2xl bg-superficie px-3 py-2.5" title={`${p.nombre} · ${p.dias_en_etapa} días en ${e.nombre.toLowerCase()}`}>
-                      <span className="min-w-0 flex-1 truncate text-sm">
-                        <span className="whitespace-nowrap font-mono text-xs font-semibold text-indigo-tinta">{p.codigo}</span>{" "}
-                        <span className="text-tinta-2">{p.nombre}</span>
-                      </span>
-                      {p.situacion === "atrasado" && <CircleX size={15} className="shrink-0 text-error" aria-label="Atrasado" />}
-                      <span className="shrink-0 rounded-full bg-suave px-2 py-0.5 text-xs font-semibold tabular-nums text-tinta-2">{p.dias_en_etapa} d</span>
+                    <li key={p.id} className="rounded-2xl bg-superficie px-3 py-2.5" title={`${p.nombre} · ${p.dias_en_etapa} días en ${e.nombre.toLowerCase()}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          <span className="whitespace-nowrap font-mono text-xs font-semibold text-indigo-tinta">{p.codigo}</span>{" "}
+                          <span className="text-tinta-2">{p.nombre}</span>
+                        </span>
+                        {p.situacion === "atrasado" && <CircleX size={15} className="shrink-0 text-error" aria-label="Atrasado" />}
+                        <span className="shrink-0 rounded-full bg-suave px-2 py-0.5 text-xs font-semibold tabular-nums text-tinta-2">{p.dias_en_etapa} d</span>
+                      </div>
+                      <HitosEtapa hitos={p.hitos.filter((h) => h.etapa === e.estado)} fecha={fecha} />
                     </li>
                   ))}
                   {e.proyectos.length === 0 && <li className="px-1 text-xs text-tinta-3">—</li>}
@@ -969,6 +1023,28 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
                         />
                       )}
                     </div>
+                    {p.hitos.length > 0 && (
+                      <div className="sm:col-span-3">
+                        <p className="mb-2 text-xs text-tinta-3">Hitos logrados ({p.hitos.length})</p>
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          {ETAPAS_DESARROLLO.map((et) => {
+                            const hs = p.hitos.filter((h) => h.etapa === et);
+                            return hs.length === 0 ? null : (
+                              <div key={et} className="min-w-0">
+                                <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-tinta">
+                                  <Muestra etapa={et} /> {NOMBRE_ESTADO[et]}
+                                </h4>
+                                <ul className="space-y-1">
+                                  {hs.map((h) => (
+                                    <HitoItem key={h.id} h={h} fecha={fecha} />
+                                  ))}
+                                </ul>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </details>
               ))}

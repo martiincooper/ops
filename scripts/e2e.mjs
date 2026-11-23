@@ -649,6 +649,24 @@ async function main() {
     assert.deepEqual(await hitosDe(D, pEt), []);
     assert.equal((await hitosDe(A, pA)).length, 1);
   });
+  await prueba("gerencia ve los hitos de su empresa en /api/exec, en orden cronológico y sin los de la otra", async () => {
+    const post = (emp, id, json) => admin.pedir(q(`/api/admin/proyectos/${id}/hitos`, emp), { metodo: "POST", json });
+    assert.equal((await post(A, pA, { titulo: "Hito A tardío", fecha: hoy, etapa: "concepto" })).status, 201);
+    assert.equal((await post(A, pA, { titulo: "Hito A temprano", detalle: "d", fecha: "2020-01-01", etapa: "concepto" })).status, 400); // antes del inicio
+    assert.equal((await post(D, pEt, { titulo: "Hito D", fecha: hoy, etapa: "concepto" })).status, 201);
+    const todos = (m) => [...m.tiempo.proyectos, ...m.pipeline.pausados, ...m.entregados];
+    const mA = (await ggA.cliente.pedir("/api/exec")).datos;
+    const mD = (await ggD.cliente.pedir("/api/exec")).datos;
+    const hA = todos(mA).flatMap((p) => p.hitos.map((h) => h.titulo));
+    assert.ok(hA.includes("Hito Aether") && hA.includes("Hito A tardío") && !hA.includes("Hito D"));
+    const hD = todos(mD).flatMap((p) => p.hitos.map((h) => h.titulo));
+    assert.deepEqual(hD, ["Hito D"]);
+    assert.deepEqual(Object.keys(todos(mD).find((p) => p.hitos.length).hitos[0]).sort(), ["detalle", "etapa", "fecha", "id", "titulo"]);
+    const fechas = todos(mA).find((p) => p.id === pA).hitos.map((h) => h.fecha);
+    assert.deepEqual(fechas, [...fechas].sort());
+    // admin con ?empresa= ve los de la empresa elegida
+    assert.ok(todos((await admin.pedir(q("/api/exec", D))).datos).some((p) => p.hitos.length));
+  });
   await prueba("gerencia: pipeline por etapa con aviso al pasar el umbral; entregados aparte con sus indicadores", async () => {
     let m = (await ggD.cliente.pedir("/api/exec")).datos;
     const umbral = m.pipeline.aviso_por_etapa;

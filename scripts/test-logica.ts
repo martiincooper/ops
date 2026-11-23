@@ -313,6 +313,21 @@ async function main() {
     d.prepare("UPDATE proyectos SET estado = 'pruebas' WHERE id = 'q0'").run();
     assert.deepEqual(metricasExec(d, hoy).pipeline.saturadas, []); // exactamente el umbral: sin aviso
   });
+  await prueba("metricasExec: hitos de cada proyecto en orden cronológico (en desarrollo, en pausa y entregados)", () => {
+    const d = dbNueva();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p9','P9','z',1,'2026-08-01','2027-12-31','pausado')").run();
+    d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES ('p8','P8','y',1,'2026-08-01','2027-12-31','entregado')").run();
+    const h = d.prepare("INSERT INTO proyecto_hitos (proyecto_id, etapa, titulo, detalle, fecha, creado_por_nombre) VALUES (?, ?, ?, ?, ?, 'Admin')");
+    h.run("p1", "prototipado", "segundo", "det", "2026-09-10");
+    h.run("p1", "concepto", "primero", null, "2026-09-02");
+    h.run("p9", "concepto", "pausado1", null, "2026-08-05");
+    h.run("p8", "pruebas", "entregado1", null, "2026-09-01");
+    const m = metricasExec(d, hoy);
+    assert.deepEqual(m.tiempo.proyectos.find((p) => p.id === "p1")!.hitos.map((x) => x.titulo), ["primero", "segundo"]);
+    assert.deepEqual(Object.keys(m.tiempo.proyectos.find((p) => p.id === "p1")!.hitos[1]).sort(), ["detalle", "etapa", "fecha", "id", "titulo"]);
+    assert.deepEqual(m.pipeline.pausados.find((p) => p.id === "p9")!.hitos.map((x) => x.titulo), ["pausado1"]);
+    assert.deepEqual(m.entregados.find((p) => p.id === "p8")!.hitos.map((x) => x.titulo), ["entregado1"]);
+  });
   await prueba("entregados: concepto → cliente real, entrega vs estimada y costo final vs BOM", () => {
     const d = dbNueva(); // p1: inicio 1-sep, estimada 31-dic, BOM 1.000.000
     const et = d.prepare("INSERT INTO proyecto_etapas (proyecto_id, estado, desde) VALUES ('p1', ?, ?)");
