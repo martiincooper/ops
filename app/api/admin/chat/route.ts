@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { manejar } from "@/lib/http";
-import { configGithub, githubConfigurado, repositoriosPorModulo } from "@/lib/chat/github";
+import { configGithub, githubConfigurado } from "@/lib/chat/github";
 import { CUENTA_DATASHEQ } from "@/lib/chat/githubApi";
 import { codigoTicket } from "@/lib/chat/modulos";
+import { listarModulos, todosLosModulos } from "@/lib/chat/catalogo";
 import { estadoSalas } from "@/lib/chat/salas";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
 import { MAX_REINTENTOS } from "@/lib/chat/envio";
@@ -41,6 +42,8 @@ export const GET = manejar(async (req) => {
     .all() as Fila[];
   return NextResponse.json({
     salas: estadoSalas(db, true),
+    archivadas: listarModulos(db, true),
+    nombres: Object.fromEntries(todosLosModulos(db).map((m) => [m.clave, m.nombre])),
     historial: filas.map((f) => ({
       ...f,
       ticket: codigoTicket(f.ticket),
@@ -50,7 +53,6 @@ export const GET = manejar(async (req) => {
     config: {
       github: githubConfigurado(),
       cuenta: configGithub()?.cuenta ?? (process.env.GITHUB_CUENTA || CUENTA_DATASHEQ),
-      repositorios: repositoriosPorModulo(),
       reintentos_max: MAX_REINTENTOS,
     },
   });

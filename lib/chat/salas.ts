@@ -19,8 +19,8 @@ import {
   extensionDe,
   nombreSeguro,
 } from "./adjuntos";
-import { moduloPorClave, MODULOS } from "./modulos";
-import { type Entorno, reposDeModulos } from "./repos";
+import { listarModulos, moduloPorClave } from "./catalogo";
+import { type Autonomia, salaAbierta } from "./modulos";
 
 type DB = Database.Database;
 
@@ -143,11 +143,11 @@ function siguienteTicket(db: DB): number {
   return (db.prepare("SELECT COALESCE(MAX(ticket), 0) + 1 AS n FROM chat_solicitudes").get() as { n: number }).n;
 }
 
-/** La sala existe y está disponible (su módulo tiene repositorio de GitHub); si no, 404. */
-export function exigirSala(clave: string, env: Entorno = process.env): string {
-  const m = moduloPorClave(clave);
-  if (!m) throw new ErrorSala(404, "Módulo desconocido");
-  if (!reposDeModulos(env)[m.clave]) throw new ErrorSala(404, SALA_NO_DISPONIBLE);
+/** La sala existe, no está archivada y tiene un repositorio verificado (si no, «Próximamente»); si no, 404. */
+export function exigirSala(db: DB, clave: string): string {
+  const m = moduloPorClave(db, clave);
+  if (!m || m.archivado) throw new ErrorSala(404, "Módulo desconocido");
+  if (!salaAbierta(m)) throw new ErrorSala(404, SALA_NO_DISPONIBLE);
   return m.clave;
 }
 
@@ -161,11 +161,10 @@ export function enviarMensaje(
   p: Persona,
   texto: string,
   ahora = new Date(),
-  env: Entorno = process.env,
   fotos: FotoEntrada[] = [],
   dataDir?: string,
 ): { mensaje: Mensaje; solicitud: Solicitud; nueva: boolean } {
-  const clave = exigirSala(sala, env);
+  const clave = exigirSala(db, sala);
   const t = texto.trim();
   if (!t && !fotos.length) throw new ErrorSala(400, "Escribe un mensaje");
   if (t.length > TEXTO_MAX) throw new ErrorSala(400, `Máximo ${TEXTO_MAX} caracteres`);
@@ -258,28 +257,46 @@ export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
 
 export interface EstadoSala {
   clave: string;
+  nombre: string;
+  area: string;
+  descripcion: string;
+  color: string;
+  orden: number;
+  /** La sala se puede abrir (repositorio verificado); si no, el portal la muestra gris, «Próximamente». */
+  disponible: boolean;
   /** Hay una solicitud abierta en la sala. */
   abierta: boolean;
   /** Mensajes de la solicitud abierta. */
   mensajes: number;
-  /** Solo para administradores: repositorio de GitHub del módulo (null: sala oculta en el portal). */
+  /** Solo para administradores. */
   repo?: string | null;
+  autonomia?: Autonomia;
 }
 
 /**
- * Estado de las salas. Sin detalle (portal) solo devuelve las activas, es decir, las de módulos con repositorio
- * asignado; con detalle (panel de administración) devuelve todas, con su repositorio.
+ * Estado de las salas activas (no archivadas), en orden. El portal las muestra todas: las sin repositorio verificado,
+ * como «Próximamente». Con detalle (panel de administración) añade repositorio y autonomía.
  */
-export function estadoSalas(db: DB, conDetalle = false, env: Entorno = process.env): EstadoSala[] {
-  const repos = reposDeModulos(env);
+export function estadoSalas(db: DB, conDetalle = false): EstadoSala[] {
   const filas = db
     .prepare(
       `SELECT s.sala, (SELECT COUNT(*) FROM chat_mensajes m WHERE m.solicitud_id = s.id) AS n
          FROM chat_solicitudes s WHERE s.estado = 'abierta'`,
     )
     .all() as { sala: string; n: number }[];
-  return MODULOS.filter((m) => conDetalle || repos[m.clave]).map((m) => {
+  return listarModulos(db).map((m) => {
     const f = filas.find((x) => x.sala === m.clave);
-    return { clave: m.clave, abierta: !!f, mensajes: f?.n ?? 0, ...(conDetalle ? { repo: repos[m.clave] } : {}) };
+    return {
+      clave: m.clave,
+      nombre: m.nombre,
+      area: m.area,
+      descripcion: m.descripcion,
+      color: m.color,
+      orden: m.orden,
+      disponible: salaAbierta(m),
+      abierta: !!f,
+      mensajes: f?.n ?? 0,
+      ...(conDetalle ? { repo: m.repo, autonomia: m.autonomia } : {}),
+    };
   });
 }

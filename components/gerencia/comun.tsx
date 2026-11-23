@@ -1,5 +1,5 @@
 // Piezas compartidas del portal gerencial (portal, sala y panel del administrador).
-import { MessagesSquare, CircleCheck, CircleDot, CircleSlash, Clock, FileCheck, Footprints, GraduationCap, IdCard, Scale, ShieldAlert, Siren, Wrench } from "lucide-react";
+import { MessagesSquare, CircleCheck, CircleDot, CircleSlash, Clock, Wrench } from "lucide-react";
 import Link from "next/link";
 import BotonSalir from "@/components/BotonSalir";
 import Marca from "@/components/Marca";
@@ -8,25 +8,14 @@ import { type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
 import { cx } from "@/lib/cliente";
 import BotonAccesoAdmin from "./BotonAccesoAdmin";
 
-export const ICONO_MODULO: Record<string, typeof Scale> = {
-  "c-legal": Scale,
-  "c-controla": FileCheck,
-  "c-previene": ShieldAlert,
-  "c-lidera": Footprints,
-  "c-acredita": IdCard,
-  "c-capacita": GraduationCap,
-  "c-investiga": Siren,
-};
-
-export function IconoModulo({ clave, color, tamano = 22, className }: { clave: string; color: string; tamano?: number; className?: string }) {
-  const Icono = ICONO_MODULO[clave] ?? MessagesSquare;
+export function IconoModulo({ color, tamano = 22, className }: { clave?: string; color: string; tamano?: number; className?: string }) {
   return (
     <span
       aria-hidden
       className={cx("flex shrink-0 items-center justify-center rounded-2xl", className)}
       style={{ background: `#${color}1a`, color: `#${color}`, width: tamano * 2, height: tamano * 2 }}
     >
-      <Icono size={tamano} />
+      <MessagesSquare size={tamano} />
     </span>
   );
 }

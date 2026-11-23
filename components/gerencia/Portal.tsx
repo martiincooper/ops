@@ -1,19 +1,18 @@
 "use client";
 
-import { ArrowRight, Lock, MessagesSquare } from "lucide-react";
+import { ArrowRight, Clock, Lock, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { MODULOS } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
-import { api } from "@/lib/cliente";
+import { api, cx } from "@/lib/cliente";
 import { IconoModulo } from "./comun";
 import MisRequerimientos from "./MisRequerimientos";
 
 const REFRESCO_MS = 15_000;
 
 /**
- * Las salas activas (las de módulos con repositorio de GitHub asignado) y si tienen una solicitud abierta,
- * actualizado cada 15 segundos. Las demás no se muestran. Cualquiera puede entrar a cualquier sala.
+ * Las salas activas que creó el administrador, en orden, y si tienen una solicitud abierta (actualizado cada 15
+ * segundos). Las que aún no tienen un repositorio verificado salen en gris, «Próximamente», y no se pueden abrir.
  */
 export default function Portal({ nombre, aviso }: { nombre: string; aviso?: string }) {
   const [salas, setSalas] = useState<EstadoSala[] | null>(null);
@@ -36,7 +35,6 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
   }, [cargar]);
 
   const primerNombre = nombre.trim().split(/\s+/)[0];
-  const visibles = salas ? MODULOS.filter((m) => salas.some((s) => s.clave === m.clave)) : [];
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6 lg:px-8">
@@ -61,34 +59,43 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
       {error && <p className="mb-5 rounded-2xl bg-error-fondo px-4 py-3 text-sm text-error-tinta">{error}</p>}
 
       {!salas && !error && <p className="mb-5 text-sm text-tinta-3">Cargando las salas…</p>}
-      {salas && !visibles.length && (
+      {salas && !salas.length && (
         <p className="mb-5 rounded-2xl bg-suave px-4 py-3 text-sm text-tinta-3">
           Por ahora no hay salas disponibles. Vuelve a intentarlo más tarde.
         </p>
       )}
 
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {visibles.map((m) => {
-          const s = salas?.find((x) => x.clave === m.clave);
-          return (
-            <li key={m.clave} className="tarjeta flex flex-col p-5">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <IconoModulo clave={m.clave} color={m.color} />
-                {s?.abierta && (
+        {(salas ?? []).map((s) => (
+          <li key={s.clave} data-sala={s.clave} className={cx("tarjeta flex flex-col p-5", !s.disponible && "bg-suave")}>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <IconoModulo clave={s.clave} color={s.disponible ? s.color : "7a7f8a"} />
+              {!s.disponible ? (
+                <span className="chip bg-suave text-tinta-2">
+                  <Clock size={13} aria-hidden /> Próximamente
+                </span>
+              ) : (
+                s.abierta && (
                   <span className="chip bg-indigo-suave text-indigo-tinta">
                     <MessagesSquare size={13} aria-hidden /> Conversación abierta
                   </span>
-                )}
-              </div>
-              <h2 className="text-lg font-semibold text-tinta">{m.nombre}</h2>
-              <p className="text-sm font-medium text-tinta-2">{m.area}</p>
-              <p className="mt-2 flex-1 text-sm text-tinta-3">{m.descripcion}</p>
-              <Link href={`/gerencia/${m.clave}`} className="boton mt-4 self-start">
-                {s?.abierta ? "Unirse a la conversación" : "Entrar a la sala"} <ArrowRight size={16} aria-hidden />
+                )
+              )}
+            </div>
+            <h2 className={cx("text-lg font-semibold", s.disponible ? "text-tinta" : "text-tinta-2")}>{s.nombre}</h2>
+            <p className="text-sm font-medium text-tinta-2">{s.area}</p>
+            <p className="mt-2 flex-1 text-sm text-tinta-3">{s.descripcion}</p>
+            {s.disponible ? (
+              <Link href={`/gerencia/${s.clave}`} className="boton mt-4 self-start">
+                {s.abierta ? "Unirse a la conversación" : "Entrar a la sala"} <ArrowRight size={16} aria-hidden />
               </Link>
-            </li>
-          );
-        })}
+            ) : (
+              <button type="button" disabled className="boton mt-4 self-start">
+                Aún no disponible
+              </button>
+            )}
+          </li>
+        ))}
       </ul>
 
       <MisRequerimientos />
