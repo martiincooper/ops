@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { contexto } from "@/lib/auth";
 import { leerEtapas } from "@/lib/etapas";
+import { leerHitos } from "@/lib/hitos";
 import { esquemaProyectoNuevo } from "@/lib/esquemas";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 export const GET = manejar(async (req: NextRequest) => {
   const { db } = await contexto(req, ["admin"]);
   const etapas = leerEtapas(db);
+  const hitos = leerHitos(db);
   const proyectos = (
     db
       .prepare(
@@ -17,7 +19,7 @@ export const GET = manejar(async (req: NextRequest) => {
            FROM proyectos ORDER BY estado IN ('entregado', 'pausado'), codigo`,
       )
       .all() as { id: string }[]
-  ).map((p) => ({ ...p, etapas: (etapas.get(p.id) ?? []).map(({ id, estado, desde }) => ({ id, estado, desde })) }));
+  ).map((p) => ({ ...p, etapas: (etapas.get(p.id) ?? []).map(({ id, estado, desde }) => ({ id, estado, desde })), hitos: hitos.get(p.id) ?? [] }));
   return NextResponse.json({ proyectos });
 });
 

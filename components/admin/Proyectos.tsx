@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, History, LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import { AlertTriangle, Flag, History, LoaderCircle, Pencil, Trash2 } from "lucide-react";
 import { Fragment, useState } from "react";
 import { api, clp, cx, miles } from "@/lib/cliente";
 import { Aviso, Cargando, conEmpresa, useAccion, useDatos, type EmpresaPublica } from "./comun";
@@ -20,6 +20,20 @@ interface Proyecto {
   fecha_entrega_objetivo: string;
   estado: "concepto" | "prototipado" | "pruebas" | "entregado" | "pausado";
   etapas: Etapa[];
+  hitos: Hito[];
+}
+
+type EtapaHito = "concepto" | "prototipado" | "pruebas";
+const ETAPAS_HITO: EtapaHito[] = ["concepto", "prototipado", "pruebas"];
+
+interface Hito {
+  id: number;
+  etapa: EtapaHito;
+  titulo: string;
+  detalle: string | null;
+  fecha: string;
+  creado_por_nombre: string;
+  editado_en: string | null;
 }
 
 const ESTADOS: Proyecto["estado"][] = ["concepto", "prototipado", "pruebas", "entregado", "pausado"];
@@ -90,6 +104,154 @@ function EditorEtapas({ p, empresa, hoy, onGuardado, onCerrar }: { p: Proyecto; 
         )}
         <button type="button" onClick={onCerrar} className="boton-texto">Cerrar</button>
       </div>
+    </div>
+  );
+}
+
+/** Hitos del proyecto: lo ya logrado en cada etapa, agrupado por etapa (el más reciente primero). */
+function EditorHitos({ p, empresa, hoy, onCambio, onCerrar }: { p: Proyecto; empresa: string; hoy: string; onCambio: () => Promise<void>; onCerrar: () => void }) {
+  const etapaActual = (ETAPAS_HITO as string[]).includes(p.estado) ? (p.estado as EtapaHito) : "";
+  const [editando, setEditando] = useState<number | null>(null);
+  const [titulo, setTitulo] = useState("");
+  const [detalle, setDetalle] = useState("");
+  const [fecha, setFecha] = useState(hoy);
+  const [etapa, setEtapa] = useState<EtapaHito | "">(etapaActual);
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmar, setConfirmar] = useState<number | null>(null);
+
+  function limpiar() {
+    setEditando(null);
+    setTitulo("");
+    setDetalle("");
+    setFecha(hoy);
+    setEtapa(etapaActual);
+  }
+
+  function editar(h: Hito) {
+    setEditando(h.id);
+    setTitulo(h.titulo);
+    setDetalle(h.detalle ?? "");
+    setFecha(h.fecha);
+    setEtapa(h.etapa);
+    setError(null);
+  }
+
+  async function llamar(accion: () => Promise<unknown>) {
+    setError(null);
+    setOcupado(true);
+    try {
+      await accion();
+      await onCambio();
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar");
+      return false;
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault();
+    const json = { titulo, detalle, fecha, etapa };
+    const ruta = `/api/admin/proyectos/${p.id}/hitos`;
+    const ok = await llamar(() =>
+      editando === null
+        ? api(conEmpresa(ruta, empresa), { method: "POST", json })
+        : api(conEmpresa(`${ruta}/${editando}`, empresa), { method: "PUT", json }),
+    );
+    if (ok) limpiar();
+  }
+
+  const id = (c: string) => `hi-${p.id}-${c}`;
+  return (
+    <div className="rounded-2xl bg-suave p-4">
+      <p className="text-sm font-semibold text-tinta">Hitos de {p.codigo}</p>
+      <p className="mt-0.5 text-xs text-tinta-3">Registra lo ya logrado en cada etapa, con la fecha en que se logró. Gerencia lo ve en su tablero.</p>
+      {p.hitos.length === 0 ? (
+        <p className="mt-3 text-sm text-tinta-3">Sin hitos todavía.</p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {ETAPAS_HITO.map((et) => {
+            const lista = p.hitos.filter((h) => h.etapa === et).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id - a.id);
+            if (lista.length === 0) return null;
+            return (
+              <div key={et}>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-tinta-2">{NOMBRE[et]}</p>
+                <ul className="space-y-2">
+                  {lista.map((h) => (
+                    <li key={h.id} className="flex items-start justify-between gap-3 rounded-2xl bg-superficie p-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium text-tinta">{h.titulo}</p>
+                        {h.detalle && <p className="mt-0.5 whitespace-pre-line break-words text-xs text-tinta-2">{h.detalle}</p>}
+                        <p className="mt-1 text-xs text-tinta-3">
+                          {h.fecha} · {h.creado_por_nombre}
+                          {h.editado_en && " · editado"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center">
+                        <button type="button" onClick={() => editar(h)} aria-label={`Editar hito ${h.titulo}`} className="rounded-full p-2 text-tinta-2 hover:bg-suave">
+                          <Pencil size={13} />
+                        </button>
+                        {confirmar === h.id ? (
+                          <button
+                            type="button"
+                            disabled={ocupado}
+                            onClick={async () => {
+                              if (await llamar(() => api(conEmpresa(`/api/admin/proyectos/${p.id}/hitos/${h.id}`, empresa), { method: "DELETE" }))) {
+                                setConfirmar(null);
+                                if (editando === h.id) limpiar();
+                              }
+                            }}
+                            className="rounded-full bg-error px-3 py-1 text-xs font-semibold text-white"
+                          >
+                            ¿Eliminar?
+                          </button>
+                        ) : (
+                          <button type="button" onClick={() => setConfirmar(h.id)} aria-label={`Eliminar hito ${h.titulo}`} className="rounded-full p-2 text-tinta-2 hover:bg-error-fondo hover:text-error-tinta">
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <form onSubmit={guardar} className="mt-4 grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
+        <p className="text-sm font-semibold text-tinta md:col-span-3">{editando === null ? "Agregar un hito" : "Editar hito"}</p>
+        <div>
+          <label htmlFor={id("titulo")} className="etiqueta">Título</label>
+          <input id={id("titulo")} required maxLength={120} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Primer prototipo funcionando" className="campo bg-superficie text-sm" />
+        </div>
+        <div>
+          <label htmlFor={id("fecha")} className="etiqueta">Fecha</label>
+          <input id={id("fecha")} type="date" required min={p.fecha_inicio} max={hoy} value={fecha} onChange={(e) => setFecha(e.target.value)} className="campo bg-superficie text-sm" />
+        </div>
+        <div>
+          <label htmlFor={id("etapa")} className="etiqueta">Etapa</label>
+          <select id={id("etapa")} required value={etapa} onChange={(e) => setEtapa(e.target.value as EtapaHito)} className="campo bg-superficie text-sm">
+            {etapa === "" && <option value="">Elige una etapa</option>}
+            {ETAPAS_HITO.map((et) => <option key={et} value={et}>{NOMBRE[et]}</option>)}
+          </select>
+        </div>
+        <div className="md:col-span-3">
+          <label htmlFor={id("detalle")} className="etiqueta">Detalle (opcional)</label>
+          <textarea id={id("detalle")} rows={2} maxLength={1000} value={detalle} onChange={(e) => setDetalle(e.target.value)} className="campo bg-superficie text-sm" />
+        </div>
+        {error && <p className="rounded-2xl bg-error-fondo px-4 py-2 text-sm text-error-tinta md:col-span-3">{error}</p>}
+        <div className="flex items-center gap-2 md:col-span-3">
+          <button type="submit" disabled={ocupado || !titulo.trim() || !etapa} className="boton">
+            {ocupado && <LoaderCircle size={14} className="animate-spin" />} {editando === null ? "Agregar hito" : "Guardar hito"}
+          </button>
+          {editando !== null && <button type="button" onClick={limpiar} className="boton-texto">Cancelar edición</button>}
+          <button type="button" onClick={onCerrar} className="boton-texto">Cerrar</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -175,8 +337,8 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
   const { datos, error, cargando, recargar } = useDatos<{ proyectos: Proyecto[] }>(conEmpresa("/api/admin/proyectos", empresa.clave));
   const { ocupado, aviso, ejecutar } = useAccion();
   const [confirmar, setConfirmar] = useState<string | null>(null);
-  const [abierto, setAbierto] = useState<{ id: string; modo: "editar" | "etapas" } | null>(null);
-  const alternar = (id: string, modo: "editar" | "etapas") => setAbierto(abierto?.id === id && abierto.modo === modo ? null : { id, modo });
+  const [abierto, setAbierto] = useState<{ id: string; modo: "editar" | "etapas" | "hitos" } | null>(null);
+  const alternar = (id: string, modo: "editar" | "etapas" | "hitos") => setAbierto(abierto?.id === id && abierto.modo === modo ? null : { id, modo });
   const [codigo, setCodigo] = useState("");
   const [nombre, setNombre] = useState("");
   const [presupuesto, setPresupuesto] = useState("");
@@ -298,23 +460,24 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                     )}
                   </td>
                   <td className="whitespace-nowrap text-right">
-                    {(["editar", "etapas"] as const).map((modo) => {
+                    {(["editar", "etapas", "hitos"] as const).map((modo) => {
                       const activo = abierto?.id === p.id && abierto.modo === modo;
-                      const Icono = modo === "editar" ? Pencil : History;
+                      const Icono = modo === "editar" ? Pencil : modo === "etapas" ? History : Flag;
+                      const nombre = modo === "editar" ? "Editar" : modo === "etapas" ? "Etapas" : "Hitos";
                       return (
                         <button
                           key={modo}
                           type="button"
                           aria-expanded={activo}
-                          aria-label={`${modo === "editar" ? "Editar" : "Etapas de"} ${p.codigo}`}
-                          title={modo === "editar" ? "Editar datos del proyecto" : "Historial de etapas"}
+                          aria-label={`${modo === "editar" ? "Editar" : modo === "etapas" ? "Etapas de" : "Hitos de"} ${p.codigo}`}
+                          title={modo === "editar" ? "Editar datos del proyecto" : modo === "etapas" ? "Historial de etapas" : "Hitos logrados"}
                           onClick={() => alternar(p.id, modo)}
                           className={cx(
                             "mr-1 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
                             activo ? "bg-indigo-suave text-indigo-tinta" : "text-tinta-2 hover:bg-suave",
                           )}
                         >
-                          <Icono size={13} /> {modo === "editar" ? "Editar" : "Etapas"}
+                          <Icono size={13} /> {nombre}{modo === "hitos" && p.hitos.length > 0 && ` (${p.hitos.length})`}
                         </button>
                       );
                     })}
@@ -368,6 +531,8 @@ export default function Proyectos({ empresa, hoy }: { empresa: EmpresaPublica; h
                             });
                           }}
                         />
+                      ) : abierto.modo === "hitos" ? (
+                        <EditorHitos p={p} empresa={empresa.clave} hoy={hoy} onCambio={recargar} onCerrar={() => setAbierto(null)} />
                       ) : (
                         <EditorProyecto
                           p={p}

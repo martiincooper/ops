@@ -13,6 +13,8 @@ import { FOTO_MAX_BYTES } from "../lib/chat/adjuntos";
 import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio } from "../lib/gastos";
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
+import { errorDeHito, leerHitos } from "../lib/hitos";
+import { esquemaHito } from "../lib/esquemas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, enlaceFoto, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
 import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas, saludToken } from "../lib/chat/githubApi";
@@ -428,6 +430,38 @@ async function main() {
     assert.deepEqual(h.get("c")!.map((f) => [f.estado, f.desde]), [["concepto", "2027-01-15"], ["prototipado", "2027-01-15"]]);
     d.prepare("DELETE FROM proyectos WHERE id = 'a'").run(); // en cascada
     assert.equal((d.prepare("SELECT COUNT(*) n FROM proyecto_etapas WHERE proyecto_id = 'a'").get() as { n: number }).n, 0);
+  });
+
+  console.log("Hitos de proyectos (v11)");
+  await prueba("hitos: orden cronológico por proyecto, se borran con el proyecto, y las reglas de fecha y título", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_EMPRESA.forEach((m) => d.exec(m));
+    const ins = d.prepare("INSERT INTO proyectos (id, codigo, nombre, presupuesto_clp, fecha_inicio, fecha_entrega_objetivo, estado) VALUES (?, ?, 'x', 1, '2026-08-01', '2027-12-31', 'concepto')");
+    ins.run("a", "A");
+    ins.run("b", "B");
+    const h = d.prepare("INSERT INTO proyecto_hitos (proyecto_id, etapa, titulo, fecha, creado_por_nombre) VALUES (?, ?, ?, ?, 'Admin')");
+    h.run("a", "prototipado", "tercero", "2026-09-10");
+    h.run("a", "concepto", "primero", "2026-08-05");
+    h.run("a", "concepto", "segundo", "2026-08-05");
+    h.run("b", "pruebas", "otro", "2026-09-01");
+    const m = leerHitos(d);
+    assert.deepEqual(m.get("a")!.map((x) => x.titulo), ["primero", "segundo", "tercero"]);
+    assert.deepEqual(leerHitos(d, "b").get("b")!.map((x) => x.titulo), ["otro"]);
+    assert.equal(leerHitos(d, "b").has("a"), false);
+    assert.throws(() => h.run("a", "entregado", "mal", "2026-09-01")); // etapa fuera del pipeline
+    d.prepare("DELETE FROM proyectos WHERE id = 'a'").run();
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM proyecto_hitos WHERE proyecto_id = 'a'").get() as { n: number }).n, 0);
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM proyecto_hitos").get() as { n: number }).n, 1);
+
+    assert.equal(errorDeHito({ titulo: "ok", fecha: "2026-09-01" }, "2026-08-01", "2026-09-01"), null);
+    assert.ok(errorDeHito({ titulo: "ok", fecha: "2026-09-02" }, "2026-08-01", "2026-09-01")); // futura
+    assert.ok(errorDeHito({ titulo: "ok", fecha: "2026-07-31" }, "2026-08-01", "2026-09-01")); // antes del inicio
+    assert.ok(errorDeHito({ titulo: "  ", fecha: "2026-09-01" }, "2026-08-01", "2026-09-01")); // sin título
+    assert.equal(esquemaHito.safeParse({ titulo: "  ", fecha: "2026-09-01", etapa: "concepto" }).success, false);
+    assert.equal(esquemaHito.safeParse({ titulo: "x".repeat(121), fecha: "2026-09-01", etapa: "concepto" }).success, false);
+    assert.equal(esquemaHito.safeParse({ titulo: "x", fecha: "2026-09-01", etapa: "pausado" }).success, false);
+    assert.equal(esquemaHito.parse({ titulo: " x ", detalle: "  ", fecha: "2026-09-01", etapa: "concepto" }).detalle, null);
   });
 
   console.log("Objetivos editables");

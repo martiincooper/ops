@@ -237,3 +237,17 @@ export const esquemaProyectoCambio = z.object({
   fecha_entrega_objetivo: fecha.optional(),
   estado: estadoProyecto.optional(),
 });
+
+/** Hito de un proyecto: algo ya logrado en una etapa de desarrollo. */
+export const esquemaHito = z.object({
+  titulo: texto(120),
+  detalle: z
+    .string()
+    .trim()
+    .max(1000, "Máximo 1000 caracteres")
+    .optional()
+    .nullable()
+    .transform((v) => v || null),
+  fecha,
+  etapa: z.enum(["concepto", "prototipado", "pruebas"]),
+});
