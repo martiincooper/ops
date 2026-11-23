@@ -119,7 +119,6 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
 [rooms and my requirements](docs/capturas/v09-22-portal-salas.png) ·
 [conversation](docs/capturas/v09-23-portal-sala-conversacion.png) ·
 [conversation on a phone](docs/capturas/v09-24-portal-sala-movil.png) ·
-[room in use](docs/capturas/v09-25-portal-sala-ocupada.png) ·
 [access denied](docs/capturas/v09-26-portal-acceso-denegado.png) ·
 [requirement generated](docs/capturas/v09-27-portal-requerimiento-generado.png) ·
 [admin panel](docs/capturas/v09-28-admin-portal-gerencial.png)
@@ -142,8 +141,8 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
 - **Every room is a shared group chat** (text only for now; no assistant, photos or "Terminar"): opening it shows
   the full history of all its requests, each message with author and time, your own on the right. Sending stores the
   message and returns at once; if the room has no open request the message opens one (numbered `GER-000n`), and the
-  sender becomes a participant. Any number of executives can be in a room at the same time: **no room lock, no "en
-  uso", no heartbeat and no inactivity expiry**; a request stays open with no timeout. Clients poll every 2.5 seconds
+  sender becomes a participant. Any number of executives can be in a room at the same time: and a request stays open
+  with no timeout. Clients poll every 2.5 seconds
   for messages newer than the last seen id (`GET /api/chat/salas/<room>?desde=<id>`). Data in `control.db`:
   `chat_solicitudes` (at most one open per room), `chat_mensajes`, `chat_participantes` and `chat_modulos` (empty;
   the admin-managed rooms ticket will use it).
@@ -170,6 +169,26 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   7 rooms with their repository and whether a request is open, request history with ticket, participants, state,
   GitHub state (column and filter), transcript and Issue link (or **Reintentar**).
 - Data lives in `control.db` (`chat_solicitudes`, `chat_mensajes`, `chat_participantes`, `chat_modulos`; automatic migrations; v7 wipes the old chat data and restarts tickets at GER-0001).
+
+### Switching the portal on
+
+1. **GitHub token** (`GITHUB_TOKEN`): a **classic** PAT with the `repo` scope, created from the `datasheq-creator`
+   account (`GITHUB_CUENTA`, default `datasheq-creator`). A fine-grained PAT does not work: it cannot reach
+   collaborator repos of another user's personal account.
+2. **Module repos**: in each one, invite `datasheq-creator` as a collaborator with write access and **accept the
+   invitation from that account**. Issues must be enabled on the repo.
+3. **Interview assistant**: `INTERVIEW_URL` (the fleet dashboard's base URL) and `INTERVIEW_TOKEN` (the same value as
+   the fleet's `INTERVIEW_TOKEN`). Optional: `INTERVIEW_TIMEOUT_MS`.
+4. **Create rooms**: in `/admin?vista=chat` → **Salas**, create each room and paste its repo link
+   (`https://github.com/owner/repo` or `owner/repo`). On save the token verifies that the repo exists, that
+   `datasheq-creator` can push and that Issues are enabled; otherwise the reason shows in the form. A room without a
+   verified repo is grey, "Próximamente", for executives.
+5. **Health lines** (top of the **Portal gerencial** panel): *GitHub* green means the token is valid and says whose it
+   is; red gives the reason (missing token, another account's, revoked). *Asistente de entrevista* green means it
+   answers; red means it is not configured or has not answered since a given date, with the reason.
+6. **When something is stuck**: **Reintentar** (on the room) runs the assistant's stuck turn now instead of waiting
+   for the next automatic retry. **Cerrar conversación** closes the room's open request without sending it; it is
+   required before changing a room's repo or archiving it.
 
 ## Run
 
@@ -226,7 +245,7 @@ every pull request and push to `main`; pushes to `main` also publish the `amd64`
 | `TZ_NEGOCIO` | `America/Santiago` | Defines which date is "today" (one jornada per day) |
 | `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
 | `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
-| `GITHUB_TOKEN` | — (Issues stay pending) | DataSHEQ account token with "Issues: write" on the module repositories |
+| `GITHUB_TOKEN` | — (Issues stay pending) | Classic (`repo`) token of the DataSHEQ account, a collaborator on the module repositories |
 | `INTERVIEW_URL`, `INTERVIEW_TOKEN` | — (the assistant does not answer; messages are kept and retried) | URL and bearer token of the implement-all-cloud interview seat |
 | `PORTAL_URL` | — (photo links in the Issue stay relative) | Public address of ops, no trailing slash; Issues link photos through it |
 | `GITHUB_CUENTA` | `datasheq-creator` | DataSHEQ's GitHub account: sends with another account's token are rejected |
