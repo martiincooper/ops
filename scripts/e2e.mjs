@@ -1,12 +1,8 @@
 // Prueba de extremo a extremo contra un servidor en marcha con datos VACÍOS (dos empresas por defecto).
 // Uso: DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=... COOKIE_SECURE=false TIPO_CAMBIO_USD=950 \
-//        GITHUB_TOKEN= node .next/standalone/server.js        (en otra terminal, PORT=3100)
+//        GITHUB_TOKEN=falso GITHUB_API_URL=<GitHub simulado: node scripts/github-falso.mjs> node .next/standalone/server.js   (PORT=3100)
 //      DATA_DIR=/tmp/aether-e2e BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
-//      (DATA_DIR: el mismo del servidor, o E2E_EJECUTAR_SQL con un comando que ejecute $SQL en control.db; la prueba del portal le asigna repositorio a las salas, que aún no se hace desde el panel)
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import path from "node:path";
-import Database from "better-sqlite3";
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:3100";
 const ADMIN = process.env.ADMIN_EMAIL ?? "admin@aether-tech.dev";
@@ -973,15 +969,29 @@ async function main() {
     // El portal las muestra como tarjetas «Próximamente»; el panel trae el editor de salas
     assert.equal((await gGerente.pedir("/gerencia")).status, 200);
   });
-  // Vincular el repositorio llega en otro ticket: aquí se les asigna directo en la base, como lo haría ese flujo
-  const SQL_REPOS = "UPDATE chat_modulos SET repo = 'prueba/' || clave, repo_verificado_en = '2026-10-01T00:00:00.000Z' WHERE clave IN ('c-legal', 'c-previene', 'c-lidera')";
-  if (process.env.DATA_DIR) {
-    const control = new Database(path.join(process.env.DATA_DIR, "control.db"));
-    control.prepare(SQL_REPOS).run();
-    control.close();
-  } else if (process.env.E2E_EJECUTAR_SQL) {
-    execSync(process.env.E2E_EJECUTAR_SQL, { env: { ...process.env, SQL: SQL_REPOS } }); // p. ej. dentro del contenedor
-  } else throw new Error("Define DATA_DIR (carpeta de datos del servidor) o E2E_EJECUTAR_SQL para asignar repositorios a las salas");
+  await prueba("repos (#31): se vinculan con URL, .git o dueño/repo y se normalizan; un repositorio verificado abre la sala", async () => {
+    const vincular = (sala, repo) => gAdmin.pedir(`/api/admin/chat/salas/${sala}`, { metodo: "PATCH", json: { repo } });
+    for (const [sala, entrada, guardado] of [
+      ["c-legal", "https://github.com/prueba/c-legal.git", "prueba/c-legal"],
+      ["c-previene", "https://github.com/prueba/c-previene", "prueba/c-previene"],
+      ["c-lidera", "prueba/c-lidera", "prueba/c-lidera"],
+    ]) {
+      const r = await vincular(sala, entrada);
+      assert.equal(r.status, 200, JSON.stringify(r.datos));
+      assert.deepEqual([r.datos.sala.repo, r.datos.error_repo, !!r.datos.sala.repo_verificado_en], [guardado, undefined, true]);
+    }
+    assert.equal((await vincular("c-controla", "no-es-un-repo")).status, 400);
+  });
+  await prueba("repos (#31): un repositorio sin verificar muestra su causa y la sala sigue gris", async () => {
+    const r = await gAdmin.pedir("/api/admin/chat/salas/c-controla", { metodo: "PATCH", json: { repo: "prueba/c-controla-solo-lectura" } });
+    assert.equal(r.status, 200);
+    assert.match(r.datos.error_repo, /no tiene acceso de escritura/);
+    assert.equal(r.datos.sala.repo_verificado_en, null);
+    const issues = await gAdmin.pedir("/api/admin/chat/salas/c-controla", { metodo: "PATCH", json: { repo: "prueba/sin-issues" } });
+    assert.match(issues.datos.error_repo, /Issues desactivados/);
+    const nada = await gAdmin.pedir("/api/admin/chat/salas/c-controla", { metodo: "PATCH", json: { repo: "prueba/no-existe" } });
+    assert.match(nada.datos.error_repo, /datasheq-creator no es colaborador de este repositorio/);
+  });
   await prueba("con repositorio verificado la sala se abre; las demás siguen «Próximamente»", async () => {
     const s = await gGerente.pedir("/api/chat/salas");
     assert.deepEqual(s.datos.salas.map((x) => [x.clave, x.disponible]), [["c-legal", true], ["c-controla", false], ["c-previene", true], ["c-lidera", true]]);
@@ -993,8 +1003,10 @@ async function main() {
     assert.equal(panel.salas.length, 4);
     assert.deepEqual(
       [panel.salas.find((x) => x.clave === "c-legal").repo, panel.salas.find((x) => x.clave === "c-controla").repo, panel.config.cuenta],
-      ["prueba/c-legal", null, "datasheq-creator"],
+      ["prueba/c-legal", "prueba/no-existe", "datasheq-creator"],
     );
+    assert.deepEqual(panel.config.token, { ok: true, login: "datasheq-creator" }); // salud del token de GitHub en el panel
+    assert.equal(panel.salas.find((x) => x.clave === "c-controla").disponible, false);
   });
   await prueba("sala vacía: sin historial; el primer mensaje abre la solicitud GER-0001 y otra persona la ve con autor y hora", async () => {
     const vacia = await gGerente.pedir("/api/chat/salas/c-legal");
@@ -1126,6 +1138,24 @@ async function main() {
     assert.equal((await gEquipo.pedir("/admin")).status, 307);
     assert.match((await gEquipo.pedir("/login?portal=admin")).headers.get("location"), /\/gerencia$/);
     assert.match((await gAdmin.pedir("/login?portal=admin")).headers.get("location"), /\/admin\?vista=chat$/);
+  });
+
+  await prueba("repos (#31): con una conversación abierta, cambiar, quitar o archivar da 409; «Cerrar conversación» lo desbloquea", async () => {
+    const repoDe = async () => (await gAdmin.pedir("/api/admin/chat")).datos.salas.find((x) => x.clave === "c-legal");
+    const cambiar = (repo) => gAdmin.pedir("/api/admin/chat/salas/c-legal", { metodo: "PATCH", json: { repo } });
+    assert.equal((await cambiar("prueba/c-legal-2")).status, 409);
+    assert.equal((await cambiar("")).status, 409);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal/archivo", { metodo: "POST", json: { archivar: true } })).status, 409);
+    assert.equal((await repoDe()).repo, "prueba/c-legal");
+    for (const c of [gEquipo, gTeam, gExecA]) assert.equal((await c.pedir("/api/admin/chat/salas/c-legal/cerrar", { metodo: "POST" })).status, 403);
+    const cierre = await gAdmin.pedir("/api/admin/chat/salas/c-legal/cerrar", { metodo: "POST" });
+    assert.deepEqual([cierre.status, cierre.datos.cerrada], [200, true]);
+    assert.equal((await repoDe()).abierta, false);
+    const r = await cambiar("prueba/c-legal-2");
+    assert.deepEqual([r.status, r.datos.sala.repo], [200, "prueba/c-legal-2"]);
+    assert.equal((await cambiar("")).datos.sala.repo, null);
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal")).status, 404); // sin repositorio la sala vuelve a gris
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal/archivo", { metodo: "POST", json: { archivar: true } })).status, 200);
   });
 
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);
