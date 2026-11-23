@@ -15,7 +15,8 @@ import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tar
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
-import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas } from "../lib/chat/githubApi";
+import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas, saludToken } from "../lib/chat/githubApi";
+import { guardarSala, normalizarRepo } from "../lib/chat/repos";
 import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
@@ -29,6 +30,7 @@ import {
   estadoSalas,
   mensajes as mensajesChat,
   participantes,
+  cerrarConversacion,
   solicitud,
   solicitudAbierta,
   vistaSala,
@@ -1297,6 +1299,8 @@ async function main() {
   await prueba("salas (#29): archivar oculta la sala del portal y conserva el historial; restaurar la devuelve", () => {
     const d = dbControl();
     const id = enviarMensaje(d, "c-legal", ana, "hola", t0).solicitud.id;
+    assert.throws(() => archivarModulo(d, "c-legal", true), (e: ErrorModulo) => e.status === 409); // conversación abierta (#31)
+    cerrarConversacion(d, "c-legal", t0);
     archivarModulo(d, "c-legal", true);
     assert.equal(moduloPorClave(d, "c-legal")?.archivado, true);
     assert.ok(!estadoSalas(d).some((s) => s.clave === "c-legal"));
@@ -1309,7 +1313,7 @@ async function main() {
     assert.ok(estadoSalas(d).some((s) => s.clave === "c-legal"));
     assert.equal(vistaSala(d, "c-legal").mensajes[0].texto, "hola");
     assert.equal(solicitud(d, id)?.sala, "c-legal");
-    assert.equal(enviarMensaje(d, "c-legal", beto, "vuelvo", t0).nueva, false);
+    assert.equal(enviarMensaje(d, "c-legal", beto, "vuelvo", t0).nueva, true); // la conversación anterior se cerró: abre otra solicitud
     assert.throws(() => archivarModulo(d, "nada", true), (e: ErrorModulo) => e.status === 404);
   });
   await prueba("salas (#29): el portal las lista en orden, y repoDe solo devuelve repositorios verificados", () => {
@@ -1320,6 +1324,93 @@ async function main() {
     d.prepare("UPDATE chat_modulos SET repo_verificado_en = NULL WHERE clave = 'c-legal'").run();
     assert.equal(repoDe(d, "c-legal"), null);
     assert.equal(repoDe(d, "c-nada"), null);
+  });
+  await prueba("repos (#31): URL, .git y dueño/repo se normalizan a dueño/repo; vacío es sin repositorio; lo demás, 400", () => {
+    for (const t of ["https://github.com/dueno/repo", "https://github.com/dueno/repo.git", "dueno/repo", " http://www.github.com/dueno/repo/ "]) assert.equal(normalizarRepo(t), "dueno/repo", t);
+    assert.equal(normalizarRepo(""), null);
+    assert.equal(normalizarRepo(null), null);
+    for (const t of ["repo", "https://gitlab.com/a/b", "a/b/c", "a b/c"]) assert.throws(() => normalizarRepo(t), (e: ErrorModulo) => e.status === 400, t);
+  });
+  const repoFalso = (c: Partial<{ push: boolean; issues: boolean }> = {}) => ({ status: 200, json: { permissions: { push: c.push ?? true }, has_issues: c.issues ?? true } });
+  const guardar = (d: Database.Database, clave: string | null, datos: object, repo: string | null | undefined) => guardarSala(d, cfgFalso, clave, datos, repo, sinEspera);
+  await prueba("repos (#31): un repositorio verificado deja la sala abierta; el token y el repositorio se consultan en GitHub", async () => {
+    const d = dbControl();
+    manejar = (_r, url) => (url.pathname === "/repos/dueno/nuevo" ? repoFalso() : { status: 404 });
+    const r = await guardar(d, null, { nombre: "C-Nueva" }, "https://github.com/dueno/nuevo.git");
+    assert.equal(r.error_repo, undefined);
+    assert.equal(r.sala.repo, "dueno/nuevo");
+    assert.ok(r.sala.repo_verificado_en);
+    assert.equal(repoDe(d, "c-nueva"), "dueno/nuevo");
+  });
+  await prueba("repos (#31): cada causa de fallo da su error en español y deja la sala gris (sin verificar)", async () => {
+    const d = dbControl();
+    const causas: [string, () => { status: number; json?: unknown }, RegExp][] = [
+      ["no-existe", () => ({ status: 404 }), /datasheq-creator no es colaborador de este repositorio/],
+      ["solo-lectura", () => repoFalso({ push: false }), /no tiene acceso de escritura/],
+      ["sin-issues", () => repoFalso({ issues: false }), /Issues desactivados/],
+      ["token-malo", () => ({ status: 401 }), /token de GitHub no es válido/],
+    ];
+    for (const [repo, resp, msg] of causas) {
+      manejar = () => resp();
+      const r = await guardar(d, "c-legal", {}, `dueno/${repo}`);
+      assert.match(r.error_repo ?? "", msg, repo);
+      assert.equal(r.sala.repo, `dueno/${repo}`);
+      assert.equal(r.sala.repo_verificado_en, null, repo);
+      assert.equal(repoDe(d, "c-legal"), null, repo);
+    }
+    loginFalso = "otra-cuenta";
+    olvidarEtiquetas(); // la cuenta del token se guarda en caché
+    try {
+      const r = await guardar(d, "c-legal", {}, "dueno/ok");
+      assert.match(r.error_repo ?? "", /otra-cuenta/);
+      assert.equal(repoDe(d, "c-legal"), null);
+    } finally {
+      loginFalso = CUENTA_DATASHEQ;
+      olvidarEtiquetas();
+    }
+    const sinToken = await guardarSala(d, null, "c-legal", {}, "dueno/ok", sinEspera);
+    assert.match(sinToken.error_repo ?? "", /GITHUB_TOKEN/);
+  });
+  await prueba("repos (#31): sin repositorio se guarda (gris); quitarlo borra la verificación; repo undefined no lo toca", async () => {
+    const d = dbControl();
+    const sin = await guardar(d, null, { nombre: "C-Sola" }, undefined);
+    assert.deepEqual([sin.sala.repo, sin.sala.repo_verificado_en, sin.error_repo], [null, null, undefined]);
+    manejar = () => repoFalso();
+    const re = await guardar(d, "c-legal", { nombre: "C-Legal 2" }, undefined); // sin tocar el repositorio: se vuelve a verificar al guardar
+    assert.deepEqual([re.sala.repo, re.error_repo], ["dueno/repo", undefined]);
+    assert.notEqual(re.sala.repo_verificado_en, "2026-10-01T00:00:00.000Z");
+    const q = await guardar(d, "c-legal", {}, "");
+    assert.deepEqual([q.sala.repo, q.sala.repo_verificado_en], [null, null]);
+    assert.equal(repoDe(d, "c-legal"), null);
+  });
+  await prueba("repos (#31): con una conversación abierta con mensajes, cambiar/quitar el repositorio y archivar dan 409; cerrarla los desbloquea", async () => {
+    const d = dbControl();
+    manejar = () => repoFalso();
+    enviarMensaje(d, "c-legal", ana, "hola", t0);
+    const es409 = (e: ErrorModulo) => e.status === 409;
+    await assert.rejects(() => guardar(d, "c-legal", {}, "dueno/otro"), es409);
+    await assert.rejects(() => guardar(d, "c-legal", {}, ""), es409);
+    assert.throws(() => archivarModulo(d, "c-legal", true), es409);
+    assert.equal(moduloPorClave(d, "c-legal")?.repo, "dueno/repo"); // nada cambió
+    await guardar(d, "c-legal", { descripcion: "x" }, "dueno/repo"); // el mismo repositorio no se bloquea
+    assert.equal(cerrarConversacion(d, "c-legal", mas(1)), true);
+    assert.equal(cerrarConversacion(d, "c-legal", mas(1)), false);
+    assert.equal((await guardar(d, "c-legal", {}, "dueno/otro")).sala.repo, "dueno/otro");
+    assert.equal(archivarModulo(d, "c-legal", true).archivado, true);
+  });
+  await prueba("repos (#31): salud del token para el panel: válido, de otra cuenta, inválido o sin configurar", async () => {
+    manejar = () => ({ status: 200 });
+    assert.deepEqual(await saludToken(cfgFalso), { ok: true, login: CUENTA_DATASHEQ });
+    loginFalso = "otra";
+    assert.match((await saludToken(cfgFalso)).motivo ?? "", /otra/);
+    loginFalso = CUENTA_DATASHEQ;
+    assert.match((await saludToken(null)).motivo ?? "", /GITHUB_TOKEN/);
+    const malo = http.createServer((_q, r) => r.writeHead(401).end("{}"));
+    await new Promise<void>((f) => malo.listen(0, "127.0.0.1", f));
+    const r = await saludToken({ ...cfgFalso, api: `http://127.0.0.1:${(malo.address() as { port: number }).port}` });
+    malo.close();
+    assert.equal(r.ok, false);
+    assert.match(r.motivo ?? "", /no es válido/);
   });
   falso.close();
 
