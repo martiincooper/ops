@@ -30,6 +30,7 @@ interface Vista {
   solicitudes: Solicitud[];
   mensajes: Mensaje[];
   ultimo_id: number;
+  asistente: "idle" | "pensando" | "esperando_reintento" | null;
 }
 
 const FOTOS_MAX = 6;
@@ -58,6 +59,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [asistente, setAsistente] = useState<Vista["asistente"]>(null);
   const ultimoId = useRef(0);
   const entrada = useRef<HTMLTextAreaElement>(null);
   const alFinal = useRef(true);
@@ -67,6 +69,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
 
   const aplicar = useCallback((v: Vista, reemplazar: boolean) => {
     setSolicitudes(v.solicitudes);
+    setAsistente(v.asistente);
     setMensajes((actuales) => (reemplazar ? v.mensajes : unir(actuales, v.mensajes)));
     ultimoId.current = Math.max(ultimoId.current, v.ultimo_id);
   }, []);
@@ -106,7 +109,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
   }, []);
   useEffect(() => {
     if (alFinal.current) window.scrollTo({ top: document.documentElement.scrollHeight });
-  }, [mensajes.length]);
+  }, [mensajes.length, asistente]);
   useEffect(() => {
     if (!cargando) window.scrollTo({ top: document.documentElement.scrollHeight });
   }, [cargando]);
@@ -150,6 +153,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
       enviadas.forEach((f) => URL.revokeObjectURL(f.url));
       setFotos([]);
       alFinal.current = true;
+      setAsistente((a) => (a === "esperando_reintento" ? a : "pensando"));
       setMensajes((actuales) => unir(actuales, [r.mensaje]));
       setSolicitudes((s) => (s.some((x) => x.id === r.solicitud.id) ? s : [...s, { ...r.solicitud, iniciada_en: r.mensaje.creado_en }]));
     } catch (e) {
@@ -263,6 +267,12 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
               );
             })}
           </ol>
+        )}
+
+        {!cargando && asistente === "pensando" && (
+          <p role="status" data-testid="asistente-pensando" className="mt-2 flex items-center gap-2 px-2 text-sm text-tinta-3">
+            <LoaderCircle size={16} className="animate-spin" aria-hidden /> El asistente está pensando…
+          </p>
         )}
 
         <div className="sticky bottom-0 -mx-3 mt-4 bg-fondo/90 px-3 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 backdrop-blur sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0">

@@ -227,6 +227,7 @@ every pull request and push to `main`; pushes to `main` also publish the `amd64`
 | `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
 | `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
 | `GITHUB_TOKEN` | — (Issues stay pending) | DataSHEQ account token with "Issues: write" on the module repositories |
+| `INTERVIEW_URL`, `INTERVIEW_TOKEN` | — (the assistant does not answer; messages are kept and retried) | URL and bearer token of the implement-all-cloud interview seat |
 | `GITHUB_CUENTA` | `datasheq-creator` | DataSHEQ's GitHub account: sends with another account's token are rejected |
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub API (GitHub Enterprise or a mock GitHub in tests) |
 

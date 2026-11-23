@@ -16,6 +16,21 @@ import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCa
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
 import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas, saludToken } from "../lib/chat/githubApi";
+import {
+  AVISO_OCUPADO,
+  type ClienteAsiento,
+  ErrorAsiento,
+  type PeticionTurno,
+  asientoDesdeEntorno,
+  correrTurnos,
+  dispararTurno,
+  esperaTurnoMin,
+  procesarTurnos,
+  reiniciarSalud,
+  reintentarTurnoDeSala,
+  saludAsiento,
+  turnosPendientes,
+} from "../lib/chat/asistente";
 import { guardarSala, normalizarRepo } from "../lib/chat/repos";
 import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
@@ -1411,6 +1426,204 @@ async function main() {
     malo.close();
     assert.equal(r.ok, false);
     assert.match(r.motivo ?? "", /no es válido/);
+  });
+
+  // ── Turnos del asistente (#32) contra un asiento inyectado
+  const asientoGuion = () => {
+    const peticiones: PeticionTurno[] = [];
+    let falla: Error | null = null;
+    let compuerta: Promise<void> | null = null;
+    const cliente: ClienteAsiento = {
+      salud: async () => ({ ok: !falla }),
+      turno: async (p) => {
+        peticiones.push(JSON.parse(JSON.stringify(p)));
+        if (compuerta) await compuerta;
+        if (falla) throw falla;
+        const hechas = p.messages.filter((m) => m.role === "asistente").length;
+        return { session: "S1", message: `pregunta ${hechas + 1}`, done: hechas >= 2, summary: hechas >= 2 ? "resumen" : null };
+      },
+    };
+    return {
+      cliente,
+      peticiones,
+      fallar: (e: Error | null) => (falla = e),
+      detener: () => {
+        let abrir!: () => void;
+        compuerta = new Promise<void>((r) => (abrir = r));
+        return () => {
+          compuerta = null;
+          abrir();
+        };
+      },
+    };
+  };
+  await prueba("turno (#32): el mensaje dispara un turno con la transcripción completa y fotos en base64; la respuesta queda en la sala", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turno-"));
+    try {
+      const d = dbControl();
+      const a = asientoGuion();
+      const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(50, 7)]);
+      const m = enviarMensaje(d, "c-legal", ana, "Necesito un informe", t0, [{ nombre: "pantalla.jpg", datos: jpg }], dir);
+      assert.equal(await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => t0, dataDir: dir }), 1);
+      const p = a.peticiones[0];
+      assert.deepEqual([p.requestId, p.repo, p.session, p.room], [m.solicitud.id, "dueno/repo", null, { nombre: "C-Legal", descripcion: "" }]);
+      assert.deepEqual(p.messages.map((x) => [x.author, x.role, x.text, x.photos.map((f) => [f.name, f.type, f.base64])]), [
+        ["Ana Pérez", "gerente", "Necesito un informe", [["pantalla.jpg", "image/jpeg", jpg.toString("base64")]]],
+      ]);
+      const s = solicitud(d, m.solicitud.id)!;
+      assert.deepEqual([s.asistente_estado, s.asistente_sesion, s.terminado, s.resumen], ["idle", "S1", 0, null]);
+      const msgs = mensajesChat(d, s.id);
+      assert.deepEqual(msgs.map((x) => [x.rol, x.texto]), [["gerente", "Necesito un informe"], ["asistente", "pregunta 1"]]);
+      assert.equal(vistaSala(d, "c-legal").asistente, "idle");
+      // El siguiente mensaje manda todo de nuevo, con la sesión; sin mensajes nuevos no hay turno
+      enviarMensaje(d, "c-legal", beto, "respuesta", mas(1));
+      await dispararTurno(d, s.id, a.cliente, { ahora: () => mas(1) });
+      assert.deepEqual(a.peticiones[1].messages.map((x) => x.role), ["gerente", "asistente", "gerente"]);
+      assert.equal(a.peticiones[1].messages[0].photos.length, 1);
+      assert.equal(a.peticiones[1].session, "S1");
+      assert.equal(await dispararTurno(d, s.id, a.cliente), 0);
+      assert.equal(a.peticiones.length, 2);
+      // Tras la 2.ª pregunta, el asistente informa que terminó y deja el resumen
+      enviarMensaje(d, "c-legal", ana, "cada lunes", mas(2));
+      await dispararTurno(d, s.id, a.cliente, { ahora: () => mas(2) });
+      assert.deepEqual([solicitud(d, s.id)!.terminado, solicitud(d, s.id)!.resumen], [1, "resumen"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("turno (#32): los mensajes de varios gerentes durante un turno se responden juntos en un solo turno siguiente", async () => {
+    const d = dbControl();
+    const a = asientoGuion();
+    const soltar = a.detener();
+    const m = enviarMensaje(d, "c-legal", ana, "uno", t0);
+    const primero = dispararTurno(d, m.solicitud.id, a.cliente);
+    assert.deepEqual(vistaSala(d, "c-legal").asistente, "pensando"); // todos ven «pensando»
+    enviarMensaje(d, "c-legal", beto, "dos", mas(1));
+    enviarMensaje(d, "c-legal", ana, "tres", mas(1));
+    assert.equal(await dispararTurno(d, m.solicitud.id, a.cliente), 0); // ocupado: no abre un segundo turno
+    assert.equal(a.peticiones.length, 1);
+    soltar();
+    assert.equal(await primero, 2);
+    assert.deepEqual(a.peticiones.map((p) => p.messages.map((x) => x.text)), [["uno"], ["uno", "dos", "tres", "pregunta 1"]]);
+    assert.deepEqual(mensajesChat(d, m.solicitud.id).map((x) => x.texto), ["uno", "dos", "tres", "pregunta 1", "pregunta 2"]);
+    assert.equal(solicitud(d, m.solicitud.id)!.asistente_estado, "idle");
+  });
+  await prueba("turno (#32): un fallo deja esperando_reintento con aviso en el chat; reintentos a 1/2/5/15/30 min y luego cada 30", async () => {
+    const d = dbControl();
+    const a = asientoGuion();
+    a.fallar(new ErrorAsiento("El asiento de entrevista está ocupado o sin cupo de uso", 503));
+    const m = enviarMensaje(d, "c-legal", ana, "hola", t0);
+    const id = m.solicitud.id;
+    await dispararTurno(d, id, a.cliente, { ahora: () => t0 });
+    let s = solicitud(d, id)!;
+    assert.deepEqual([s.asistente_estado, s.asistente_intentos, s.asistente_proximo_intento], ["esperando_reintento", 1, mas(1).toISOString()]);
+    assert.match(s.asistente_error ?? "", /ocupado/);
+    assert.deepEqual(mensajesChat(d, id).map((x) => [x.rol, x.texto]), [["gerente", "hola"], ["sistema", AVISO_OCUPADO]]); // el mensaje no se pierde
+    assert.equal(vistaSala(d, "c-legal").asistente, "esperando_reintento");
+    // Un mensaje nuevo no abre turno mientras espera
+    enviarMensaje(d, "c-legal", beto, "¿hay alguien?", t0);
+    assert.equal(await dispararTurno(d, id, a.cliente, { ahora: () => t0 }), 0);
+    assert.equal(a.peticiones.length, 1);
+    // Antes de la hora no hace nada; en la hora, reintenta y vuelve a fallar con la espera siguiente (sin repetir el aviso)
+    let ahora = mas(0);
+    assert.deepEqual(turnosPendientes(d, ahora), []);
+    const esperas = [2, 5, 15, 30, 30, 30];
+    let t = mas(1);
+    for (const espera of esperas) {
+      ahora = t;
+      assert.deepEqual(turnosPendientes(d, new Date(t.getTime() - 1)), []);
+      assert.deepEqual(turnosPendientes(d, ahora), [id]);
+      assert.equal(await procesarTurnos(d, a.cliente, { ahora: () => ahora }), 0);
+      s = solicitud(d, id)!;
+      assert.equal(s.asistente_proximo_intento, new Date(ahora.getTime() + espera * 60_000).toISOString());
+      t = new Date(ahora.getTime() + espera * 60_000);
+    }
+    assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map(esperaTurnoMin), [1, 2, 5, 15, 30, 30, 30]);
+    assert.equal(mensajesChat(d, id).filter((x) => x.rol === "sistema").length, 1);
+    // El asiento vuelve: el reintento responde a todo junto y limpia el estado
+    a.fallar(null);
+    assert.equal(await procesarTurnos(d, a.cliente, { ahora: () => t }), 1);
+    s = solicitud(d, id)!;
+    assert.deepEqual([s.asistente_estado, s.asistente_intentos, s.asistente_error, s.asistente_proximo_intento], ["idle", 0, null, null]);
+    assert.deepEqual(a.peticiones.at(-1)!.messages.map((x) => x.text), ["hola", "¿hay alguien?"]);
+  });
+  await prueba("turno (#32): «Reintentar» corre ahora el turno trabado; sin asiento configurado también queda en espera", async () => {
+    const d = dbControl();
+    const a = asientoGuion();
+    a.fallar(new ErrorAsiento("caído"));
+    const m = enviarMensaje(d, "c-legal", ana, "hola", t0);
+    await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => t0 });
+    assert.equal(await procesarTurnos(d, a.cliente, { ahora: () => t0 }), 0); // aún no vence
+    a.fallar(null);
+    const r = reintentarTurnoDeSala(d, "c-legal", a.cliente, { ahora: () => t0 });
+    assert.equal(r.iniciado, true);
+    assert.equal(await r.promesa, 1);
+    assert.equal(solicitud(d, m.solicitud.id)!.asistente_estado, "idle");
+    assert.equal(reintentarTurnoDeSala(d, "c-legal", a.cliente).iniciado, false); // nada trabado
+    assert.equal(reintentarTurnoDeSala(d, "c-lidera", a.cliente).iniciado, false); // sala sin solicitud
+    // Sin INTERVIEW_URL: el turno falla con un motivo claro y queda para reintentar
+    const m2 = enviarMensaje(d, "c-lidera", ana, "hola", t0);
+    await dispararTurno(d, m2.solicitud.id, null, { ahora: () => t0 });
+    assert.match(solicitud(d, m2.solicitud.id)!.asistente_error ?? "", /INTERVIEW_URL/);
+    assert.equal(solicitud(d, m2.solicitud.id)!.asistente_estado, "esperando_reintento");
+  });
+  await prueba("turno (#32): un «pensando» huérfano (reinicio del proceso) se retoma", async () => {
+    const d = dbControl();
+    const a = asientoGuion();
+    const m = enviarMensaje(d, "c-legal", ana, "hola", t0);
+    d.prepare("UPDATE chat_solicitudes SET asistente_estado = 'pensando' WHERE id = ?").run(m.solicitud.id);
+    assert.deepEqual(turnosPendientes(d, t0), [m.solicitud.id]);
+    assert.equal(await procesarTurnos(d, a.cliente, { ahora: () => t0 }), 1);
+  });
+  await prueba("asiento (#32): el cliente HTTP manda el bearer y traduce 401/409/503/504 y las caídas de red", async () => {
+    const vistos: { url: string; auth: string | undefined; cuerpo: string }[] = [];
+    let status = 200;
+    const srv = http.createServer((req, res) => {
+      let cuerpo = "";
+      req.on("data", (c) => (cuerpo += c));
+      req.on("end", () => {
+        vistos.push({ url: `${req.method} ${req.url}`, auth: req.headers.authorization, cuerpo });
+        const json = req.url?.endsWith("/health") ? { ok: true } : { session: "S", message: "hola", done: true, summary: "r" };
+        res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(json));
+      });
+    });
+    await new Promise<void>((f) => srv.listen(0, "127.0.0.1", f));
+    const antes = [process.env.INTERVIEW_URL, process.env.INTERVIEW_TOKEN];
+    try {
+      process.env.INTERVIEW_URL = `http://127.0.0.1:${(srv.address() as { port: number }).port}/`;
+      process.env.INTERVIEW_TOKEN = "tok";
+      const c = asientoDesdeEntorno()!;
+      assert.deepEqual(await c.salud(), { ok: true });
+      const p: PeticionTurno = { requestId: "r", repo: "o/r", session: null, room: { nombre: "N", descripcion: "" }, messages: [] };
+      assert.deepEqual(await c.turno(p), { session: "S", message: "hola", done: true, summary: "r" });
+      assert.deepEqual(vistos.map((v) => [v.url, v.auth]), [["GET /api/interview/health", "Bearer tok"], ["POST /api/interview/turn", "Bearer tok"]]);
+      assert.equal(JSON.parse(vistos[1].cuerpo).requestId, "r");
+      for (const [st, re] of [[401, /token/], [409, /clonar/], [503, /ocupado/], [504, /tardó/]] as const) {
+        status = st;
+        await assert.rejects(c.turno(p), (e: ErrorAsiento) => e instanceof ErrorAsiento && e.status === st && re.test(e.message));
+      }
+      srv.close();
+      await assert.rejects(c.turno(p), /No se pudo conectar/);
+      delete process.env.INTERVIEW_TOKEN;
+      assert.equal(asientoDesdeEntorno(), null);
+    } finally {
+      srv.close();
+      [process.env.INTERVIEW_URL, process.env.INTERVIEW_TOKEN] = antes as [string, string];
+      if (antes[0] === undefined) delete process.env.INTERVIEW_URL;
+      if (antes[1] === undefined) delete process.env.INTERVIEW_TOKEN;
+    }
+  });
+  await prueba("asiento (#32): la salud dice si responde y desde cuándo no", async () => {
+    reiniciarSalud();
+    const a = asientoGuion();
+    assert.deepEqual(await saludAsiento(a.cliente, t0), { configurado: true, ok: true, desde: null, motivo: null });
+    a.fallar(new Error("x"));
+    const caido = await saludAsiento(a.cliente, mas(5));
+    assert.deepEqual([caido.ok, caido.desde], [false, mas(5).toISOString()]);
+    assert.equal((await saludAsiento(a.cliente, mas(9))).desde, mas(5).toISOString()); // sigue la hora del primer fallo
+    a.fallar(null);
+    assert.deepEqual(await saludAsiento(a.cliente, mas(12)), { configurado: true, ok: true, desde: null, motivo: null });
+    assert.equal((await saludAsiento(null)).configurado, false);
   });
   falso.close();
 

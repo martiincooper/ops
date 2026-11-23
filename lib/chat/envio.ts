@@ -1,4 +1,5 @@
-// Envío de los requerimientos a GitHub con reintentos automáticos. Si el envío falla por un error transitorio
+// Envío de los requerimientos a GitHub con reintentos automáticos (el mismo programador reintenta los turnos del asistente,
+// ver ./asistente). Si el envío falla por un error transitorio
 // (red, tiempo de espera, 5xx, límite de uso), queda programado un reintento a 1, 2, 5, 15, 30 y 60 minutos; después
 // queda pendiente para «Reintentar» desde el panel. Los errores definitivos (token, permisos, datos) no se reintentan.
 // Un mismo requerimiento nunca se envía dos veces a la vez (botón y reintento automático), y al reintentar se busca
@@ -126,7 +127,12 @@ export async function procesarPendientes(
 const global = globalThis as unknown as { __aetherReintentos?: ReturnType<typeof setInterval> };
 
 /** Revisa cada minuto los reintentos vencidos (una sola vez por proceso, también con recargas de `next dev`). */
-export function iniciarReintentos(obtenerDb: () => DB, obtenerCfg: () => ConfigCuenta | null, cadaMs = 60_000) {
+export function iniciarReintentos(
+  obtenerDb: () => DB,
+  obtenerCfg: () => ConfigCuenta | null,
+  cadaMs = 60_000,
+  turnos?: (db: DB) => Promise<number>,
+) {
   if (global.__aetherReintentos) return;
   let ocupado = false;
   global.__aetherReintentos = setInterval(async () => {
@@ -135,6 +141,8 @@ export function iniciarReintentos(obtenerDb: () => DB, obtenerCfg: () => ConfigC
     try {
       const n = await procesarPendientes(obtenerDb(), obtenerCfg());
       if (n) console.info(`[chat-github] ${n} requerimiento(s) enviado(s) a GitHub en reintento automático`);
+      const t = turnos ? await turnos(obtenerDb()) : 0;
+      if (t) console.info(`[chat-asistente] ${t} turno(s) del asistente completado(s) en reintento automático`);
     } catch (e) {
       console.error("[chat-github] reintentos automáticos:", e);
     } finally {

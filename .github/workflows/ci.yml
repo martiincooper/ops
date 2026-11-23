@@ -54,13 +54,16 @@ jobs:
         run: |
           # GitHub simulado en el host (sin token real); el contenedor lo alcanza por host.docker.internal
           GITHUB_FALSO_HOST=0.0.0.0 GITHUB_FALSO_PORT=3199 node scripts/github-falso.mjs &
+          # Asiento de entrevista simulado (sin Claude real)
+          INTERVIEW_TOKEN=token-asiento-falso ASIENTO_FALSO_HOST=0.0.0.0 ASIENTO_FALSO_PORT=3198 node scripts/asiento-falso.mjs &
           sleep 1
           docker run -d --name aether -p 127.0.0.1:3100:3000 --add-host=host.docker.internal:host-gateway \
             -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false \
             -e TIPO_CAMBIO_USD=950 -e GITHUB_TOKEN=token-falso -e GITHUB_API_URL=http://host.docker.internal:3199 \
+            -e INTERVIEW_URL=http://host.docker.internal:3198 -e INTERVIEW_TOKEN=token-asiento-falso \
             aether-ops:ci
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:3100/api/health && break; sleep 1; done
-          BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
+          ASIENTO=http://127.0.0.1:3198 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
           # El contenedor inicia como root solo para preparar /data (scripts/arranque.cjs) y baja a uid 1001:
           # se verifica el usuario del proceso del servidor (PID 1), no el de la imagen.
           test "$(docker exec aether node -e "process.stdout.write(require('fs').readFileSync('/proc/1/status','utf8').match(/^Uid:\s+(\d+)/m)[1])")" = "1001"

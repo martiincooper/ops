@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { HttpError, leerJson, manejar } from "@/lib/http";
 import { FOTOS_MAX_POR_SOLICITUD, FOTO_MAX_BYTES, MSG_FOTOS_LIMITE, MSG_FOTO_GRANDE, type FotoEntrada } from "@/lib/chat/adjuntos";
+import { asientoDesdeEntorno, dispararTurno } from "@/lib/chat/asistente";
 import { enSala, requireGerencia } from "@/lib/chat/servicio";
 import { TEXTO_MAX, enviarMensaje } from "@/lib/chat/salas";
 import { MENSAJE_CUPO, consumirCupo } from "@/lib/chat/uso";
@@ -39,5 +40,6 @@ export const POST = manejar<Ctx>(async (req, { params }) => {
   const { texto, fotos } = await leerEnvio(req);
   if (!consumirCupo(p.email, "mensaje")) throw new HttpError(429, MENSAJE_CUPO);
   const { mensaje, solicitud, nueva } = enSala(() => enviarMensaje(db, modulo, p, texto, new Date(), fotos));
+  void dispararTurno(db, solicitud.id, asientoDesdeEntorno()); // el asistente responde aparte; el mensaje ya está guardado
   return NextResponse.json({ mensaje, solicitud: { id: solicitud.id, ticket: solicitud.ticket, estado: solicitud.estado }, nueva });
 });
