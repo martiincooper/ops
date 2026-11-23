@@ -25,8 +25,9 @@ export interface DatosModulo {
   autonomia: Autonomia;
 }
 
+export const MSG_SALA_EXISTE = "Ya existe una sala con ese nombre";
 export const COLOR_POR_DEFECTO = "5b4fd6";
-const COLUMNAS = "clave, nombre, area, descripcion, color, orden, repo, repo_verificado_en, autonomia, archivado";
+const COLUMNAS = "clave, nombre, area, descripcion, color, orden, repo, repo_verificado_en, autonomia, archivado, estado_modulo, creado_por";
 
 interface Fila extends Omit<Modulo, "archivado"> {
   archivado: number;
@@ -80,17 +81,19 @@ export function todosLosModulos(db: DB): Modulo[] {
 /** Repositorio verificado de la sala (null: sin repositorio o sin verificar). */
 export function repoDe(db: DB, clave: string): string | null {
   const m = moduloPorClave(db, clave);
-  return m && salaAbierta(m) ? m.repo : null;
+  return m && m.estado_modulo === "activo" && salaAbierta(m) ? m.repo : null;
 }
 
-/** Crea una sala; su clave es el slug del nombre. Sin orden, va al final. */
-export function crearModulo(db: DB, d: Partial<DatosModulo>): Modulo {
+/** Crea una sala; su clave es el slug del nombre. Sin orden, va al final. `propuesto`: la crea un gerente (su email). */
+export function crearModulo(db: DB, d: Partial<DatosModulo>, propuestoPor?: string): Modulo {
   const v = validarDatos({ ...d, orden: d.orden ?? undefined });
   const clave = slugSala(v.nombre);
   if (!clave) throw new ErrorModulo(400, "El nombre debe llevar letras o números");
-  if (moduloPorClave(db, clave)) throw new ErrorModulo(409, `Ya existe una sala con la clave «${clave}»`);
+  if (moduloPorClave(db, clave)) {
+    throw new ErrorModulo(409, propuestoPor ? MSG_SALA_EXISTE : `Ya existe una sala con la clave «${clave}»`);
+  }
   const orden = d.orden ?? (db.prepare("SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM chat_modulos").get() as { n: number }).n;
-  db.prepare("INSERT INTO chat_modulos (clave, nombre, area, descripcion, color, orden, autonomia) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+  db.prepare("INSERT INTO chat_modulos (clave, nombre, area, descripcion, color, orden, autonomia, estado_modulo, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     clave,
     v.nombre,
     v.area,
@@ -98,8 +101,15 @@ export function crearModulo(db: DB, d: Partial<DatosModulo>): Modulo {
     v.color,
     orden,
     v.autonomia,
+    propuestoPor ? "propuesto" : "activo",
+    propuestoPor ? propuestoPor.toLowerCase() : null,
   );
   return moduloPorClave(db, clave) as Modulo;
+}
+
+/** Un gerente propone un módulo nuevo: sala abierta sin repositorio, sin área y con el color por defecto, al final. */
+export function proponerModulo(db: DB, d: Pick<DatosModulo, "nombre" | "descripcion">, email: string): Modulo {
+  return crearModulo(db, { nombre: d.nombre, descripcion: d.descripcion }, email);
 }
 
 /** Edita nombre, área, descripción, color, orden y autonomía. La clave nunca cambia. */

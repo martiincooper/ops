@@ -196,7 +196,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
     <div className="flex min-h-dvh flex-col">
       <CabeceraPortal
         nombre={nombre}
-        subtitulo={`Sala ${modulo.nombre} · ${modulo.area}`}
+        subtitulo={`Sala ${modulo.nombre}${modulo.area ? ` · ${modulo.area}` : ""}`}
         esAdmin={esAdmin}
         volver={
           <Link href="/gerencia" aria-label="Volver a las salas" title="Volver a las salas" className="boton-suave bg-superficie">
@@ -210,7 +210,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
           <IconoModulo clave={modulo.clave} color={modulo.color} tamano={20} />
           <div className="min-w-0 flex-1">
             <h1 className="font-semibold text-tinta">
-              {modulo.nombre} <span className="font-normal text-tinta-3">· {modulo.area}</span>
+              {modulo.nombre} <span className="font-normal text-tinta-3">· {modulo.estado_modulo === "propuesto" ? "Propuesto" : modulo.area}</span>
             </h1>
             <p className="text-xs text-tinta-3">{modulo.descripcion}</p>
           </div>

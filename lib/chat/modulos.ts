@@ -21,12 +21,22 @@ export interface Modulo {
   repo_verificado_en: string | null;
   autonomia: Autonomia;
   archivado: boolean;
+  /** propuesto: sala creada por gerentes, abierta sin repositorio; activo: sala normal (necesita repositorio verificado). */
+  estado_modulo: EstadoModulo;
+  /** Email de quien creó la sala (null: la creó el administrador). */
+  creado_por: string | null;
 }
+
+export type EstadoModulo = "propuesto" | "activo";
 
 export type Autonomia = "revisar" | "automatico";
 
-/** Una sala se puede abrir solo con un repositorio verificado; sin él es «Próximamente» (gris, cerrada). */
-export const salaAbierta = (m: Pick<Modulo, "repo" | "repo_verificado_en">) => !!m.repo && !!m.repo_verificado_en;
+/**
+ * Una sala activa se abre solo con un repositorio verificado; sin él es «Próximamente» (gris, cerrada). Un módulo
+ * propuesto está abierto desde el principio, sin repositorio.
+ */
+export const salaAbierta = (m: Pick<Modulo, "repo" | "repo_verificado_en" | "estado_modulo">) =>
+  m.estado_modulo === "propuesto" || (!!m.repo && !!m.repo_verificado_en);
 
 /** Portal gerencial: gerentes (executive) de la empresa Datasheq, o cualquier administrador (sin empresa, cualquier dominio). */
 export function puedeUsarPortal(u: { rol: string; empresa: string | null }): boolean {

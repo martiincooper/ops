@@ -197,8 +197,11 @@ export default function EditorSalas({
                 <p className="font-semibold text-tinta">
                   {s.nombre} <span className="font-normal text-tinta-3">· {s.clave} · orden {s.orden}</span>
                 </p>
+                <p className="truncate text-xs text-tinta-3" data-estado-modulo={s.estado_modulo}>
+                  {s.estado_modulo === "propuesto" ? `Propuesto${s.creado_por ? ` por ${s.creado_por}` : ""}` : "Activo"}
+                </p>
                 <p className="truncate text-xs text-tinta-3" data-repo>
-                  {s.repo ? `${s.repo} · ${s.disponible ? "verificado" : "sin verificar (gris)"}` : "Sin repositorio (gris)"}
+                  {s.repo ? `${s.repo} · ${s.disponible ? "verificado" : "sin verificar (gris)"}` : s.estado_modulo === "propuesto" ? "Sin repositorio (módulo propuesto, abierto)" : "Sin repositorio (gris)"}
                 </p>
                 <p className="truncate text-xs text-tinta-3">{s.area || "Sin área"} · autonomía {s.autonomia === "automatico" ? "automático" : "revisar"}</p>
               </div>

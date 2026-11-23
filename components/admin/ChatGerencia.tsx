@@ -183,7 +183,9 @@ export default function ChatGerencia() {
                     <p className="font-semibold text-tinta">{s.nombre}</p>
                     <p className="truncate text-xs text-tinta-3">{s.area}</p>
                   </div>
-                  {!s.disponible ? (
+                  {s.estado_modulo === "propuesto" ? (
+                    <span className="chip bg-pastel-azul text-indigo-tinta">Propuesto</span>
+                  ) : !s.disponible ? (
                     <span className="chip bg-suave text-tinta-3">Próximamente</span>
                   ) : s.abierta ? (
                     <span className="chip bg-indigo-suave text-indigo-tinta">

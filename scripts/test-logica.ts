@@ -37,10 +37,10 @@ import {
   turnosPendientes,
 } from "../lib/chat/asistente";
 import { guardarSala, normalizarRepo } from "../lib/chat/repos";
-import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
+import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, proponerModulo, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
-import { type Modulo, codigoTicket, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
+import { type Modulo, codigoTicket, salaAbierta as salaAbiertaDe, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
 import {
   ErrorSala,
   SALA_NO_DISPONIBLE,
@@ -812,6 +812,30 @@ async function main() {
   const t0 = new Date("2026-10-07T13:00:00Z");
   const mas = (min: number) => new Date(t0.getTime() + min * 60_000);
 
+  await prueba("módulos propuestos (#47): migración conserva las salas como «activo»; proponer abre la sala sin repositorio y no inicia turnos", async () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_CONTROL.slice(0, MIGRACIONES_CONTROL.length - 1).forEach((m) => d.exec(m));
+    d.prepare("INSERT INTO chat_modulos (clave, nombre) VALUES ('c-legal', 'C-Legal')").run();
+    d.exec(MIGRACIONES_CONTROL[MIGRACIONES_CONTROL.length - 1]);
+    const previa = moduloPorClave(d, "c-legal")!;
+    assert.deepEqual([previa.estado_modulo, previa.creado_por], ["activo", null]);
+    assert.equal(salaAbiertaDe(previa), false); // sin repositorio: gris
+    const m = proponerModulo(d, { nombre: "C-Compras", descripcion: "Compras" }, "Ana@Datasheq.com");
+    assert.deepEqual([m.clave, m.estado_modulo, m.creado_por, m.area, m.color, m.orden], ["c-compras", "propuesto", "ana@datasheq.com", "", "5b4fd6", 1]);
+    assert.equal(estadoSalas(d).find((s) => s.clave === "c-compras")!.disponible, true);
+    assert.equal(estadoSalas(d).find((s) => s.clave === "c-legal")!.disponible, false);
+    assert.throws(() => proponerModulo(d, { nombre: "c compras", descripcion: "x" }, "b@datasheq.com"), (e) => e instanceof ErrorModulo && e.status === 409 && e.message === "Ya existe una sala con ese nombre");
+    archivarModulo(d, "c-compras", true);
+    assert.throws(() => proponerModulo(d, { nombre: "C-Compras", descripcion: "x" }, "b@datasheq.com"), (e) => e instanceof ErrorModulo && e.status === 409);
+    archivarModulo(d, "c-compras", false);
+    const { solicitud: s } = enviarMensaje(d, "c-compras", ana, "hola", t0);
+    let turnos = 0;
+    const asiento = { turno: async () => (turnos++, { session: "s", message: "x", done: false, summary: null }), cierre: async () => ({ session: "s", title: "t", spec: "s" }) } as unknown as ClienteAsiento;
+    assert.equal(await dispararTurno(d, s.id, asiento), 0);
+    assert.equal(turnos, 0);
+    assert.equal(solicitud(d, s.id)!.asistente_estado, "idle");
+  });
   await prueba("portal (#27): gerentes de Datasheq y administradores de cualquier dominio", () => {
     assert.equal(puedeUsarPortal({ rol: "executive", empresa: "datasheq" }), true);
     assert.equal(puedeUsarPortal({ rol: "admin", empresa: null }), true); // administrador: sin empresa, cualquier dominio
@@ -841,6 +865,7 @@ async function main() {
       assert.deepEqual(d.prepare(`SELECT COUNT(*) n FROM ${t}`).get(), { n: 0 }, `${t} vacía`);
     }
     // La primera solicitud tras la migración es GER-0001 (con una sala abierta, ya con repositorio verificado)
+    MIGRACIONES_CONTROL.slice(8).forEach((m) => d.exec(m));
     crearModulo(d, { nombre: "C-Legal" });
     d.prepare("UPDATE chat_modulos SET repo = 'dueno/repo', repo_verificado_en = '2026-10-01T00:00:00.000Z'").run();
     const { solicitud: s } = enviarMensaje(d, "c-legal", ana, "hola", t0);
