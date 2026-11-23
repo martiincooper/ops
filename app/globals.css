@@ -152,3 +152,48 @@
     @apply border-t border-linea;
   }
 }
+
+/* Markdown renderizado (documentos de los módulos propuestos) */
+.markdown {
+  @apply text-sm leading-relaxed text-tinta-2;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  @apply mb-2 mt-4 font-semibold text-tinta;
+}
+.markdown h1 {
+  @apply text-lg;
+}
+.markdown h2 {
+  @apply text-base;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown pre,
+.markdown blockquote {
+  @apply mb-3;
+}
+.markdown ul {
+  @apply list-disc pl-5;
+}
+.markdown ol {
+  @apply list-decimal pl-5;
+}
+.markdown code {
+  @apply rounded bg-suave px-1 py-0.5 text-xs text-tinta;
+}
+.markdown pre {
+  @apply overflow-x-auto rounded-2xl bg-suave p-3;
+}
+.markdown pre code {
+  @apply bg-transparent p-0;
+}
+.markdown blockquote {
+  @apply border-l-4 border-indigo-suave pl-3 text-tinta-3;
+}
+.markdown a {
+  @apply font-semibold text-indigo-tinta underline;
+}

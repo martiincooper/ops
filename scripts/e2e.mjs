@@ -1384,6 +1384,98 @@ async function main() {
     assert.ok(panel.historial.some((f) => f.sala === "c-prueba" && f.guardado));
   });
 
+  await prueba("módulos propuestos (#49): el admin ve la lista y el detalle (spec, CONTEXT.md, ADR, foto, transcripción) y descarga .md y .zip; los demás, 403", async () => {
+    const esperar = async (fn, que) => {
+      for (let i = 0; i < 100; i++) {
+        const r = await fn();
+        if (r) return r;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      assert.fail(`no ocurrió: ${que}`);
+    };
+    const r = await gGerente.pedir("/api/chat/salas", { metodo: "POST", json: { nombre: "C-Panel", descripcion: "Módulo para el panel" } });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    const vista = async () => (await gGerente.pedir("/api/chat/salas/c-panel")).datos;
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 5)]);
+    const form = new FormData();
+    form.set("texto", "Compras y aprobaciones");
+    form.append("fotos", new Blob([jpg], { type: "image/jpeg" }), "planilla.jpg");
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-panel/mensajes", { metodo: "POST", form })).status, 200);
+    let v;
+    for (const t of [null, "Lo usan tres personas cada semana", "Eso es todo"]) {
+      if (t) assert.equal((await escribir(gGerente, "c-panel", t)).status, 200);
+      v = await esperar(async () => {
+        const x = await vista();
+        return x.asistente === "idle" && x.mensajes.at(-1).rol === "asistente" ? x : null;
+      }, "respuesta del asistente");
+      if (v.resumen) break;
+    }
+    assert.ok(v.resumen);
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-panel/terminar", { metodo: "POST" })).status, 200);
+    await esperar(async () => (await vista()).solicitudes.at(-1).envio === "guardado", "marcador «Guardado»");
+    // una conversación nueva queda abierta
+    assert.equal((await escribir(gGerente, "c-panel", "Otra idea")).status, 200);
+
+    const lista = (await gAdmin.pedir("/api/admin/chat/propuestos")).datos.propuestos;
+    const fila = lista.find((x) => x.clave === "c-panel");
+    assert.deepEqual([fila.nombre, fila.creado_por, fila.guardadas, fila.abierta], ["C-Panel", "portal.gerente@datasheq.com", 1, true]);
+    assert.ok(lista.every((x, i) => i === 0 || lista[i - 1].ultima_actividad >= x.ultima_actividad));
+    const d = (await gAdmin.pedir("/api/admin/chat/propuestos/c-panel")).datos;
+    assert.equal(d.specs.length, 1);
+    assert.match(d.specs[0].ticket, /^GER-\d{4}$/);
+    assert.ok(d.specs[0].titulo && d.specs[0].html.includes("<"));
+    assert.deepEqual(d.specs[0].participantes.map((p) => p.nombre), ["Gonzalo Gerente"]);
+    assert.match(d.context_html, /Glosario de prueba/);
+    assert.deepEqual(d.adrs.map((a) => a.ruta), ["docs/adr/0001-decision-de-prueba.md"]);
+    const foto = d.specs[0].mensajes.flatMap((m) => m.adjuntos)[0];
+    assert.equal(foto.nombre, "planilla.jpg");
+    assert.equal((await gAdmin.pedir(`/api/chat/adjuntos/${foto.id}`)).status, 200);
+    assert.ok(d.specs[0].mensajes.length >= 3);
+    assert.equal(d.otras.length, 1); // la conversación abierta
+    assert.equal((await gAdmin.pedir("/api/admin/chat/propuestos/c-legal")).status, 404);
+
+    // descargas
+    const base = "/api/admin/chat/propuestos/c-panel/descarga";
+    const md = await gAdmin.pedir(`${base}?doc=${encodeURIComponent(`specs/${d.specs[0].ticket}.md`)}`);
+    assert.equal(md.status, 200);
+    assert.match(md.headers.get("content-type"), /text\/markdown/);
+    assert.match(md.headers.get("content-disposition"), new RegExp(`${d.specs[0].ticket}\\.md`));
+    assert.equal(Buffer.from(md.datos).toString("utf8"), d.specs[0].spec);
+    assert.equal(Buffer.from((await gAdmin.pedir(`${base}?doc=CONTEXT.md`)).datos).toString("utf8"), d.context);
+    assert.equal((await gAdmin.pedir(`${base}?doc=${encodeURIComponent("docs/adr/0001-decision-de-prueba.md")}`)).status, 200);
+    assert.equal((await gAdmin.pedir(`${base}?doc=${encodeURIComponent("../../etc/passwd")}`)).status, 404);
+    const zip = await gAdmin.pedir(base);
+    assert.equal(zip.status, 200);
+    assert.equal(zip.headers.get("content-type"), "application/zip");
+    const buf = Buffer.from(zip.datos);
+    const { inflateRawSync } = await import("node:zlib");
+    const entradas = {};
+    const fin = buf.length - 22;
+    assert.equal(buf.readUInt32LE(fin), 0x06054b50);
+    let o = buf.readUInt32LE(fin + 16);
+    for (let n = buf.readUInt16LE(fin + 10); n-- > 0; ) {
+      assert.equal(buf.readUInt32LE(o), 0x02014b50);
+      const nl = buf.readUInt16LE(o + 28);
+      const nombre = buf.toString("utf8", o + 46, o + 46 + nl);
+      const lo = buf.readUInt32LE(o + 42);
+      const cs = buf.readUInt32LE(o + 20);
+      const dato = buf.subarray(lo + 30 + buf.readUInt16LE(lo + 26) + buf.readUInt16LE(lo + 28), lo + 30 + buf.readUInt16LE(lo + 26) + buf.readUInt16LE(lo + 28) + cs);
+      entradas[nombre] = inflateRawSync(dato).toString("utf8");
+      o += 46 + nl + buf.readUInt16LE(o + 30) + buf.readUInt16LE(o + 32);
+    }
+    assert.deepEqual(Object.keys(entradas).sort(), ["CONTEXT.md", "docs/adr/0001-decision-de-prueba.md", `specs/${d.specs[0].ticket}.md`].sort());
+    assert.equal(entradas["CONTEXT.md"], d.context);
+    // solo administradores: 401 sin sesión, 403 gerente y equipo
+    for (const ruta of ["/api/admin/chat/propuestos", "/api/admin/chat/propuestos/c-panel", base, `${base}?doc=CONTEXT.md`]) {
+      assert.equal((await new Cliente("anon").pedir(ruta)).status, 401, ruta);
+      for (const c of [gGerente, gEquipo]) assert.equal((await c.pedir(ruta)).status, 403, ruta);
+    }
+    // cerrar la conversación y archivar: sale de la lista
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-panel/cerrar", { metodo: "POST" })).status, 200);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-panel/archivo", { metodo: "POST", json: { archivar: true } })).status, 200);
+    assert.ok(!(await gAdmin.pedir("/api/admin/chat/propuestos")).datos.propuestos.some((x) => x.clave === "c-panel"));
+  });
+
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);
   process.exitCode = fallos ? 1 : 0;
 }
