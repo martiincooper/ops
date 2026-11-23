@@ -1450,8 +1450,11 @@ async function main() {
     const buf = Buffer.from(zip.datos);
     const { inflateRawSync } = await import("node:zlib");
     const entradas = {};
-    for (let o = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])); o >= 0 && o < buf.length - 22; ) {
-      if (buf.readUInt32LE(o) !== 0x02014b50) break;
+    const fin = buf.length - 22;
+    assert.equal(buf.readUInt32LE(fin), 0x06054b50);
+    let o = buf.readUInt32LE(fin + 16);
+    for (let n = buf.readUInt16LE(fin + 10); n-- > 0; ) {
+      assert.equal(buf.readUInt32LE(o), 0x02014b50);
       const nl = buf.readUInt16LE(o + 28);
       const nombre = buf.toString("utf8", o + 46, o + 46 + nl);
       const lo = buf.readUInt32LE(o + 42);
