@@ -915,7 +915,7 @@ async function main() {
     const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(50)]);
     const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(50)]);
     const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP"), Buffer.alloc(20)]);
-    const envio = (texto: string, fotos: { nombre: string; datos: Buffer }[], t = t0) => enviarMensaje(d, "c-legal", ana, texto, t, process.env, fotos, dir);
+    const envio = (texto: string, fotos: { nombre: string; datos: Buffer }[], t = t0) => enviarMensaje(d, "c-legal", ana, texto, t, fotos, dir);
     const falla = (fn: () => unknown, msg: string) => assert.throws(fn, (e: ErrorSala) => e.status === 400 && e.message === msg, msg);
     try {
       const a = envio("mira", [{ nombre: "uno.jpg", datos: jpg }, { nombre: "../dos.png", datos: png }, { nombre: "tres.webp", datos: webp }]);
@@ -943,7 +943,7 @@ async function main() {
       assert.equal(mensajesChat(d, a.solicitud.id).length, 4);
       assert.equal(fs.readdirSync(path.join(dir, "adjuntos", a.solicitud.id)).length, 6);
       // otra solicitud (otra sala) tiene su propio cupo de 6
-      assert.equal(enviarMensaje(d, "c-previene", beto, "x", t0, process.env, Array.from({ length: 6 }, (_, i) => ({ nombre: `${i}.jpg`, datos: jpg })), dir).mensaje.adjuntos.length, 6);
+      assert.equal(enviarMensaje(d, "c-previene", beto, "x", t0, Array.from({ length: 6 }, (_, i) => ({ nombre: `${i}.jpg`, datos: jpg })), dir).mensaje.adjuntos.length, 6);
       falla(() => envio("siete de golpe", Array.from({ length: 7 }, () => ({ nombre: "z.jpg", datos: jpg }))), "Una solicitud admite como máximo 6 fotos");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
