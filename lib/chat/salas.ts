@@ -4,6 +4,21 @@
 // Sin "server-only" para poder probarlo con scripts/test-logica.ts.
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  type Adjunto,
+  type FotoEntrada,
+  FOTOS_MAX_POR_SOLICITUD,
+  FOTO_MAX_BYTES,
+  MSG_FOTOS_LIMITE,
+  MSG_FOTO_GRANDE,
+  MSG_FOTO_TIPO,
+  detectarTipo,
+  dirAdjuntos,
+  extensionDe,
+  nombreSeguro,
+} from "./adjuntos";
 import { moduloPorClave, MODULOS } from "./modulos";
 import { type Entorno, reposDeModulos } from "./repos";
 
@@ -63,7 +78,11 @@ export interface Mensaje {
   rol: Rol;
   texto: string;
   creado_en: string;
+  /** Fotos del mensaje (vacío si no tiene); se sirven por /api/chat/adjuntos/<id>. */
+  adjuntos: AdjuntoVista[];
 }
+
+export type AdjuntoVista = Pick<Adjunto, "id" | "nombre" | "tipo" | "tamano">;
 
 export interface Participante {
   email: string;
@@ -92,7 +111,31 @@ export function participantes(db: DB, solicitudId: string): Participante[] {
 
 /** Mensajes de una solicitud, en orden. */
 export function mensajes(db: DB, solicitudId: string): Mensaje[] {
-  return db.prepare("SELECT * FROM chat_mensajes WHERE solicitud_id = ? ORDER BY id").all(solicitudId) as Mensaje[];
+  return conAdjuntos(db, db.prepare("SELECT * FROM chat_mensajes WHERE solicitud_id = ? ORDER BY id").all(solicitudId) as Mensaje[]);
+}
+
+/** Completa cada mensaje con sus fotos. */
+function conAdjuntos(db: DB, msgs: Mensaje[]): Mensaje[] {
+  if (!msgs.length) return msgs;
+  const filas = db
+    .prepare(
+      `SELECT id, mensaje_id, nombre, tipo, tamano FROM chat_adjuntos
+        WHERE mensaje_id IN (${msgs.map(() => "?").join(",")}) ORDER BY n`,
+    )
+    .all(...msgs.map((m) => m.id)) as (AdjuntoVista & { mensaje_id: number })[];
+  return msgs.map((m) => ({
+    ...m,
+    adjuntos: filas.filter((f) => f.mensaje_id === m.id).map(({ id, nombre, tipo, tamano }) => ({ id, nombre, tipo, tamano })),
+  }));
+}
+
+/** Foto guardada: su metadato y el archivo en disco (null si no existe). Para la ruta que la sirve. */
+export function adjuntoGuardado(db: DB, id: number, dataDir?: string): { tipo: string; nombre: string; archivo: string } | null {
+  const f = db.prepare("SELECT tipo, nombre, ruta FROM chat_adjuntos WHERE id = ?").get(id) as { tipo: string; nombre: string; ruta: string } | undefined;
+  if (!f) return null;
+  const raiz = dirAdjuntos(dataDir);
+  const archivo = path.resolve(raiz, f.ruta);
+  return archivo.startsWith(raiz + path.sep) && fs.existsSync(archivo) ? { tipo: f.tipo, nombre: f.nombre, archivo } : null;
 }
 
 /** Asigna el siguiente número de ticket (GER-0001 tras la migración v7). */
@@ -119,12 +162,22 @@ export function enviarMensaje(
   texto: string,
   ahora = new Date(),
   env: Entorno = process.env,
+  fotos: FotoEntrada[] = [],
+  dataDir?: string,
 ): { mensaje: Mensaje; solicitud: Solicitud; nueva: boolean } {
   const clave = exigirSala(sala, env);
   const t = texto.trim();
-  if (!t) throw new ErrorSala(400, "Escribe un mensaje");
+  if (!t && !fotos.length) throw new ErrorSala(400, "Escribe un mensaje");
   if (t.length > TEXTO_MAX) throw new ErrorSala(400, `Máximo ${TEXTO_MAX} caracteres`);
-  return db.transaction(() => {
+  const tipos = fotos.map((f) => {
+    if (f.datos.length > FOTO_MAX_BYTES) throw new ErrorSala(400, `${MSG_FOTO_GRANDE} («${nombreSeguro(f.nombre)}»)`);
+    const tipo = detectarTipo(f.datos);
+    if (!tipo) throw new ErrorSala(400, `${MSG_FOTO_TIPO} («${nombreSeguro(f.nombre)}»)`);
+    return tipo;
+  });
+  const escritos: string[] = [];
+  try {
+    return db.transaction(() => {
     let s = solicitudAbierta(db, clave);
     const nueva = !s;
     if (!s) {
@@ -137,9 +190,29 @@ export function enviarMensaje(
     const { lastInsertRowid } = db
       .prepare("INSERT INTO chat_mensajes (solicitud_id, autor_email, autor_nombre, rol, texto, creado_en) VALUES (?, ?, ?, 'gerente', ?, ?)")
       .run(s.id, email, p.nombre, t, iso(ahora));
-    const mensaje = db.prepare("SELECT * FROM chat_mensajes WHERE id = ?").get(lastInsertRowid) as Mensaje;
+    if (fotos.length) {
+      const previas = (db.prepare("SELECT COALESCE(MAX(n), 0) AS n FROM chat_adjuntos WHERE solicitud_id = ?").get(s.id) as { n: number }).n;
+      if (previas + fotos.length > FOTOS_MAX_POR_SOLICITUD) throw new ErrorSala(400, MSG_FOTOS_LIMITE);
+      const carpeta = path.join(dirAdjuntos(dataDir), s.id);
+      fs.mkdirSync(carpeta, { recursive: true });
+      fotos.forEach((f, i) => {
+        const n = previas + i + 1;
+        const ruta = `${s.id}/${n}.${extensionDe(tipos[i])}`;
+        const archivo = path.join(carpeta, `${n}.${extensionDe(tipos[i])}`);
+        fs.writeFileSync(archivo, f.datos);
+        escritos.push(archivo);
+        db.prepare("INSERT INTO chat_adjuntos (mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+          lastInsertRowid, s.id, n, nombreSeguro(f.nombre), tipos[i], f.datos.length, ruta,
+        );
+      });
+    }
+    const mensaje = conAdjuntos(db, [db.prepare("SELECT * FROM chat_mensajes WHERE id = ?").get(lastInsertRowid) as Mensaje])[0];
     return { mensaje, solicitud: s, nueva };
   })();
+  } catch (e) {
+    for (const a of escritos) fs.rmSync(a, { force: true });
+    throw e;
+  }
 }
 
 export interface SolicitudVista {
@@ -168,12 +241,15 @@ export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
   const solicitudes = db
     .prepare("SELECT id, ticket, estado, iniciada_en, terminada_en, issue_url FROM chat_solicitudes WHERE sala = ? ORDER BY ticket")
     .all(sala) as SolicitudVista[];
-  const msgs = db
-    .prepare(
-      `SELECT m.* FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id
+  const msgs = conAdjuntos(
+    db,
+    db
+      .prepare(
+        `SELECT m.* FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id
         WHERE s.sala = ? AND m.id > ? ORDER BY m.id`,
-    )
-    .all(sala, desde) as Mensaje[];
+      )
+      .all(sala, desde) as Mensaje[],
+  );
   const { ultimo } = db
     .prepare("SELECT COALESCE(MAX(m.id), 0) AS ultimo FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id WHERE s.sala = ?")
     .get(sala) as { ultimo: number };

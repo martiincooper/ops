@@ -1,11 +1,15 @@
 // Pruebas de reglas puras: zona horaria, Say-Do por objetivos, tableros, migraciones, códigos. Ejecutar: npm run test:logica
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import http from "node:http";
 import Database from "better-sqlite3";
 import { calcularProgreso } from "../lib/metricas";
 import { empresaPorEmail } from "../lib/empresas";
 import { MAX_OBJETIVOS, esquemaGasto, esquemaGastoCambio } from "../lib/esquemas";
+import { FOTO_MAX_BYTES } from "../lib/chat/adjuntos";
 import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio } from "../lib/gastos";
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
@@ -20,6 +24,7 @@ import {
   ErrorSala,
   SALA_NO_DISPONIBLE,
   TEXTO_MAX,
+  adjuntoGuardado,
   enviarMensaje,
   estadoSalas,
   mensajes as mensajesChat,
@@ -807,6 +812,7 @@ async function main() {
     d.prepare("INSERT INTO chat_mensajes (conversacion_id, autor, texto) VALUES ('v', 'usuario', 'hola')").run();
     d.prepare("INSERT INTO chat_salas (modulo, conversacion_id, usuario_email) VALUES ('c-legal', 'v', 'ana@datasheq.com')").run();
     d.exec(MIGRACIONES_CONTROL[6]);
+    d.exec(MIGRACIONES_CONTROL[7]); // v8: fotos adjuntas
     const tablas = (d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
     assert.ok(!tablas.includes("chat_salas") && !tablas.includes("chat_conversaciones"), tablas.join());
     for (const t of ["chat_solicitudes", "chat_mensajes", "chat_participantes", "chat_modulos"]) {
@@ -899,6 +905,60 @@ async function main() {
     const b = enviarMensaje(d, "c-previene", beto, "b", t0).solicitud;
     assert.deepEqual([a.ticket, b.ticket], [1, 2]);
     assert.equal(codigoTicket(7), "GER-0007");
+  });
+
+  await prueba("fotos (#30): se guardan por contenido en adjuntos/<solicitud>/<n>.<ext> con su fila; límites con su mensaje", () => {
+    const d = dbControl();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adjuntos-"));
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(50)]);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(50)]);
+    const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP"), Buffer.alloc(20)]);
+    const envio = (texto: string, fotos: { nombre: string; datos: Buffer }[], t = t0) => enviarMensaje(d, "c-legal", ana, texto, t, process.env, fotos, dir);
+    const falla = (fn: () => unknown, msg: string) => assert.throws(fn, (e: ErrorSala) => e.status === 400 && e.message === msg, msg);
+    try {
+      const a = envio("mira", [{ nombre: "uno.jpg", datos: jpg }, { nombre: "../dos.png", datos: png }, { nombre: "tres.webp", datos: webp }]);
+      assert.deepEqual(a.mensaje.adjuntos.map((x) => [x.nombre, x.tipo, x.tamano]), [["uno.jpg", "image/jpeg", 53], ["dos.png", "image/png", 58], ["tres.webp", "image/webp", 32]]);
+      for (const f of ["1.jpg", "2.png", "3.webp"]) assert.ok(fs.existsSync(path.join(dir, "adjuntos", a.solicitud.id, f)), f);
+      const guardado = adjuntoGuardado(d, a.mensaje.adjuntos[0].id, dir);
+      assert.ok(guardado && fs.readFileSync(guardado.archivo).equals(jpg));
+      assert.equal(adjuntoGuardado(d, 999, dir), null);
+      assert.deepEqual(vistaSala(d, "c-legal").mensajes[0].adjuntos.map((x) => x.id), a.mensaje.adjuntos.map((x) => x.id));
+      assert.deepEqual(mensajesChat(d, a.solicitud.id)[0].adjuntos.length, 3);
+      // solo fotos, sin texto, es un mensaje válido; sin texto ni fotos no
+      assert.equal(envio("", [{ nombre: "solo.jpg", datos: jpg }], mas(1)).mensaje.texto, "");
+      falla(() => envio("", [], mas(1)), "Escribe un mensaje");
+      // tipo por contenido, no por nombre
+      falla(() => envio("x", [{ nombre: "renombrada.png", datos: Buffer.from("MZ ejecutable") }]), "Solo se aceptan fotos JPG, PNG o WEBP («renombrada.png»)");
+      falla(() => envio("x", [{ nombre: "vacia.jpg", datos: Buffer.alloc(0) }]), "Solo se aceptan fotos JPG, PNG o WEBP («vacia.jpg»)");
+      // tamaño: 5 MB exactos pasan, un byte más no
+      const justo = Buffer.concat([jpg, Buffer.alloc(FOTO_MAX_BYTES - jpg.length)]);
+      assert.equal(envio("justo", [{ nombre: "justo.jpg", datos: justo }], mas(2)).mensaje.adjuntos.length, 1); // 5.ª foto
+      falla(() => envio("x", [{ nombre: "grande.jpg", datos: Buffer.concat([justo, Buffer.alloc(1)]) }]), "Cada foto debe pesar como máximo 5 MB («grande.jpg»)");
+      // límite de 6 por solicitud, entre todos sus mensajes: la 6.ª pasa, la 7.ª no y no deja nada
+      assert.equal(envio("sexta", [{ nombre: "6.jpg", datos: jpg }], mas(3)).mensaje.adjuntos.length, 1);
+      falla(() => envio("séptima", [{ nombre: "7.jpg", datos: jpg }], mas(4)), "Una solicitud admite como máximo 6 fotos");
+      assert.equal((d.prepare("SELECT COUNT(*) n FROM chat_adjuntos").get() as { n: number }).n, 6);
+      assert.equal(mensajesChat(d, a.solicitud.id).length, 4);
+      assert.equal(fs.readdirSync(path.join(dir, "adjuntos", a.solicitud.id)).length, 6);
+      // otra solicitud (otra sala) tiene su propio cupo de 6
+      assert.equal(enviarMensaje(d, "c-previene", beto, "x", t0, process.env, Array.from({ length: 6 }, (_, i) => ({ nombre: `${i}.jpg`, datos: jpg })), dir).mensaje.adjuntos.length, 6);
+      falla(() => envio("siete de golpe", Array.from({ length: 7 }, () => ({ nombre: "z.jpg", datos: jpg }))), "Una solicitud admite como máximo 6 fotos");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await prueba("fotos (#30): el respaldo copia la carpeta adjuntos", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "respaldo-"));
+    try {
+      fs.mkdirSync(path.join(dir, "adjuntos", "sol-1"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "adjuntos", "sol-1", "1.jpg"), "foto");
+      execFileSync("node", ["scripts/backup.mjs", path.join(dir, "respaldos")], { env: { ...process.env, DATA_DIR: dir }, stdio: "pipe" });
+      const [marca] = fs.readdirSync(path.join(dir, "respaldos"));
+      assert.equal(fs.readFileSync(path.join(dir, "respaldos", marca, "adjuntos", "sol-1", "1.jpg"), "utf8"), "foto");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   await prueba("cupo por minuto por cuenta: 30 mensajes, se renueva al minuto", () => {

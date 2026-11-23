@@ -425,7 +425,8 @@ server {
 
 `scripts/backup.mjs` respalda **todas** las bases (`control.db` y una por empresa) con la API de respaldo en
 caliente de SQLite, verifica cada copia con `integrity_check` y deja `respaldos/AAAAMMDD-HHMMSS/`. No copies los
-`.db` con `cp` mientras la aplicación corre: sin el archivo `-wal` la copia puede quedar inconsistente.
+`.db` con `cp` mientras la aplicación corre: sin el archivo `-wal` la copia puede quedar inconsistente. También copia
+`adjuntos/` (las fotos de los chats de las salas).
 
 Estructura de datos:
 
@@ -433,6 +434,7 @@ Estructura de datos:
 /data/control.db                         administradores y supervisión
 /data/empresas/aether-tech/app.db        datos de Aether Tech
 /data/empresas/datasheq/app.db           datos de Datasheq
+/data/adjuntos/<solicitud>/<n>.<ext>    fotos de los chats de las salas
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 

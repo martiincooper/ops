@@ -1,7 +1,7 @@
 // Respaldo en caliente de TODAS las bases (control + una por empresa) con la API de backup de SQLite:
 // consistente aunque haya escrituras en curso y archivos WAL.
 // Uso dentro del contenedor:  node scripts/backup.mjs [/data/respaldos]
-// Deja respaldos/AAAAMMDD-HHMMSS/{control.db, empresas/<clave>.db} y conserva los últimos 30.
+// Deja respaldos/AAAAMMDD-HHMMSS/{control.db, empresas/<clave>.db, adjuntos/} y conserva los últimos 30.
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
@@ -50,6 +50,13 @@ for (const b of bases) {
   } else {
     console.log(`✓ ${b.nombre} (${(fs.statSync(archivo).size / 1024).toFixed(0)} KB)`);
   }
+}
+
+// Fotos adjuntas de los chats (DATA_DIR/adjuntos): se copian tal cual junto a las bases
+const dirAdjuntos = path.join(dataDir, "adjuntos");
+if (fs.existsSync(dirAdjuntos)) {
+  fs.cpSync(dirAdjuntos, path.join(destino, "adjuntos"), { recursive: true });
+  console.log("✓ adjuntos/");
 }
 
 const antiguos = fs.readdirSync(raiz).filter((f) => /^\d{8}-\d{6}$/.test(f)).sort().slice(0, -30);

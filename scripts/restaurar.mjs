@@ -64,4 +64,6 @@ for (const b of bases) {
   fs.mkdirSync(path.dirname(b.hacia), { recursive: true });
   fs.copyFileSync(b.desde, b.hacia);
 }
+const adjuntos = path.join(origen, "adjuntos");
+if (fs.existsSync(adjuntos)) fs.cpSync(adjuntos, path.join(dataDir, "adjuntos"), { recursive: true });
 console.log(`Respaldo restaurado en ${dataDir}. Las migraciones pendientes se aplican al iniciar el servidor.`);
