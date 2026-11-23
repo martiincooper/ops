@@ -2,14 +2,25 @@
 // GET /api/interview/health, POST /api/interview/turn y POST /api/interview/close, con `Authorization: Bearer <token>`.
 // Guion: hace dos preguntas y, en el tercer turno, informa `done` con un resumen. Al cerrar devuelve un título y una
 // especificación fijos. Un turno con una foto la menciona (así se comprueba que viajó en base64).
-// Control para las pruebas (sin token): POST /control {"falla": 503|0, "turnos": [...]} · GET /control (turnos recibidos).
+// Control para las pruebas (sin token): POST /control {"falla": 503|0, "demora": ms} · GET /control (turnos recibidos).
 // Uso: INTERVIEW_TOKEN=... node scripts/asiento-falso.mjs [archivo-del-puerto]
 import fs from "node:fs";
 import http from "node:http";
 
 const TOKEN = process.env.INTERVIEW_TOKEN ?? "token-asiento";
 let falla = 0;
+let demora = 0;
 const turnos = [];
+
+function turno(json, responder) {
+  const hechas = json.messages.filter((m) => m.role === "asistente").length;
+  const fotos = json.messages.reduce((n, m) => n + m.photos.length, 0);
+  turnos.push({ requestId: json.requestId, repo: json.repo, session: json.session, mensajes: json.messages.length, fotos });
+  const sesion = json.session ?? `sesion-${json.requestId}`;
+  if (hechas === 0) return responder(200, { session: sesion, message: `¿Qué necesitan resolver exactamente?${fotos ? ` (recibí ${fotos} foto${fotos > 1 ? "s" : ""})` : ""}`, done: false, summary: null });
+  if (hechas === 1) return responder(200, { session: sesion, message: "¿Quién usaría esto y cada cuánto?", done: false, summary: null });
+  return responder(200, { session: sesion, message: "Entendido todo. Este es el resumen.", done: true, summary: "Resumen de prueba del requerimiento." });
+}
 
 const servidor = http.createServer((req, res) => {
   const { pathname } = new URL(req.url ?? "/", "http://x");
@@ -19,20 +30,17 @@ const servidor = http.createServer((req, res) => {
   req.on("end", () => {
     const json = cuerpo ? JSON.parse(cuerpo) : {};
     if (pathname === "/control") {
-      if (req.method === "POST") falla = Number(json.falla) || 0;
-      return responder(200, { falla, turnos });
+      if (req.method === "POST") {
+        falla = Number(json.falla) || 0;
+        demora = Number(json.demora) || 0;
+      }
+      return responder(200, { falla, demora, turnos });
     }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return responder(401, { error: "token inválido" });
     if (pathname === "/api/interview/health") return responder(200, { ok: true });
     if (pathname === "/api/interview/turn" && req.method === "POST") {
       if (falla) return responder(falla, { error: "falla simulada" });
-      const hechas = json.messages.filter((m) => m.role === "asistente").length;
-      const fotos = json.messages.reduce((n, m) => n + m.photos.length, 0);
-      turnos.push({ requestId: json.requestId, repo: json.repo, session: json.session, mensajes: json.messages.length, fotos });
-      const sesion = json.session ?? `sesion-${json.requestId}`;
-      if (hechas === 0) return responder(200, { session: sesion, message: `¿Qué necesitan resolver exactamente?${fotos ? ` (recibí ${fotos} foto${fotos > 1 ? "s" : ""})` : ""}`, done: false, summary: null });
-      if (hechas === 1) return responder(200, { session: sesion, message: "¿Quién usaría esto y cada cuánto?", done: false, summary: null });
-      return responder(200, { session: sesion, message: "Entendido todo. Este es el resumen.", done: true, summary: "Resumen de prueba del requerimiento." });
+      return setTimeout(() => turno(json, responder), demora);
     }
     if (pathname === "/api/interview/close" && req.method === "POST") return responder(200, { title: "Requerimiento de prueba", spec: "# Especificación de prueba" });
     responder(404, { error: "no existe" });
