@@ -8,6 +8,7 @@ import { codigoTicket } from "@/lib/chat/modulos";
 import { listarModulos, todosLosModulos } from "@/lib/chat/catalogo";
 import { estadoSalas } from "@/lib/chat/salas";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
+import { asientoDesdeEntorno, saludAsiento } from "@/lib/chat/asistente";
 import { MAX_REINTENTOS } from "@/lib/chat/envio";
 
 interface Fila {
@@ -55,6 +56,7 @@ export const GET = manejar(async (req) => {
       token: await saludToken(configGithub()),
       cuenta: configGithub()?.cuenta ?? (process.env.GITHUB_CUENTA || CUENTA_DATASHEQ),
       reintentos_max: MAX_REINTENTOS,
+      asiento: await saludAsiento(asientoDesdeEntorno()),
     },
   });
 });

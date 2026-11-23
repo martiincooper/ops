@@ -14,6 +14,7 @@ export async function register() {
 
     const { iniciarReintentos } = await import("./lib/chat/envio");
     const { configDesdeEntorno } = await import("./lib/chat/githubApi");
-    iniciarReintentos(getDbControl, () => configDesdeEntorno());
+    const { asientoDesdeEntorno, procesarTurnos } = await import("./lib/chat/asistente");
+    iniciarReintentos(getDbControl, () => configDesdeEntorno(), 60_000, (db) => procesarTurnos(db, asientoDesdeEntorno()));
   }
 }

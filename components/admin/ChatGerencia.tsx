@@ -43,6 +43,7 @@ interface Datos {
     token: { ok: boolean; login?: string; motivo?: string };
     cuenta: string;
     reintentos_max: number;
+    asiento: { configurado: boolean; ok: boolean; desde: string | null; motivo: string | null };
   };
 }
 
@@ -136,6 +137,15 @@ export default function ChatGerencia() {
             : `GitHub: ${datos.config.token.motivo ?? "el token no se pudo verificar"}`}
         </p>
       )}
+
+      <p data-salud-asiento className={cx("flex items-center gap-2 text-sm", datos.config.asiento.ok ? "text-ok-tinta" : "text-alerta-tinta")}>
+        {datos.config.asiento.ok ? <CheckCircle2 size={16} aria-hidden /> : <AlertTriangle size={16} aria-hidden />}
+        {datos.config.asiento.ok
+          ? "Asistente de entrevista: responde"
+          : !datos.config.asiento.configurado
+            ? `Asistente de entrevista: ${datos.config.asiento.motivo}`
+            : `Asistente de entrevista: no responde${datos.config.asiento.desde ? ` desde el ${fechaHora(datos.config.asiento.desde)}` : ""}${datos.config.asiento.motivo ? ` (${datos.config.asiento.motivo})` : ""}`}
+      </p>
 
       <EditorSalas salas={datos.salas} archivadas={datos.archivadas} recargar={recargar} />
 

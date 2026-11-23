@@ -26,6 +26,9 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_CUENTA: ${GITHUB_CUENTA:-}
       GITHUB_API_URL: ${GITHUB_API_URL:-}
+      # Asiento de entrevista (implement-all-cloud): el asistente de IA que responde en las salas
+      INTERVIEW_URL: ${INTERVIEW_URL:-}
+      INTERVIEW_TOKEN: ${INTERVIEW_TOKEN:-}
 
 volumes:
   aether-data:

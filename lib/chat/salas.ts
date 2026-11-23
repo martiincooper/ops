@@ -56,6 +56,9 @@ export interface Solicitud {
   asistente_sesion: string | null;
   asistente_estado: EstadoAsistente;
   asistente_proximo_intento: string | null;
+  asistente_hasta: number;
+  asistente_intentos: number;
+  asistente_error: string | null;
   terminado: 0 | 1;
   resumen: string | null;
   issue_numero: number | null;
@@ -235,6 +238,8 @@ export interface VistaSala {
   mensajes: Mensaje[];
   /** Id del último mensaje de la sala (0 si no hay): desde ahí consulta el cliente. */
   ultimo_id: number;
+  /** Estado del asistente en la solicitud abierta (null si no hay): «pensando» se muestra a todos. */
+  asistente: EstadoAsistente | null;
 }
 
 /**
@@ -257,7 +262,8 @@ export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
   const { ultimo } = db
     .prepare("SELECT COALESCE(MAX(m.id), 0) AS ultimo FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id WHERE s.sala = ?")
     .get(sala) as { ultimo: number };
-  return { solicitudes, mensajes: msgs, ultimo_id: ultimo };
+  const abierta = solicitudAbierta(db, sala);
+  return { solicitudes, mensajes: msgs, ultimo_id: ultimo, asistente: abierta?.asistente_estado ?? null };
 }
 
 export interface EstadoSala {
@@ -273,6 +279,8 @@ export interface EstadoSala {
   abierta: boolean;
   /** Mensajes de la solicitud abierta. */
   mensajes: number;
+  /** Estado del asistente en la solicitud abierta (null si no hay), con su error y próximo reintento: solo para administradores. */
+  asistente?: { estado: EstadoAsistente; error: string | null; proximo_intento: string | null; intentos: number } | null;
   /** Solo para administradores. */
   repo?: string | null;
   autonomia?: Autonomia;
@@ -301,7 +309,16 @@ export function estadoSalas(db: DB, conDetalle = false): EstadoSala[] {
       disponible: salaAbierta(m),
       abierta: !!f,
       mensajes: f?.n ?? 0,
-      ...(conDetalle ? { repo: m.repo, autonomia: m.autonomia } : {}),
+      ...(conDetalle
+        ? {
+            repo: m.repo,
+            autonomia: m.autonomia,
+            asistente: (() => {
+              const a = solicitudAbierta(db, m.clave);
+              return a ? { estado: a.asistente_estado, error: a.asistente_error, proximo_intento: a.asistente_proximo_intento, intentos: a.asistente_intentos } : null;
+            })(),
+          }
+        : {}),
     };
   });
 }

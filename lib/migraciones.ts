@@ -192,6 +192,13 @@ export const MIGRACIONES_CONTROL: string[] = [
   );
   CREATE INDEX idx_chat_adjuntos_mensaje ON chat_adjuntos (mensaje_id);
   `,
+  // v9 — turnos del asistente: último mensaje que el asistente ya recibió (los posteriores van juntos en el próximo
+  //      turno), reintentos seguidos del turno y el último error del asiento de entrevista.
+  `
+  ALTER TABLE chat_solicitudes ADD COLUMN asistente_hasta INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_solicitudes ADD COLUMN asistente_intentos INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_solicitudes ADD COLUMN asistente_error TEXT;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

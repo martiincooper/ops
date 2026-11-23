@@ -1,12 +1,12 @@
 "use client";
 
-import { Archive, ArchiveRestore, MessageSquareOff, Pencil, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, MessageSquareOff, Pencil, Plus, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { slugSala } from "@/lib/chat/catalogo";
 import type { Autonomia, Modulo } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
 import { api } from "@/lib/cliente";
-import { Aviso, useAccion } from "./comun";
+import { Aviso, fechaHora, useAccion } from "./comun";
 
 interface Borrador {
   /** null: sala nueva. */
@@ -84,6 +84,13 @@ export default function EditorSalas({
       await api(`/api/admin/chat/salas/${clave}/cerrar`, { method: "POST" });
       await recargar();
       return `Conversación de «${nombre}» cerrada sin enviar`;
+    });
+
+  const reintentarTurno = (clave: string, nombre: string) =>
+    ejecutar(clave, async () => {
+      await api(`/api/admin/chat/salas/${clave}/reintentar-turno`, { method: "POST" });
+      await recargar();
+      return `Turno del asistente de «${nombre}» en marcha`;
     });
 
   const archivar = (clave: string, nombre: string, archivar: boolean) =>
@@ -198,6 +205,18 @@ export default function EditorSalas({
               <button type="button" onClick={() => setB(deSala(s))} className="boton-suave" aria-label={`Editar ${s.nombre}`}>
                 <Pencil size={13} aria-hidden /> Editar
               </button>
+              {s.asistente && s.asistente.estado !== "idle" && (
+                <span data-asistente={s.asistente.estado} className="flex max-w-[16rem] items-center gap-2 text-xs text-tinta-3">
+                  {s.asistente.estado === "pensando"
+                    ? "El asistente está pensando…"
+                    : `Turno trabado${s.asistente.error ? `: ${s.asistente.error}` : ""}${s.asistente.proximo_intento ? ` · reintento automático ${fechaHora(s.asistente.proximo_intento)}` : ""}`}
+                </span>
+              )}
+              {s.asistente && s.asistente.estado !== "idle" && (
+                <button type="button" disabled={ocupado === s.clave} onClick={() => reintentarTurno(s.clave, s.nombre)} className="boton-suave" aria-label={`Reintentar el turno del asistente de ${s.nombre}`}>
+                  <RefreshCw size={13} aria-hidden /> Reintentar
+                </button>
+              )}
               {s.abierta && (
                 <button type="button" disabled={ocupado === s.clave} onClick={() => cerrarConversacion(s.clave, s.nombre)} className="boton-texto" aria-label={`Cerrar conversación de ${s.nombre}`}>
                   <MessageSquareOff size={13} aria-hidden /> Cerrar conversación

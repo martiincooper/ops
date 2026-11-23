@@ -874,6 +874,8 @@ async function main() {
   console.log("Portal gerencial");
   const DENEGADO = "El portal gerencial es solo para gerencia de Datasheq";
   let gAdmin, gGerente, gEquipo, gTeam, gExecA;
+  // El asistente (asiento simulado) también escribe en las salas: estas pruebas cuentan solo los mensajes de gerentes
+  const deGerente = (m) => m.rol === "gerente";
   const escribir = (c, sala, texto) => c.pedir(`/api/chat/salas/${sala}/mensajes`, { metodo: "POST", json: { texto } });
 
   await prueba("sin sesión, /gerencia lleva al ingreso del portal", async () => {
@@ -1017,7 +1019,7 @@ async function main() {
     assert.deepEqual([r.datos.nueva, r.datos.solicitud.ticket, r.datos.solicitud.estado], [true, 1, "abierta"]);
     // otra persona entra a la misma sala al mismo tiempo: sin bloqueo ni «en uso»
     const v = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos;
-    assert.equal(v.mensajes.length, 1);
+    assert.equal(v.mensajes.filter(deGerente).length, 1);
     assert.deepEqual(
       [v.mensajes[0].texto, v.mensajes[0].autor_nombre, v.mensajes[0].autor_email, v.mensajes[0].rol],
       ["Necesitamos evaluar el DS 594 en la faena norte", "Gonzalo Gerente", "portal.gerente@datasheq.com", "gerente"],
@@ -1027,15 +1029,15 @@ async function main() {
     assert.equal((await gEquipo.pedir("/gerencia/c-legal")).status, 200); // la página de la sala
   });
   await prueba("dos gerentes en la misma sala se ven entre sí al consultar desde el último id", async () => {
-    const visto = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos.ultimo_id;
+    const visto = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos.mensajes.filter(deGerente).at(-1).id; // el asistente ya pudo responder
     const r = await escribir(gEquipo, "c-legal", "Yo también lo necesito para C-Previene");
     assert.deepEqual([r.status, r.datos.nueva, r.datos.solicitud.ticket], [200, false, 1]);
-    const nuevos = (await gGerente.pedir(`/api/chat/salas/c-legal?desde=${visto - 1}`)).datos.mensajes;
+    const nuevos = (await gGerente.pedir(`/api/chat/salas/c-legal?desde=${visto - 1}`)).datos.mensajes.filter(deGerente);
     assert.deepEqual(nuevos.map((m) => [m.autor_nombre, m.texto]), [["Gonzalo Gerente", "Necesitamos evaluar el DS 594 en la faena norte"], ["Elena Equipo", "Yo también lo necesito para C-Previene"]]);
-    assert.deepEqual((await gGerente.pedir(`/api/chat/salas/c-legal?desde=${nuevos[1].id}`)).datos.mensajes, []);
+    assert.deepEqual((await gGerente.pedir(`/api/chat/salas/c-legal?desde=${nuevos[1].id}`)).datos.mensajes.filter(deGerente), []);
     await escribir(gGerente, "c-legal", "Perfecto, lo vemos juntos");
     const hist = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos;
-    assert.deepEqual(hist.mensajes.map((m) => m.autor_nombre), ["Gonzalo Gerente", "Elena Equipo", "Gonzalo Gerente"]);
+    assert.deepEqual(hist.mensajes.filter(deGerente).map((m) => m.autor_nombre), ["Gonzalo Gerente", "Elena Equipo", "Gonzalo Gerente"]);
     assert.equal(new Set(hist.mensajes.map((m) => m.solicitud_id)).size, 1); // las dos personas, una sola solicitud
   });
   await prueba("mensajes vacíos o demasiado largos, sala sin repositorio verificado y límite de 30 mensajes por minuto", async () => {
@@ -1051,7 +1053,7 @@ async function main() {
     r = await escribir(gAdmin, "c-lidera", "mensaje 31");
     assert.equal(r.status, 429);
     assert.equal(r.datos.error, "Vas muy rápido. Espera unos segundos y vuelve a intentar.");
-    assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera")).datos.mensajes.length, 30); // el rechazado no se guardó
+    assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera")).datos.mensajes.filter(deGerente).length, 30); // el rechazado no se guardó
   });
   await prueba("fotos (#30): mensaje con texto y fotos, errores específicos y la foto solo para el portal", async () => {
     const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]);
@@ -1080,7 +1082,7 @@ async function main() {
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     r = await enviarFotos(fot, "una más", [["h.jpg", jpg, "image/jpeg"]]);
     assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 fotos"]);
-    const vistas = (await gEquipo.pedir("/api/chat/salas/c-previene")).datos.mensajes;
+    const vistas = (await gEquipo.pedir("/api/chat/salas/c-previene")).datos.mensajes.filter(deGerente);
     assert.deepEqual(vistas.map((m) => [m.texto, m.adjuntos.length]), [["Así se ve la falla", 2], ["", 4]]);
     // la foto: portal (gerente y administrador) sí; sin sesión 401; equipo y otra empresa 403
     const ruta = `/api/chat/adjuntos/${vistas[0].adjuntos[0].id}`;
@@ -1094,11 +1096,91 @@ async function main() {
     for (const c of [gTeam, gExecA]) assert.equal((await c.pedir(ruta)).status, 403);
     assert.equal((await gEquipo.pedir("/api/chat/adjuntos/99999")).status, 404);
   });
+  await prueba("asistente (#32): responde en la sala para todos, recibe las fotos en base64 y se muestra «pensando» mientras corre el turno", async () => {
+    const ASIENTO = process.env.ASIENTO;
+    assert.ok(ASIENTO, "falta ASIENTO (URL del asiento simulado)");
+    const control = async (cuerpo) => (await fetch(`${ASIENTO}/control`, cuerpo ? { method: "POST", body: JSON.stringify(cuerpo) } : undefined)).json();
+    const esperar = async (fn, que) => {
+      for (let i = 0; i < 80; i++) {
+        const r = await fn();
+        if (r) return r;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      assert.fail(`no ocurrió: ${que}`);
+    };
+    const vista = async (c) => (await c.pedir("/api/chat/salas/c-lidera")).datos;
+    // respuestas del asistente en la solicitud abierta (la última), cuando ya hay n y el asistente quedó libre
+    const respuestas = async (c, n) =>
+      esperar(async () => {
+        const x = await vista(c);
+        const abierta = x.solicitudes.at(-1).id;
+        return x.mensajes.filter((m) => m.rol === "asistente" && m.solicitud_id === abierta).length >= n && x.asistente === "idle" ? x : null;
+      }, `${n} respuesta(s) del asistente`);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-lidera/cerrar", { metodo: "POST" })).status, 200); // solicitud nueva
+    await control({ falla: 0, demora: 1200 });
+    const antes = (await control()).turnos.length;
+    // «pensando» para todos mientras corre el turno
+    assert.equal((await escribir(gGerente, "c-lidera", "Necesitamos un tablero de capacitaciones")).status, 200);
+    assert.equal((await vista(gEquipo)).asistente, "pensando");
+    const v = await respuestas(gEquipo, 1);
+    assert.equal(v.asistente, "idle");
+    const resp = v.mensajes.findLast((m) => m.rol === "asistente");
+    assert.deepEqual([resp.texto, resp.autor_nombre, resp.solicitud_id === v.solicitudes.at(-1).id], ["¿Qué necesitan resolver exactamente?", "Asistente", true]);
+    assert.deepEqual((await vista(gGerente)).mensajes.map((m) => m.id), v.mensajes.map((m) => m.id)); // la ven todos
+    await control({ demora: 0 });
+    // el 2.º turno lleva la transcripción completa con la foto en base64
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 3)]);
+    const form = new FormData();
+    form.set("texto", "Mira cómo se ve hoy");
+    form.append("fotos", new Blob([jpg], { type: "image/jpeg" }), "hoy.jpg");
+    assert.equal((await gEquipo.pedir("/api/chat/salas/c-lidera/mensajes", { metodo: "POST", form })).status, 200);
+    await respuestas(gGerente, 2);
+    const turnos = (await control()).turnos.slice(antes);
+    assert.deepEqual(turnos.map((t) => [t.repo, t.mensajes, t.fotos]), [["prueba/c-lidera", 1, 0], ["prueba/c-lidera", 3, 1]]);
+    assert.equal(turnos[1].session, turnos[0].requestId ? `sesion-${turnos[0].requestId}` : null);
+    // salud del asiento y estado del turno en el panel
+    const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
+    assert.deepEqual([panel.config.asiento.configurado, panel.config.asiento.ok, panel.config.asiento.desde], [true, true, null]);
+    assert.equal(panel.salas.find((x) => x.clave === "c-lidera").asistente.estado, "idle");
+  });
+  await prueba("asistente (#32): si el asiento falla, el mensaje no se pierde, el chat avisa y «Reintentar» (solo admin) corre el turno ya", async () => {
+    const control = async (cuerpo) => (await fetch(`${process.env.ASIENTO}/control`, { method: "POST", body: JSON.stringify(cuerpo) })).json();
+    const esperar = async (fn, que) => {
+      for (let i = 0; i < 80; i++) {
+        const r = await fn();
+        if (r) return r;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      assert.fail(`no ocurrió: ${que}`);
+    };
+    const vista = async (c) => (await c.pedir("/api/chat/salas/c-lidera")).datos;
+    await control({ falla: 503 });
+    assert.equal((await escribir(gGerente, "c-lidera", "Es para los lunes")).status, 200);
+    const v = await esperar(async () => ((await vista(gEquipo)).asistente === "esperando_reintento" ? vista(gEquipo) : null), "esperando_reintento");
+    assert.equal(v.mensajes.at(-1).rol, "sistema");
+    assert.match(v.mensajes.at(-1).texto, /ocupado y responderá apenas pueda/);
+    assert.ok(v.mensajes.some((m) => m.texto === "Es para los lunes")); // el mensaje sigue ahí
+    const sala = (await gAdmin.pedir("/api/admin/chat")).datos.salas.find((x) => x.clave === "c-lidera");
+    assert.deepEqual([sala.asistente.estado, sala.asistente.intentos], ["esperando_reintento", 1]);
+    assert.match(sala.asistente.error, /ocupado|cupo/);
+    assert.ok(Date.parse(sala.asistente.proximo_intento) > Date.now() + 30_000); // el primero, a 1 minuto
+    // sin permiso, sin sala o sin turno trabado
+    for (const c of [gGerente, gEquipo]) assert.equal((await c.pedir("/api/admin/chat/salas/c-lidera/reintentar-turno", { metodo: "POST" })).status, 403);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-nada/reintentar-turno", { metodo: "POST" })).status, 404);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-previene/reintentar-turno", { metodo: "POST" })).status === 202, false);
+    // el asiento vuelve y el administrador pulsa «Reintentar»
+    await control({ falla: 0 });
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-lidera/reintentar-turno", { metodo: "POST" })).status, 202);
+    const fin = await esperar(async () => ((await vista(gGerente)).asistente === "idle" ? vista(gGerente) : null), "turno reintentado");
+    assert.equal(fin.mensajes.at(-1).rol, "asistente");
+    assert.equal(fin.mensajes.at(-1).texto, "Entendido todo. Este es el resumen."); // 3.ª respuesta: el asistente da por terminada la entrevista
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-lidera/reintentar-turno", { metodo: "POST" })).status, 409);
+  });
   await prueba("sin bloqueo de sala: cerrar sesión no cambia nada y las rutas del flujo anterior ya no existen", async () => {
     const salida = new Cliente("salida");
     salida.cookie = gEquipo.cookie;
     assert.equal((await salida.pedir("/api/auth/logout", { metodo: "POST" })).status, 200);
-    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal")).datos.mensajes.length, 3); // la conversación sigue abierta
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal")).datos.mensajes.filter(deGerente).length, 3); // la conversación sigue abierta
     gEquipo = await (async () => {
       const c = new Cliente("equipo");
       assert.equal((await c.login("portal.equipo@datasheq.com", "518306")).status, 200);
@@ -1114,10 +1196,10 @@ async function main() {
     const r = await gAdmin.pedir("/api/admin/chat");
     assert.equal(r.status, 200);
     const sol = r.datos.historial.find((f) => f.ticket === "GER-0001");
-    assert.deepEqual([sol.estado, sol.sala, sol.issue_url, sol.mensajes, sol.estado_issue], ["abierta", "c-legal", null, 3, null]);
+    assert.deepEqual([sol.estado, sol.sala, sol.issue_url, sol.mensajes >= 3, sol.estado_issue], ["abierta", "c-legal", null, true, null]);
     assert.deepEqual(sol.participantes.split(", ").sort(), ["Elena Equipo", "Gonzalo Gerente"]);
     assert.equal(r.datos.salas.find((x) => x.clave === "c-legal").abierta, true);
-    assert.equal((await gAdmin.pedir(`/api/admin/chat/${sol.id}`)).datos.mensajes.length, 3);
+    assert.equal((await gAdmin.pedir(`/api/admin/chat/${sol.id}`)).datos.mensajes.filter(deGerente).length, 3);
     // una solicitud abierta no se envía a GitHub
     assert.equal((await gAdmin.pedir(`/api/admin/chat/${sol.id}/issue`, { metodo: "POST" })).status, 409);
     for (const [ruta, metodo] of [[`/api/admin/chat/${sol.id}`, "GET"], [`/api/admin/chat/${sol.id}/issue`, "POST"]]) {
@@ -1127,8 +1209,8 @@ async function main() {
   await prueba("«Mis requerimientos»: las solicitudes en que la persona escribió", async () => {
     const mios = await gEquipo.pedir("/api/chat/mis-requerimientos");
     assert.equal(mios.status, 200);
-    assert.deepEqual(mios.datos.requerimientos.map((r) => [r.ticket, r.sala, r.estado_solicitud, r.estado]), [["GER-0001", "c-legal", "abierta", null]]);
-    assert.deepEqual((await gGerente.pedir("/api/chat/mis-requerimientos")).datos.requerimientos.length, 1);
+    assert.deepEqual(mios.datos.requerimientos.filter((r) => r.sala === "c-legal").map((r) => [r.ticket, r.sala, r.estado_solicitud, r.estado]), [["GER-0001", "c-legal", "abierta", null]]);
+    assert.deepEqual((await gGerente.pedir("/api/chat/mis-requerimientos")).datos.requerimientos.filter((r) => r.sala === "c-legal").length, 1);
     assert.equal((await gExecA.pedir("/api/chat/mis-requerimientos")).status, 403); // otra empresa
     assert.equal((await gAdmin.pedir("/api/admin/chat?actualizar=1")).status, 200);
   });
