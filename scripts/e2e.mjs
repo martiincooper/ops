@@ -611,6 +611,44 @@ async function main() {
     assert.equal(p.fecha_inicio, "2026-08-20");
     assert.deepEqual(p.etapas.map((e) => e.desde), ["2026-08-20", "2026-09-15"]);
   });
+  await prueba("hitos: el admin crea, edita y borra en cada empresa; reglas; otros roles 403; aislados por empresa", async () => {
+    const hitosDe = async (emp, id) => (await admin.pedir(q("/api/admin/proyectos", emp))).datos.proyectos.find((p) => p.id === id)?.hitos;
+    const post = (cl, emp, id, json) => cl.pedir(q(`/api/admin/proyectos/${id}/hitos`, emp), { metodo: "POST", json });
+    const base = { titulo: "Primer prototipo", detalle: "  Funciona en banco ", fecha: hoy, etapa: "concepto" };
+    assert.equal((await post(ggD.cliente, D, pEt, base)).status, 403);
+    assert.equal((await post(ana.cliente, A, pA, base)).status, 403);
+    assert.equal((await ggA.cliente.pedir(q(`/api/admin/proyectos/${pA}/hitos`, A))).status, 403);
+    assert.equal((await post(admin, D, pEt, { ...base, fecha: "2099-01-01" })).status, 400);
+    assert.equal((await post(admin, D, pEt, { ...base, fecha: "2000-01-01" })).status, 400);
+    assert.equal((await post(admin, D, pEt, { ...base, titulo: " " })).status, 400);
+    assert.equal((await post(admin, D, "no-existe", base)).status, 404);
+    const rD = await post(admin, D, pEt, base);
+    assert.equal(rD.status, 201, JSON.stringify(rD.datos));
+    const rA = await post(admin, A, pA, { ...base, titulo: "Hito Aether" });
+    assert.equal(rA.status, 201, JSON.stringify(rA.datos));
+    const lD = await hitosDe(D, pEt);
+    assert.deepEqual(lD.map((h) => [h.titulo, h.detalle, h.etapa, h.creado_por_nombre.length > 0, h.editado_en]), [["Primer prototipo", "Funciona en banco", "concepto", true, null]]);
+    assert.deepEqual((await hitosDe(A, pA)).map((h) => h.titulo), ["Hito Aether"]);
+    assert.equal((await admin.pedir(q(`/api/admin/proyectos/${pEt}/hitos`, D))).datos.hitos.length, 1);
+    // un hito de la empresa A no aparece al listar los proyectos de la B
+    assert.equal(JSON.stringify((await admin.pedir(q("/api/admin/proyectos", D))).datos).includes("Hito Aether"), false);
+    // editar
+    const put = (cl, emp, id, hid, json) => cl.pedir(q(`/api/admin/proyectos/${id}/hitos/${hid}`, emp), { metodo: "PUT", json });
+    assert.equal((await put(ggD.cliente, D, pEt, rD.datos.id, base)).status, 403);
+    assert.equal((await put(admin, D, pEt, rD.datos.id, { ...base, fecha: "2099-01-01" })).status, 400);
+    assert.equal((await put(admin, D, pD, rD.datos.id, base)).status, 404); // hito de otro proyecto
+    assert.equal((await put(admin, D, pEt, rD.datos.id, { ...base, titulo: "Editado", detalle: "", etapa: "pruebas" })).status, 200);
+    const e = (await hitosDe(D, pEt))[0];
+    assert.deepEqual([e.titulo, e.detalle, e.etapa, e.editado_en !== null], ["Editado", null, "pruebas", true]);
+    // borrar
+    const del = (cl, emp, id, hid) => cl.pedir(q(`/api/admin/proyectos/${id}/hitos/${hid}`, emp), { metodo: "DELETE" });
+    assert.equal((await del(ggD.cliente, D, pEt, rD.datos.id)).status, 403);
+    assert.equal((await del(admin, D, pD, rD.datos.id)).status, 404);
+    assert.equal((await del(admin, D, pEt, rD.datos.id)).status, 200);
+    assert.equal((await del(admin, D, pEt, rD.datos.id)).status, 404);
+    assert.deepEqual(await hitosDe(D, pEt), []);
+    assert.equal((await hitosDe(A, pA)).length, 1);
+  });
   await prueba("gerencia: pipeline por etapa con aviso al pasar el umbral; entregados aparte con sus indicadores", async () => {
     let m = (await ggD.cliente.pedir("/api/exec")).datos;
     const umbral = m.pipeline.aviso_por_etapa;

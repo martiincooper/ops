@@ -531,4 +531,21 @@ export const MIGRACIONES_EMPRESA: string[] = [
   ALTER TABLE gastos ADD COLUMN tipo_cambio REAL CHECK (tipo_cambio IS NULL OR tipo_cambio > 0);
   ALTER TABLE gastos ADD COLUMN tipo_cambio_fecha TEXT;
   `,
+
+  // v11 — hitos de los proyectos: lo ya logrado en cada etapa de desarrollo (concepto, prototipado, pruebas), que el
+  //       administrador registra con su fecha de término. Se borran junto con el proyecto.
+  `
+  CREATE TABLE proyecto_hitos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proyecto_id TEXT NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+    etapa TEXT NOT NULL CHECK (etapa IN ('concepto', 'prototipado', 'pruebas')),
+    titulo TEXT NOT NULL,
+    detalle TEXT,
+    fecha TEXT NOT NULL,
+    creado_por_nombre TEXT NOT NULL,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    editado_en TEXT
+  );
+  CREATE INDEX idx_proyecto_hitos ON proyecto_hitos (proyecto_id, fecha, id);
+  `,
 ];
