@@ -9,7 +9,10 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import { dirAdjuntos } from "./adjuntos";
 import { moduloPorClave, repoDe } from "./catalogo";
-import { type Mensaje, type Solicitud, mensajes, solicitud } from "./salas";
+import { SIN_REPO, enviarIssue } from "./envio";
+import type { OpcionesPeticion } from "./githubApi";
+import { ErrorSala, type Mensaje, type Solicitud, mensajes, solicitud } from "./salas";
+import type { ConfigCuenta } from "./seguimiento";
 
 type DB = Database.Database;
 
@@ -46,10 +49,18 @@ export interface RespuestaTurno {
   summary: string | null;
 }
 
+export interface RespuestaCierre {
+  session: string | null;
+  title: string;
+  spec: string;
+}
+
 /** Lo que ops necesita del asiento; en las pruebas se inyecta uno falso. */
 export interface ClienteAsiento {
   salud(): Promise<{ ok: boolean }>;
   turno(p: PeticionTurno): Promise<RespuestaTurno>;
+  /** «Terminar»: el asiento redacta la especificación (mismo cuerpo que un turno). */
+  cierre(p: PeticionTurno): Promise<RespuestaCierre>;
 }
 
 export class ErrorAsiento extends Error {
@@ -95,6 +106,11 @@ export function asientoDesdeEntorno(): ClienteAsiento | null {
       const r = (await pedir("/api/interview/turn", { method: "POST", body: JSON.stringify(p) }, TIMEOUT_TURNO_MS)) as Partial<RespuestaTurno>;
       if (typeof r.session !== "string" || typeof r.message !== "string") throw new ErrorAsiento("Respuesta inválida del asiento de entrevista");
       return { session: r.session, message: r.message, done: r.done === true, summary: r.done && r.summary ? r.summary : null };
+    },
+    async cierre(p) {
+      const r = (await pedir("/api/interview/close", { method: "POST", body: JSON.stringify(p) }, TIMEOUT_TURNO_MS)) as Partial<RespuestaCierre>;
+      if (typeof r.title !== "string" || !r.title.trim() || typeof r.spec !== "string" || !r.spec.trim()) throw new ErrorAsiento("Respuesta inválida del asiento de entrevista");
+      return { session: typeof r.session === "string" ? r.session : null, title: r.title.trim(), spec: r.spec };
     },
   };
 }
@@ -288,4 +304,117 @@ export function reintentarTurnoDeSala(db: DB, sala: string, asiento: ClienteAsie
   const s = db.prepare("SELECT * FROM chat_solicitudes WHERE sala = ? AND estado = 'abierta'").get(sala) as Solicitud | undefined;
   if (!s || enCurso.has(s.id) || s.asistente_estado === "idle") return { iniciado: false };
   return { iniciado: true, promesa: dispararTurno(db, s.id, asiento, { ...op, forzar: true }) };
+}
+
+// ── «Terminar» y «Se me olvidó algo»
+
+/** La solicitud abierta de la sala, si el asistente ya informó que entendió todo y está libre (los botones se aceptan solo así). */
+const UPDATE_SI_TERMINADO = `WHERE id = ? AND estado = 'abierta' AND terminado = 1 AND asistente_estado = 'idle'`;
+
+function conflictoBotones(db: DB, id: string): ErrorSala {
+  const s = solicitud(db, id);
+  const estado = !s ? "no existe" : s.estado === "terminada" ? (s.issue_numero ? "enviada" : "enviando") : s.estado === "cerrada" ? "cerrada" : s.terminado ? "ocupada" : "abierta";
+  const texto: Record<string, string> = {
+    enviada: "Esta solicitud ya se guardó y se envió a revisión",
+    enviando: "Esta solicitud ya se está enviando",
+    cerrada: "Esta solicitud ya se cerró",
+    ocupada: "El asistente está trabajando; espera su respuesta",
+    abierta: "El asistente aún no termina de entender la solicitud",
+    "no existe": "La solicitud no existe",
+  };
+  return new ErrorSala(409, texto[estado]);
+}
+
+/** Id de la solicitud abierta de la sala; si no hay (otra persona ya pulsó «Terminar»), 409 con el estado de la última. */
+function abiertaDe(db: DB, sala: string): string {
+  const s = db.prepare("SELECT id FROM chat_solicitudes WHERE sala = ? AND estado = 'abierta'").get(sala) as { id: string } | undefined;
+  if (s) return s.id;
+  const ultima = db.prepare("SELECT id FROM chat_solicitudes WHERE sala = ? ORDER BY ticket DESC LIMIT 1").get(sala) as { id: string } | undefined;
+  throw ultima ? conflictoBotones(db, ultima.id) : new ErrorSala(409, "No hay una solicitud abierta en esta sala");
+}
+
+/**
+ * «Terminar»: el primero que llega gana, de forma atómica (un UPDATE condicionado al estado); la solicitud pasa a
+ * `terminada`, sin especificación aún (se muestra «enviando…»), y la siguiente persona que escriba abre una solicitud
+ * nueva. Quien llega segundo recibe 409. El cierre en sí lo hace `correrCierre`.
+ */
+export function terminarSolicitud(db: DB, sala: string, ahora = new Date()): string {
+  const id = abiertaDe(db, sala);
+  const r = db.prepare(`UPDATE chat_solicitudes SET estado = 'terminada', terminada_en = ?, cierre_intentos = 0, cierre_error = NULL, cierre_proximo_intento = NULL ${UPDATE_SI_TERMINADO}`).run(iso(ahora), id);
+  if (!r.changes) throw conflictoBotones(db, id);
+  return id;
+}
+
+/** «Se me olvidó algo»: borra la marca de terminado (la solicitud sigue abierta; el próximo mensaje retoma la entrevista). */
+export function reabrirEntrevista(db: DB, sala: string): string {
+  const id = abiertaDe(db, sala);
+  const r = db.prepare(`UPDATE chat_solicitudes SET terminado = 0, resumen = NULL ${UPDATE_SI_TERMINADO}`).run(id);
+  if (!r.changes) throw conflictoBotones(db, id);
+  return id;
+}
+
+const cerrando = new Set<string>();
+
+/**
+ * Pide la especificación al asiento y la publica como Issue (con los reintentos del envío). Si el asiento falla, el
+ * cierre se reintenta como un turno (1, 2, 5, 15, 30 min y luego cada 30). Devuelve true si el Issue quedó creado.
+ */
+export async function correrCierre(db: DB, id: string, asiento: ClienteAsiento | null, cuenta: ConfigCuenta | null, op: OpcionesTurno & OpcionesPeticion = {}): Promise<boolean> {
+  const ahora = op.ahora ?? (() => new Date());
+  const s = solicitud(db, id);
+  if (!s || s.estado !== "terminada" || cerrando.has(id)) return false;
+  cerrando.add(id);
+  try {
+    if (!s.spec) {
+      try {
+        if (!repoDe(db, s.sala)) throw new ErrorAsiento(SIN_REPO);
+        const { peticion } = peticionTurno(db, s, op.dataDir);
+        if (!asiento) throw new ErrorAsiento(SIN_ASIENTO);
+        const r = await asiento.cierre(peticion);
+        anotarSalud(true, null, ahora());
+        db.prepare("UPDATE chat_solicitudes SET titulo = ?, spec = ?, asistente_sesion = COALESCE(?, asistente_sesion), cierre_error = NULL, cierre_proximo_intento = NULL WHERE id = ?").run(r.title, r.spec, r.session, id);
+      } catch (e) {
+        const motivo = e instanceof ErrorAsiento ? e.message : "Error inesperado al cerrar la solicitud";
+        if (!(e instanceof ErrorAsiento)) console.error("[chat-cierre]", e);
+        const intentos = s.cierre_intentos + 1;
+        const proximo = new Date(ahora().getTime() + esperaTurnoMin(intentos) * 60_000);
+        db.prepare("UPDATE chat_solicitudes SET cierre_intentos = ?, cierre_error = ?, cierre_proximo_intento = ? WHERE id = ?").run(intentos, motivo, iso(proximo), id);
+        console.warn(`[chat-cierre] ${motivo}; reintento a las ${iso(proximo)}`);
+        return false;
+      }
+    }
+  } finally {
+    cerrando.delete(id);
+  }
+  return (await enviarIssue(db, id, cuenta, op)).ok;
+}
+
+/** «Terminar» completo sin esperar: quien llama puede no esperar la promesa. */
+export function dispararCierre(db: DB, id: string, asiento: ClienteAsiento | null, cuenta: ConfigCuenta | null, op: OpcionesTurno & OpcionesPeticion = {}): Promise<boolean> {
+  return correrCierre(db, id, asiento, cuenta, op).catch((e) => {
+    console.error("[chat-cierre]", e);
+    return false;
+  });
+}
+
+/** Solicitudes terminadas sin especificación cuyo cierre toca (primer intento huérfano por un reinicio, o reintento vencido). */
+export function cierresPendientes(db: DB, ahora = new Date()): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT id FROM chat_solicitudes
+          WHERE estado = 'terminada' AND spec IS NULL AND (cierre_proximo_intento IS NULL OR cierre_proximo_intento <= ?)
+          ORDER BY ticket`,
+      )
+      .all(iso(ahora)) as { id: string }[]
+  )
+    .map((f) => f.id)
+    .filter((id) => !cerrando.has(id));
+}
+
+/** Reintenta los cierres vencidos. Devuelve cuántos Issues quedaron creados. */
+export async function procesarCierres(db: DB, asiento: ClienteAsiento | null, cuenta: ConfigCuenta | null, op: OpcionesTurno & OpcionesPeticion = {}): Promise<number> {
+  let n = 0;
+  for (const id of cierresPendientes(db, (op.ahora ?? (() => new Date()))())) if (await correrCierre(db, id, asiento, cuenta, op)) n++;
+  return n;
 }

@@ -10,6 +10,9 @@ export const CUENTA_DATASHEQ = "datasheq-creator";
 /** Etiqueta que llevan todos los Issues nuevos del portal: listos para que una persona los revise. */
 export const ETIQUETA_REVISION = "ready-for-human";
 
+/** Etiqueta de los Issues que son una especificación completa (no un ticket suelto). */
+export const ETIQUETA_SPEC = "spec";
+
 /**
  * GITHUB_TOKEN (de la cuenta de DataSHEQ), GITHUB_CUENTA (su login, por defecto datasheq-creator) y GITHUB_API_URL
  * (GitHub Enterprise o pruebas). El repositorio de cada módulo se elige al enviar (./repos).
@@ -170,44 +173,24 @@ const sinMenciones = (s: string) => s.replace(/(^|[^\w.])@(?=\w)/g, "$1@​");
 export interface DatosIssue {
   ticket: number;
   modulo: Modulo;
+  /** Título que devolvió el asiento al cerrar. */
   titulo: string;
-  resumen: string;
+  /** Especificación (markdown) que devolvió el asiento al cerrar. */
+  spec: string;
+  /** Fotos de la solicitud, con su enlace protegido por el login de ops. */
+  fotos: { nombre: string; url: string }[];
   /** Quienes escribieron en la solicitud. */
   solicitantes: { nombre: string; email: string }[];
-  solicitudId: string;
-  fecha: string;
-  transcripcion: { autor: string; texto: string }[];
 }
 
 /** Título del Issue: empieza con el ticket, que es lo que se busca para no duplicarlo. */
 export const tituloIssue = (d: DatosIssue) => `[${codigoTicket(d.ticket)}][${d.modulo.nombre}] ${d.titulo}`.slice(0, 250);
 
+/** Cuerpo del Issue: la especificación, la sección «Fotos» (si hay) y quién lo envió. */
 export function cuerpoIssue(d: DatosIssue): string {
-  const t = codigoTicket(d.ticket);
-  const transcripcion = d.transcripcion
-    .map((l) => `**${l.autor}:** ${sinMenciones(l.texto).replace(/\n/g, "  \n")}`)
-    .join("\n\n");
-  return `## Requerimiento ${t} · ${d.modulo.nombre}
-
-| Campo | Valor |
-|---|---|
-| Ticket | **${t}** |
-| Módulo | ${d.modulo.nombre} (${d.modulo.area}) |
-| Solicitado por | ${d.solicitantes.map((x) => `${x.nombre} (${x.email})`).join(", ") || "—"} |
-| Fecha | ${d.fecha} |
-
-### Resumen
-${sinMenciones(d.resumen)}
-
-<details>
-<summary>Conversación</summary>
-
-${transcripcion}
-
-</details>
-
----
-_Creado automáticamente por el portal gerencial de DataSheq · solicitud \`${d.solicitudId}\`._`;
+  const fotos = d.fotos.length ? `\n\n## Fotos\n\n${d.fotos.map((f) => `- [${f.nombre}](${f.url})`).join("\n")}` : "";
+  const por = d.solicitantes.map((x) => x.nombre).join(", ") || "—";
+  return `${sinMenciones(d.spec.trim())}${fotos}\n\n---\nEnviado desde el portal gerencial por ${sinMenciones(por)}`;
 }
 
 /**
@@ -243,6 +226,7 @@ export async function crearIssueEn(
   const etiquetas: [string, string, string][] = [
     [d.modulo.nombre, d.modulo.color, `${d.modulo.area}: ${d.modulo.descripcion}`],
     [ETIQUETA_ISSUES, "6f42c1", "Requerimiento levantado por gerencia en el portal"],
+    [ETIQUETA_SPEC, "1d76db", "Especificación completa lista para revisar"],
     [ETIQUETA_REVISION, "0e8a16", "Listo para que una persona lo revise"],
   ];
   for (const [nombre, color, descripcion] of etiquetas) await asegurarEtiqueta(cfg, nombre, color, descripcion, op);

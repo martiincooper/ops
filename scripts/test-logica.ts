@@ -14,7 +14,7 @@ import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio 
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
-import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
+import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, enlaceFoto, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
 import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas, saludToken } from "../lib/chat/githubApi";
 import {
   AVISO_OCUPADO,
@@ -22,8 +22,13 @@ import {
   ErrorAsiento,
   type PeticionTurno,
   asientoDesdeEntorno,
+  cierresPendientes,
+  correrCierre,
   correrTurnos,
   dispararTurno,
+  procesarCierres,
+  reabrirEntrevista,
+  terminarSolicitud,
   esperaTurnoMin,
   procesarTurnos,
   reiniciarSalud,
@@ -1091,16 +1096,14 @@ async function main() {
     ticket,
     modulo: moduloPorClave(dbControl(), "c-legal") as Modulo,
     titulo: "Informe DS 594",
-    resumen: "r",
+    spec: "# Spec",
+    fotos: [],
     solicitantes: [{ nombre: "Ana", email: "ana@datasheq.com" }],
-    solicitudId: "conv",
-    fecha: "2026-10-08",
-    transcripcion: [],
   });
   /** Solicitud ya terminada (lo que dejará «Terminar» en un ticket posterior): lista para enviarse como Issue. */
   const terminada = (d: ReturnType<typeof dbControl>, sala: string, persona: typeof ana) => {
     const { solicitud: s } = enviarMensaje(d, sala, persona, "Necesito un informe", t0);
-    d.prepare("UPDATE chat_solicitudes SET estado = 'terminada', terminado = 1, titulo = 'Informe DS 594', resumen = 'r', terminada_en = ? WHERE id = ?").run(t0.toISOString(), s.id);
+    d.prepare("UPDATE chat_solicitudes SET estado = 'terminada', terminado = 1, titulo = 'Informe DS 594', resumen = 'r', spec = '# Spec', terminada_en = ? WHERE id = ?").run(t0.toISOString(), s.id);
     return s.id;
   };
   const posts = () => pedidos.filter((p) => p === "POST /repos/dueno/repo/issues").length;
@@ -1433,8 +1436,15 @@ async function main() {
     const peticiones: PeticionTurno[] = [];
     let falla: Error | null = null;
     let compuerta: Promise<void> | null = null;
+    const cierres: PeticionTurno[] = [];
+    let fallaCierre: Error | null = null;
     const cliente: ClienteAsiento = {
       salud: async () => ({ ok: !falla }),
+      cierre: async (p) => {
+        cierres.push(JSON.parse(JSON.stringify(p)));
+        if (fallaCierre) throw fallaCierre;
+        return { session: "S2", title: "Informe DS 594", spec: "## Decisiones del negocio\n\nTodo claro @ana" };
+      },
       turno: async (p) => {
         peticiones.push(JSON.parse(JSON.stringify(p)));
         if (compuerta) await compuerta;
@@ -1446,6 +1456,8 @@ async function main() {
     return {
       cliente,
       peticiones,
+      cierres,
+      fallarCierre: (e: Error | null) => (fallaCierre = e),
       fallar: (e: Error | null) => (falla = e),
       detener: () => {
         let abrir!: () => void;
@@ -1624,6 +1636,201 @@ async function main() {
     a.fallar(null);
     assert.deepEqual(await saludAsiento(a.cliente, mas(12)), { configurado: true, ok: true, desde: null, motivo: null });
     assert.equal((await saludAsiento(null)).configurado, false);
+  });
+
+  // ── «Terminar» / «Se me olvidó algo» (#33)
+  /** Sala con una solicitud en la que el asistente ya informó que terminó (con una foto de Ana). */
+  const salaTerminada = async (d: ReturnType<typeof dbControl>, a: ReturnType<typeof asientoGuion>, dir: string, sala = "c-legal") => {
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(50, 7)]);
+    const m = enviarMensaje(d, sala, ana, "uno", t0, [{ nombre: "pantalla.jpg", datos: jpg }], dir);
+    enviarMensaje(d, sala, beto, "dos", t0);
+    await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => t0, dataDir: dir });
+    enviarMensaje(d, sala, ana, "tres", mas(1));
+    await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => mas(1), dataDir: dir });
+    enviarMensaje(d, sala, beto, "cuatro", mas(2));
+    await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => mas(2), dataDir: dir });
+    assert.equal(solicitud(d, m.solicitud.id)!.terminado, 1);
+    return m.solicitud.id;
+  };
+  await prueba("terminar (#33): la tarjeta y los botones aparecen solo cuando el asistente terminó y está libre", async () => {
+    const d = dbControl();
+    const a = asientoGuion();
+    const m = enviarMensaje(d, "c-legal", ana, "uno", t0);
+    assert.deepEqual([vistaSala(d, "c-legal").resumen, vistaSala(d, "c-legal").botones], [null, false]);
+    await dispararTurno(d, m.solicitud.id, a.cliente);
+    assert.equal(vistaSala(d, "c-legal").botones, false); // aún pregunta
+    assert.throws(() => terminarSolicitud(d, "c-legal"), (e: ErrorSala) => e.status === 409 && /aún no termina/.test(e.message));
+    assert.throws(() => reabrirEntrevista(d, "c-legal"), (e: ErrorSala) => e.status === 409);
+    enviarMensaje(d, "c-legal", ana, "dos", mas(1));
+    await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => mas(1) });
+    enviarMensaje(d, "c-legal", ana, "tres", mas(2));
+    await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => mas(2) });
+    const v = vistaSala(d, "c-legal");
+    assert.deepEqual([v.resumen, v.botones], ["resumen", true]);
+    // con un mensaje nuevo en camino (asistente pensando) los botones se ocultan
+    d.prepare("UPDATE chat_solicitudes SET asistente_estado = 'pensando' WHERE id = ?").run(m.solicitud.id);
+    assert.equal(vistaSala(d, "c-legal").botones, false);
+    assert.throws(() => terminarSolicitud(d, "c-legal"), (e: ErrorSala) => e.status === 409 && /trabajando/.test(e.message));
+  });
+  await prueba("terminar (#33): dos pulsaciones a la vez: una gana y la otra recibe 409 con el estado", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "terminar-"));
+    try {
+      const d = dbControl();
+      const a = asientoGuion();
+      const id = await salaTerminada(d, a, dir);
+      const resultados = [terminarSolicitud, terminarSolicitud, reabrirEntrevista].map((f) => {
+        try {
+          return f(d, "c-legal", t0);
+        } catch (e) {
+          return e as ErrorSala;
+        }
+      });
+      assert.deepEqual(resultados.map((r) => (typeof r === "string" ? "ok" : r.status)), ["ok", 409, 409]);
+      assert.match((resultados[1] as ErrorSala).message, /ya se está enviando/);
+      assert.equal(solicitud(d, id)!.estado, "terminada");
+      assert.equal(vistaSala(d, "c-legal").botones, false);
+      assert.equal(vistaSala(d, "c-legal").solicitudes[0].envio, "enviando");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("«Se me olvidó algo» (#33): oculta los botones y el siguiente mensaje corre un turno en la misma solicitud", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "olvido-"));
+    try {
+      const d = dbControl();
+      const a = asientoGuion();
+      const id = await salaTerminada(d, a, dir);
+      assert.equal(reabrirEntrevista(d, "c-legal"), id);
+      const v = vistaSala(d, "c-legal");
+      assert.deepEqual([v.botones, v.resumen, solicitud(d, id)!.estado, solicitud(d, id)!.terminado], [false, null, "abierta", 0]);
+      assert.throws(() => terminarSolicitud(d, "c-legal"), (e: ErrorSala) => e.status === 409); // ya no está terminado
+      const turnos = a.peticiones.length;
+      const m = enviarMensaje(d, "c-legal", beto, "me olvidé de algo", mas(5));
+      assert.equal(m.solicitud.id, id);
+      assert.equal(await dispararTurno(d, id, a.cliente, { ahora: () => mas(5) }), 1);
+      assert.equal(a.peticiones.length, turnos + 1);
+      assert.equal(a.peticiones.at(-1)!.requestId, id);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("«Terminar» (#33): cierra en el asiento y crea un Issue con el título, el cuerpo y las 4 etiquetas; un reintento no duplica", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cierre-"));
+    const ant = process.env.PORTAL_URL;
+    process.env.PORTAL_URL = "https://ops.example/";
+    try {
+      olvidarEtiquetas();
+      const d = dbControl();
+      const a = asientoGuion();
+      const id = await salaTerminada(d, a, dir);
+      terminarSolicitud(d, "c-legal", t0);
+      pedidos.length = 0;
+      let enviado: { title: string; body: string; labels: string[] } | null = null;
+      let publicados = 0;
+      manejar = (req, url, cuerpo) => {
+        if (url.pathname.endsWith("/labels")) return { status: 201 };
+        if (req.method === "GET") return { status: 200, json: [] };
+        publicados++;
+        enviado = JSON.parse(cuerpo);
+        return issueCreado;
+      };
+      assert.equal(await correrCierre(d, id, a.cliente, cfgFalso, { ...sinEspera, dataDir: dir, ahora: () => mas(10) }), true);
+      // el asiento recibió la transcripción completa con la sesión y las fotos, igual que un turno
+      assert.deepEqual([a.cierres.length, a.cierres[0].requestId, a.cierres[0].session, a.cierres[0].repo], [1, id, "S1", "dueno/repo"]);
+      assert.equal(a.cierres[0].messages[0].photos.length, 1);
+      const foto = mensajesChat(d, id)[0].adjuntos[0].id;
+      const e = enviado!;
+      assert.equal(e.title, "[GER-0001][C-Legal] Informe DS 594");
+      assert.deepEqual([...e.labels].sort(), ["C-Legal", "gerencia", "ready-for-human", "spec"]);
+      assert.equal(
+        e.body,
+        `## Decisiones del negocio\n\nTodo claro @\u200bana\n\n## Fotos\n\n- [pantalla.jpg](https://ops.example/api/chat/adjuntos/${foto})\n\n---\nEnviado desde el portal gerencial por Ana Pérez, Beto Rojas`,
+      );
+      assert.equal(enlaceFoto(foto), `https://ops.example/api/chat/adjuntos/${foto}`);
+      const s = solicitud(d, id)!;
+      assert.deepEqual([s.issue_numero, s.issue_repo, s.titulo, s.asistente_sesion], [41, "dueno/repo", "Informe DS 594", "S2"]);
+      assert.deepEqual([vistaSala(d, "c-legal").solicitudes[0].envio, publicados], ["enviado", 1]);
+      // un segundo intento (reintento tras perder la respuesta) no crea otro
+      assert.equal(await correrCierre(d, id, a.cliente, cfgFalso, sinEspera), true);
+      assert.equal(publicados, 1);
+      // si el intento anterior sí llegó a GitHub pero se perdió la respuesta, se encuentra por el prefijo del ticket
+      d.prepare("UPDATE chat_solicitudes SET issue_numero = NULL, issue_url = NULL, issue_intentos = 1 WHERE id = ?").run(id);
+      manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : { status: 200, json: [{ number: 41, html_url: "https://x/41", title: "[GER-0001][C-Legal] Informe DS 594" }] });
+      assert.equal(await correrCierre(d, id, a.cliente, cfgFalso, sinEspera), true);
+      assert.equal(publicados, 1);
+      assert.equal(a.cierres.length, 1); // la especificación ya estaba guardada: no se vuelve a pedir
+    } finally {
+      process.env.PORTAL_URL = ant;
+      if (ant === undefined) delete process.env.PORTAL_URL;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("«Terminar» (#33): un cierre fallido se reintenta como un turno; tras terminar el siguiente mensaje abre otra solicitud", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cierre2-"));
+    try {
+      olvidarEtiquetas();
+      const d = dbControl();
+      const a = asientoGuion();
+      const id = await salaTerminada(d, a, dir);
+      terminarSolicitud(d, "c-legal", t0);
+      // un mensaje nuevo ya abre otra solicitud mientras la primera se envía
+      const otra = enviarMensaje(d, "c-legal", beto, "otro tema", t0);
+      assert.deepEqual([otra.nueva, otra.solicitud.ticket, otra.solicitud.id === id], [true, 2, false]);
+      assert.deepEqual(cierresPendientes(d, t0), [id]);
+      a.fallarCierre(new ErrorAsiento("ocupado", 503));
+      let reloj = t0.getTime();
+      const op = { ...sinEspera, ahora: () => new Date(reloj) };
+      for (const min of [1, 2, 5, 15, 30, 30]) {
+        assert.equal(await correrCierre(d, id, a.cliente, cfgFalso, op), false);
+        const s = solicitud(d, id)!;
+        assert.equal(s.cierre_proximo_intento, new Date(reloj + min * 60_000).toISOString());
+        assert.deepEqual(cierresPendientes(d, new Date(reloj + min * 60_000 - 1)), []);
+        reloj += min * 60_000;
+        assert.deepEqual(cierresPendientes(d, new Date(reloj)), [id]);
+      }
+      assert.match(solicitud(d, id)!.cierre_error ?? "", /ocupado/);
+      assert.deepEqual([vistaSala(d, "c-legal").solicitudes[0].envio, vistaSala(d, "c-legal").solicitudes[0].envio_error], ["enviando", "ocupado"]);
+      a.fallarCierre(null);
+      manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : req.method === "GET" ? { status: 200, json: [] } : issueCreado);
+      assert.equal(await procesarCierres(d, a.cliente, cfgFalso, op), 1);
+      assert.equal(solicitud(d, id)!.issue_numero, 41);
+      assert.equal(vistaSala(d, "c-legal").solicitudes[0].envio, "enviado");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("«Terminar» (#33): sala sin repositorio queda «pendiente: sala sin repositorio» y sale al vincular uno", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cierre3-"));
+    try {
+      olvidarEtiquetas();
+      const d = dbControl();
+      const a = asientoGuion();
+      const id = await salaTerminada(d, a, dir);
+      terminarSolicitud(d, "c-legal", t0);
+      d.prepare("UPDATE chat_modulos SET repo = NULL WHERE clave = 'c-legal'").run();
+      assert.equal(await correrCierre(d, id, a.cliente, cfgFalso, { ...sinEspera, ahora: () => t0 }), false);
+      assert.equal(solicitud(d, id)!.cierre_error, SIN_REPO);
+      assert.equal(vistaSala(d, "c-legal").solicitudes[0].envio_error, "pendiente: sala sin repositorio");
+      // se vincula un repositorio: el reintento automático lo envía
+      d.prepare("UPDATE chat_modulos SET repo = 'dueno/repo' WHERE clave = 'c-legal'").run();
+      manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : req.method === "GET" ? { status: 200, json: [] } : issueCreado);
+      assert.equal(await procesarCierres(d, a.cliente, cfgFalso, { ...sinEspera, ahora: () => mas(2) }), 1);
+      assert.equal(solicitud(d, id)!.issue_numero, 41);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("«Mis requerimientos» (#33): lista las solicitudes en que la persona escribió, con su estado", async () => {
+    const d = dbControl();
+    const a = asientoGuion();
+    const x = enviarMensaje(d, "c-legal", ana, "uno", t0).solicitud.id;
+    const y = enviarMensaje(d, "c-lidera", beto, "dos", t0).solicitud.id;
+    enviarMensaje(d, "c-lidera", ana, "tres", t0);
+    const mias = (email: string) =>
+      (d.prepare("SELECT s.id FROM chat_solicitudes s JOIN chat_participantes p ON p.solicitud_id = s.id WHERE p.email = ? COLLATE NOCASE ORDER BY s.ticket DESC").all(email) as { id: string }[]).map((f) => f.id);
+    assert.deepEqual(mias("ANA@datasheq.com"), [y, x]);
+    assert.deepEqual(mias("beto@datasheq.com"), [y]);
+    assert.equal(a.cierres.length, 0);
   });
   falso.close();
 

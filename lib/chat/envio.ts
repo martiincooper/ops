@@ -17,7 +17,7 @@ type DB = Database.Database;
 export const ESPERAS_MIN = [1, 2, 5, 15, 30, 60];
 export const MAX_REINTENTOS = ESPERAS_MIN.length;
 export const SIN_TOKEN = "GITHUB_TOKEN no está configurado en el servidor";
-export const SIN_REPO = "El módulo no tiene un repositorio de GitHub verificado";
+export const SIN_REPO = "pendiente: sala sin repositorio";
 
 const enCurso = new Set<string>();
 
@@ -28,20 +28,19 @@ export interface ResultadoEnvio {
   reintento_en?: string | null;
 }
 
+/** Enlace (protegido por el login de ops) a una foto de la solicitud; PORTAL_URL es la dirección pública de ops. */
+export const enlaceFoto = (id: number) => `${(process.env.PORTAL_URL ?? "").replace(/\/+$/, "")}/api/chat/adjuntos/${id}`;
+
 function datosDelIssue(db: DB, id: string): DatosIssue {
   const s = solicitud(db, id);
-  if (!s || s.estado !== "terminada" || !s.titulo || !s.resumen) throw new Error("La solicitud no está terminada");
+  if (!s || s.estado !== "terminada" || !s.titulo || !s.spec) throw new Error("La solicitud no tiene especificación");
   return {
     ticket: s.ticket,
     modulo: moduloPorClave(db, s.sala) as Modulo,
     titulo: s.titulo,
-    resumen: s.resumen,
+    spec: s.spec,
     solicitantes: participantes(db, id),
-    solicitudId: s.id,
-    fecha: s.terminada_en ?? s.iniciada_en,
-    transcripcion: mensajes(db, id)
-      .filter((m) => m.rol !== "sistema")
-      .map((m) => ({ autor: m.rol === "asistente" ? "Asistente" : m.autor_nombre, texto: m.texto })),
+    fotos: mensajes(db, id).flatMap((m) => m.adjuntos.map((a) => ({ nombre: a.nombre, url: enlaceFoto(a.id) }))),
   };
 }
 
@@ -96,17 +95,17 @@ export async function enviarIssue(
   }
 }
 
-/** Requerimientos con un reintento automático vencido. */
+/** Requerimientos con un reintento automático vencido, o esperando que su sala tenga repositorio y ya lo tiene. */
 export function pendientesDeReintento(db: DB, ahora = new Date()): string[] {
-  return (
-    db
-      .prepare(
-        `SELECT id FROM chat_solicitudes
-          WHERE estado = 'terminada' AND issue_numero IS NULL AND issue_proximo_intento IS NOT NULL AND issue_proximo_intento <= ?
-          ORDER BY issue_proximo_intento`,
-      )
-      .all(ahora.toISOString()) as { id: string }[]
-  ).map((f) => f.id);
+  const filas = db
+    .prepare(
+      `SELECT id, sala, issue_error FROM chat_solicitudes
+        WHERE estado = 'terminada' AND spec IS NOT NULL AND issue_numero IS NULL
+          AND ((issue_proximo_intento IS NOT NULL AND issue_proximo_intento <= ?) OR issue_error = ?)
+        ORDER BY ticket`,
+    )
+    .all(ahora.toISOString(), SIN_REPO) as { id: string; sala: string; issue_error: string | null }[];
+  return filas.filter((f) => f.issue_error !== SIN_REPO || repoDe(db, f.sala)).map((f) => f.id);
 }
 
 /** Reintenta los envíos vencidos, de a uno. Devuelve cuántos se enviaron. */

@@ -61,6 +61,10 @@ export interface Solicitud {
   asistente_error: string | null;
   terminado: 0 | 1;
   resumen: string | null;
+  spec: string | null;
+  cierre_intentos: number;
+  cierre_error: string | null;
+  cierre_proximo_intento: string | null;
   issue_numero: number | null;
   issue_url: string | null;
   issue_repo: string | null;
@@ -229,6 +233,10 @@ export interface SolicitudVista {
   iniciada_en: string;
   terminada_en: string | null;
   issue_url: string | null;
+  /** Solo en solicitudes terminadas: «enviando» (aún sin Issue) o «enviado» (el marcador «Guardado y enviado a revisión ✓»). */
+  envio: "enviando" | "enviado" | null;
+  /** Por qué sigue «enviando» (p. ej. «pendiente: sala sin repositorio»), si hay un error. */
+  envio_error: string | null;
 }
 
 export interface VistaSala {
@@ -240,6 +248,10 @@ export interface VistaSala {
   ultimo_id: number;
   /** Estado del asistente en la solicitud abierta (null si no hay): «pensando» se muestra a todos. */
   asistente: EstadoAsistente | null;
+  /** Resumen del asistente de la solicitud abierta, si ya entendió todo (tarjeta con los botones). */
+  resumen: string | null;
+  /** Se muestran «Terminar» y «Se me olvidó algo»: el asistente terminó y está libre. */
+  botones: boolean;
 }
 
 /**
@@ -247,9 +259,15 @@ export interface VistaSala {
  * mayor (para consultar cada 2 a 3 segundos).
  */
 export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
-  const solicitudes = db
-    .prepare("SELECT id, ticket, estado, iniciada_en, terminada_en, issue_url FROM chat_solicitudes WHERE sala = ? ORDER BY ticket")
-    .all(sala) as SolicitudVista[];
+  const solicitudes = (
+    db
+      .prepare("SELECT id, ticket, estado, iniciada_en, terminada_en, issue_url, issue_numero, cierre_error, issue_error FROM chat_solicitudes WHERE sala = ? ORDER BY ticket")
+      .all(sala) as (Omit<SolicitudVista, "envio" | "envio_error"> & { issue_numero: number | null; cierre_error: string | null; issue_error: string | null })[]
+  ).map(({ issue_numero, cierre_error, issue_error, ...f }) => ({
+    ...f,
+    envio: f.estado !== "terminada" ? null : issue_numero ? ("enviado" as const) : ("enviando" as const),
+    envio_error: f.estado === "terminada" && !issue_numero ? (cierre_error ?? issue_error) : null,
+  }));
   const msgs = conAdjuntos(
     db,
     db
@@ -263,7 +281,15 @@ export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
     .prepare("SELECT COALESCE(MAX(m.id), 0) AS ultimo FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id WHERE s.sala = ?")
     .get(sala) as { ultimo: number };
   const abierta = solicitudAbierta(db, sala);
-  return { solicitudes, mensajes: msgs, ultimo_id: ultimo, asistente: abierta?.asistente_estado ?? null };
+  const terminado = !!abierta?.terminado;
+  return {
+    solicitudes,
+    mensajes: msgs,
+    ultimo_id: ultimo,
+    asistente: abierta?.asistente_estado ?? null,
+    resumen: terminado ? (abierta?.resumen ?? "") : null,
+    botones: terminado && abierta?.asistente_estado === "idle",
+  };
 }
 
 export interface EstadoSala {
