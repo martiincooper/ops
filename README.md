@@ -150,8 +150,9 @@ nuevo entre los que quedan. No se puede deshacer: para un proyecto real que term
 
 ## Portal gerencial con asistente (`/gerencia`)
 
-Chatbot para que la gerencia levante requerimientos sobre la plataforma DataSheq. Al terminar la entrevista, el
-asistente clasifica el requerimiento, lo redacta y crea un **Issue en GitHub** con su ticket.
+Chat para que la gerencia levante requerimientos sobre la plataforma DataSheq. Cada sala es un chat grupal con un
+asistente de entrevista que conversa con la gerencia y le hace las preguntas necesarias; al pulsar **Terminar**, el
+asistente redacta la **especificación** y ops la publica como un **Issue (spec) en el repositorio de la sala**.
 
 Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 [salas y mis requerimientos](docs/capturas/v09-22-portal-salas.png) ·
@@ -174,38 +175,56 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   borra: se **archiva** (desaparece del portal, queda en «Archivadas» con su historial) y se puede restaurar. No hay
   salas fijas en el código.
 - **Salas «Próximamente»**: el portal muestra a los gerentes las salas activas en orden; las que aún no tienen un
-  repositorio verificado salen en gris, «Próximamente», y no se pueden abrir (404). Vincular el repositorio llega
-  en el siguiente ticket. Cada Issue guarda el repositorio donde se creó.
-- **Cada sala es un chat grupal compartido** (solo texto por ahora; sin asistente, fotos ni «Terminar»): al abrirla
-  se ve el historial completo de todas sus solicitudes, cada mensaje con autor y hora, los propios a la derecha. Al
-  enviar, el mensaje se guarda y la respuesta vuelve al tiro; si la sala no tiene una solicitud abierta, el mensaje
-  abre una (con su número `GER-000n`), y quien escribe queda como participante. Cualquier cantidad de gerentes puede
-  estar a la vez, y una solicitud sigue abierta sin límite de tiempo. Los clientes consultan cada 2,5 segundos los mensajes con id mayor al último
-  visto (`GET /api/chat/salas/<sala>?desde=<id>`), así los mensajes ajenos aparecen sin recargar. Modelo en
-  `control.db`: `chat_solicitudes` (a lo más una abierta por sala), `chat_mensajes`, `chat_participantes` y
-  `chat_modulos` (vacía; la usará el ticket de salas administradas).
-- **Issue automático**: título `[GER-0001][C-Legal] …`, etiquetas del módulo (`C-Legal`), `gerencia` y
-  `ready-for-human` (se crean solas si no existen), y en el cuerpo el ticket, los participantes, el resumen y la
-  conversación. Por ahora nada lo dispara (el asistente y «Terminar» llegan en tickets posteriores): el envío y sus
-  reintentos quedan listos para solicitudes terminadas.
+  repositorio verificado salen en gris, «Próximamente», y no se pueden abrir (404). El repositorio se vincula en el
+  editor de salas (ver «Puesta en marcha», paso 4). Cada Issue guarda el repositorio donde se creó.
+- **Cada sala es un chat grupal compartido**: al abrirla se ve el historial completo de todas sus solicitudes, cada
+  mensaje con autor y hora, los propios a la derecha. Al enviar, el mensaje se guarda y la respuesta vuelve al tiro; si
+  la sala no tiene una solicitud abierta, el mensaje abre una (con su número `GER-000n`), y quien escribe queda como
+  participante. Cualquier cantidad de gerentes puede estar a la vez, y una solicitud sigue abierta sin límite de
+  tiempo. Los clientes consultan cada 2,5 segundos los mensajes con id mayor al último visto
+  (`GET /api/chat/salas/<sala>?desde=<id>`), así los mensajes ajenos aparecen sin recargar. Modelo en `control.db`:
+  `chat_solicitudes` (a lo más una abierta por sala), `chat_mensajes`, `chat_participantes`, `chat_adjuntos` y
+  `chat_modulos` (las salas que administra el administrador).
+- **Fotos**: cada mensaje puede llevar fotos JPG, PNG o WEBP (se validan por su contenido, no por el nombre), de hasta
+  5 MB cada una y 6 por solicitud. Se guardan en `DATA_DIR/adjuntos/<solicitud>/` (el respaldo `scripts/backup.mjs`
+  las copia junto a las bases) y solo las sirve `GET /api/chat/adjuntos/<id>` a administradores y usuarios del
+  portal (401 sin sesión, 403 sin acceso).
+- **Turno del asistente**: tras un mensaje, el asistente de entrevista responde en la misma sala; mientras piensa,
+  todos ven «El asistente está pensando…». Los mensajes que llegan durante un turno viajan juntos en el siguiente, así
+  la conversación no se bifurca. Si el turno falla, se reintenta solo a 1, 2, 5, 15 y 30 minutos y después cada 30
+  minutos; mientras tanto la sala avisa «El asistente está ocupado y responderá apenas pueda. Tu mensaje está
+  guardado.» (**Reintentar** en el panel lo corre de inmediato).
+- **«Terminar» y «Se me olvidó algo»**: cuando el asistente informa que terminó, la tarjeta de resumen muestra los dos
+  botones. Gana quien pulsa primero (la otra persona recibe 409 y ve lo ocurrido). **Se me olvidó algo** reabre la
+  entrevista y la solicitud sigue abierta. **Terminar** cierra la solicitud: el asistente redacta título y
+  especificación, la sala muestra «enviando…» mientras se crea el Issue y luego «Guardado y enviado a revisión ✓»;
+  el siguiente mensaje de la sala abre una solicitud nueva.
+- **Issue de especificación**: título `[GER-0001][<sala>] <título>` (el título lo redacta el asistente). El cuerpo es la
+  especificación, una sección **Fotos** con los enlaces a las fotos en ops (con `PORTAL_URL`; protegidos por el
+  login) y al final «Enviado desde el portal gerencial por <participantes>». Etiquetas: `gerencia`, `spec`, el nombre
+  de la sala y `ready-for-human` (se crean solas si no existen). Lo dispara **Terminar**; el envío y sus reintentos
+  están descritos abajo.
 - **Reintentos automáticos del envío**: si GitHub falla por un problema pasajero (red, tiempo de espera, error 5xx o
   límite de uso), la petición se reintenta hasta 3 veces en el momento (respetando `Retry-After`) y, si sigue
   fallando, el servidor la reintenta solo a los 1, 2, 5, 15, 30 y 60 minutos; el panel muestra cuándo será el próximo.
   Antes de cada reintento busca si el Issue ya existe, para no duplicarlo, y nunca envía el mismo requerimiento dos
   veces a la vez. Los errores definitivos (falta `GITHUB_TOKEN`, token sin permiso, repositorio inexistente) no se
   reintentan solos: el requerimiento queda guardado y se reenvía desde el panel con **Reintentar**.
-- **Credenciales de DataSHEQ**: los Issues se crean con el token de la cuenta de GitHub de DataSHEQ
-  (`GITHUB_CUENTA`, por defecto `datasheq-creator`). Antes de enviar se comprueba de quién es el token
-  (`GET /user`); si es de otra cuenta, el envío se rechaza (error definitivo, sin reintentos).
-- **Panel del administrador** (`/admin` → **Portal gerencial**, cualquier administrador; el resto de
-  `/admin` no cambia): estado de las 7 salas con su repositorio y si tienen una solicitud abierta, historial de
-  solicitudes con ticket, participantes, estado, transcripción y enlace directo al Issue (o **Reintentar** si quedó
-  pendiente).
+- **Cuenta de GitHub**: `GITHUB_CUENTA` es la cuenta dueña de `GITHUB_TOKEN` (por defecto `datasheq-creator`). Con
+  esa cuenta se verifica el repositorio de cada sala y se crean los Issues (esa cuenta es su autora). Antes de enviar
+  se comprueba de quién es el token (`GET /user`); si es de otra cuenta, el envío se rechaza (error definitivo, sin
+  reintentos).
+- **Panel del administrador** (`/admin` → **Portal gerencial**, cualquier administrador; el resto de `/admin` no
+  cambia): arriba, las líneas de salud de GitHub y del asistente; el editor **Salas** (crear, editar, archivar y
+  restaurar); y por cada sala su repositorio y su solicitud abierta, con **Cerrar conversación** (cierra la
+  solicitud sin enviarla) y **Reintentar** (el turno trabado del asistente). Más abajo, el historial de solicitudes con
+  ticket, participantes, estado, transcripción y enlace directo al Issue (o **Reintentar** si quedó pendiente de
+  envío).
 - **Seguimiento de requerimientos**: el estado de cada Issue se trae de GitHub (Issues con la etiqueta `gerencia`)
   como máximo cada 10 minutos, al abrir el panel o el portal; el botón **Actualizar** del panel fuerza la consulta
   (como máximo una vez por minuto). Estados: **Pendiente de envío**, **Abierto**, **En curso** (tiene persona
   asignada), **Cerrado** y **Descartado** (cerrado como «no planificado»). El panel tiene la columna y el filtro
-  **Estado en GitHub**; en el portal, **Mis requerimientos** muestra a cada persona solo los suyos (el enlace al Issue
+  **Estado en GitHub**; en el portal, **Mis requerimientos** muestra a cada persona solo las solicitudes en que participó (el enlace al Issue
   solo a administradores, porque el resto puede no tener acceso al repositorio). Si GitHub no responde, se muestra el
   último estado conocido con su fecha.
 - **Límite de uso** (protege el servidor): cada cuenta puede enviar hasta 30 mensajes por minuto; si se pasa, ve
@@ -214,20 +233,26 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 ### Puesta en marcha del portal gerencial
 
 1. **Token de GitHub** (`GITHUB_TOKEN`): un token **clásico** (*classic* PAT) con el alcance `repo`, creado desde la
-   cuenta `datasheq-creator` (`GITHUB_CUENTA`, por defecto `datasheq-creator`). Un token de grano fino no sirve:
-   no alcanza los repositorios de otra cuenta personal en los que `datasheq-creator` es colaborador.
-2. **Repositorios de los módulos**: en cada uno, invita a `datasheq-creator` como colaborador con permiso de
+   cuenta que nombra `GITHUB_CUENTA` (por defecto `datasheq-creator`). Un token de grano fino no sirve: no alcanza
+   los repositorios de otra cuenta personal en los que esa cuenta es colaboradora. `GITHUB_CUENTA` debe ser la
+   cuenta dueña del token: con ella se verifica el repositorio y es la autora de los Issues.
+2. **Repositorios de los módulos**: en cada uno, invita a la cuenta `GITHUB_CUENTA` como colaboradora con permiso de
    escritura y **acepta la invitación desde esa cuenta**. Los Issues deben estar habilitados en el repositorio.
 3. **Asistente de entrevista**: `INTERVIEW_URL` (la URL base del panel de la flota) e `INTERVIEW_TOKEN` (el mismo
    valor que el `INTERVIEW_TOKEN` de la flota). Opcional: `INTERVIEW_TIMEOUT_MS`.
 4. **Crear las salas**: en `/admin?vista=chat` → **Salas**, crea cada sala y pega el enlace de su repositorio
    (`https://github.com/dueño/repo` o `dueño/repo`). Al guardar se verifica con el token que el repositorio existe, que
-   `datasheq-creator` puede escribir en él y que tiene Issues habilitados; si no, se muestra el motivo en el
+   la cuenta `GITHUB_CUENTA` puede escribir en él y que tiene Issues habilitados; si no, se muestra el motivo en el
    formulario. Sin repositorio verificado la sala sale en gris, «Próximamente», para los gerentes.
 5. **Líneas de salud** (arriba del panel **Portal gerencial**): *GitHub* en verde dice que el token es válido y de qué
    cuenta es; en rojo, el motivo (falta el token, es de otra cuenta, fue revocado). *Asistente de entrevista* en verde
    responde; en rojo falta configurarlo o no responde desde cierta fecha, con el motivo.
-6. **Cuando algo se traba**: **Reintentar** (en la sala) corre ahora el turno trabado del asistente, sin esperar el
+6. **Volver a `datasheq-creator`**: si producción corre con `GITHUB_CUENTA` apuntando a otra cuenta, para volver a
+   `datasheq-creator`: (a) crea un token clásico con alcance `repo` desde `datasheq-creator` y ponlo en
+   `GITHUB_TOKEN`; (b) comprueba que esa cuenta aceptó la invitación de colaboración en cada repositorio de las
+   salas; (c) quita `GITHUB_CUENTA` del entorno (así vale el valor por defecto) y reinicia el contenedor. La línea
+   *GitHub* del panel debe decir que el token pertenece a `datasheq-creator`; los Issues nuevos salen con esa cuenta.
+7. **Cuando algo se traba**: **Reintentar** (en la sala) corre ahora el turno trabado del asistente, sin esperar el
    siguiente reintento automático. **Cerrar conversación** cierra la solicitud abierta de la sala sin enviarla; es
    necesario antes de cambiar el repositorio de una sala o archivarla.
 
@@ -244,7 +269,7 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
 | `/exec`: costo vs estimación BOM, desglose de costos (total, único vs recurrente, recurrente por día/mes/año y por proyecto), tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
 | Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) y edición de los datos del proyecto | |
-| `/gerencia`: portal gerencial con asistente (7 salas, una persona por sala, solo gerencia de Datasheq y administradores) que crea Issues en GitHub; panel en `/admin` | |
+| `/gerencia`: portal gerencial con asistente (un chat grupal compartido por sala administrada, con fotos; «Terminar» publica un Issue de especificación en GitHub; solo gerencia de Datasheq y administradores); panel en `/admin` | |
 
 ---
 
