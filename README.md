@@ -162,12 +162,11 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 [requerimiento generado](docs/capturas/v09-27-portal-requerimiento-generado.png) ·
 [panel del administrador](docs/capturas/v09-28-admin-portal-gerencial.png)
 
-- **Solo `@datasheq.com`**: cualquier cuenta de ese dominio (equipo, gerencia o administración) entra a hacer sus
-  entrevistas, sin necesitar permisos de administración. Cualquier otra cuenta (Gmail, Hotmail, otro dominio) ve
-  «Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com», en la página y en la API. El
-  ingreso directo es `/login?portal=gerencia` (rechaza otros dominios antes de pedir el código); gerencia de
-  Datasheq tiene además un botón **Portal gerencial** en `/exec`.
-- **Acceso Administrador**: botón en la barra superior del portal y de cada sala. Un administrador @datasheq.com va
+- **Solo gerencia de Datasheq y administradores**: entran los gerentes (`executive`) de la empresa Datasheq y
+  cualquier administrador (sea cual sea su dominio). Cualquier otra cuenta (equipo, gerencia de otra empresa) recibe
+  403 y ve «El portal gerencial es solo para gerencia de Datasheq», en la página y en la API. El ingreso directo es
+  `/login?portal=gerencia`; gerencia de Datasheq tiene además un botón **Portal gerencial** en `/exec`.
+- **Acceso Administrador**: botón en la barra superior del portal y de cada sala. Un administrador va
   directo al panel (`/admin?vista=chat`); el resto cierra sesión y entra por `/login?portal=admin` con credenciales
   de administrador (si la cuenta no lo es, vuelve al portal con un aviso).
 - **7 salas**, una por módulo: C-Legal (Cumplimiento Legal), C-Controla (Control Documental), C-Previene (Gestor
@@ -208,7 +207,7 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 - **Credenciales de DataSHEQ**: los Issues se crean con el token de la cuenta de GitHub de DataSHEQ
   (`GITHUB_CUENTA`, por defecto `datasheq-creator`). Antes de enviar se comprueba de quién es el token
   (`GET /user`); si es de otra cuenta, el envío se rechaza (error definitivo, sin reintentos).
-- **Panel del administrador** (`/admin` → **Portal gerencial**, solo administradores @datasheq.com; el resto de
+- **Panel del administrador** (`/admin` → **Portal gerencial**, cualquier administrador; el resto de
   `/admin` no cambia): estado de las 7 salas con su repositorio (quién la usa, desde cuándo,
   cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
   enlace directo al Issue (o **Reintentar** si quedó pendiente).
@@ -237,7 +236,7 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 | `/admin`: standup (bloqueos → Say-Do < 70% → no disponibles), disponibilidad 14 días, validación de compras, equipo con supervisores, proyectos (crear, editar, eliminar), administradores | |
 | `/exec`: costo vs estimación BOM, desglose de costos (total, único vs recurrente, recurrente por día/mes/año y por proyecto), tiempo de concepto a cliente, pipeline por etapa con aviso de carga, entregados con indicadores propios | |
 | Historial de etapas de cada proyecto (corregible en Proyectos → Etapas) y edición de los datos del proyecto | |
-| `/gerencia`: portal gerencial con asistente (7 salas, una persona por sala, solo @datasheq.com) que crea Issues en GitHub; panel en `/admin` | |
+| `/gerencia`: portal gerencial con asistente (7 salas, una persona por sala, solo gerencia de Datasheq y administradores) que crea Issues en GitHub; panel en `/admin` | |
 
 ---
 

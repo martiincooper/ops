@@ -124,12 +124,11 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
 [requirement generated](docs/capturas/v09-27-portal-requerimiento-generado.png) ·
 [admin panel](docs/capturas/v09-28-admin-portal-gerencial.png)
 
-- **`@datasheq.com` only**: any account with that domain (team, executive or admin) can run interviews, no admin
-  rights needed. Any other account (Gmail, Hotmail, other domains) gets "Acceso denegado: Este sistema es de uso
-  exclusivo para personal de @datasheq.com" on the page and the API. Direct sign-in: `/login?portal=gerencia`
-  (other domains are rejected before asking for the code); Datasheq executives also get a **Portal gerencial**
-  button in `/exec`.
-- **Acceso Administrador**: a button in the portal and room headers. A `@datasheq.com` admin goes straight to the
+- **Datasheq executives and admins only**: executives (`executive`) of the Datasheq company and any admin (any
+  email domain) get in. Any other account (team, executives of other companies) gets 403 and "El portal gerencial es
+  solo para gerencia de Datasheq" on the page and the API. Direct sign-in: `/login?portal=gerencia`; Datasheq
+  executives also get a **Portal gerencial** button in `/exec`.
+- **Acceso Administrador**: a button in the portal and room headers. An admin goes straight to the
   panel (`/admin?vista=chat`); anyone else is signed out and sent to `/login?portal=admin` (non-admin accounts land
   back in the portal with a notice).
 - **7 rooms**, one per module: C-Legal (legal compliance), C-Controla (document control), C-Previene (preventive
@@ -178,7 +177,7 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
 - **Usage limits** (they protect the server): 30 turns and 3 "generate" actions per account per minute ("Vas muy
   rápido…", nothing typed is lost), and `CHAT_TURNOS_MAX` assistant replies per conversation (default 40): the last
   one asks the person to generate the requirement and the chat only allows finishing.
-- **Admin panel** (`/admin` → Portal gerencial, `@datasheq.com` admins only; the rest of `/admin` is unchanged): the
+- **Admin panel** (`/admin` → Portal gerencial, any admin; the rest of `/admin` is unchanged): the
   7 rooms with their repository (who, since when, when it frees up, a button to release it), conversation history with ticket, priority,
   conversation state, GitHub state (column and filter), transcript and Issue link (or **Reintentar**).
 - Data lives in `control.db` (`chat_conversaciones`, `chat_mensajes`, `chat_salas`; automatic migrations).
