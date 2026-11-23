@@ -1,0 +1,4 @@
+{
+  "_comment": "Merged over implement-all.json when the loop runs in implement-all-cloud (IMPLEMENT_ALL_CLOUD=1). Nothing differs: no shared Postgres (SQLite in a temporary folder), no docker, no browser; ports carry the repo index {r}. GitHub Actions (.github/workflows/ci.yml) still builds the Docker image; the fleet judges PRs by `ci` alone.",
+  "chrome": false
+}
