@@ -1,10 +1,10 @@
-// Portal gerencial: las 7 salas (lista fija hasta el ticket de salas administradas) y el dominio permitido.
+// Portal gerencial: el modelo de una sala (los datos viven en la tabla chat_modulos; ver ./catalogo) y quién puede usarlo.
 // Sin "server-only": lo usan también los componentes cliente (tarjetas de sala, login del portal).
 
 export const EMPRESA_GERENCIA = "datasheq";
 export const MENSAJE_ACCESO_DENEGADO = "El portal gerencial es solo para gerencia de Datasheq";
 
-/** Clave de una sala: texto simple (la lista de salas vendrá de la base de datos). */
+/** Clave de una sala: el «slug» de su nombre al crearla; nunca cambia. */
 export type ClaveModulo = string;
 
 export interface Modulo {
@@ -15,69 +15,18 @@ export interface Modulo {
   descripcion: string;
   /** Color de la etiqueta en GitHub (hex sin #). */
   color: string;
+  orden: number;
+  /** dueño/repositorio; null: sin repositorio. */
+  repo: string | null;
+  repo_verificado_en: string | null;
+  autonomia: Autonomia;
+  archivado: boolean;
 }
 
-export const MODULOS: Modulo[] = [
-  {
-    clave: "c-legal",
-    nombre: "C-Legal",
-    area: "Cumplimiento Legal",
-    descripcion:
-      "Identifica la normativa aplicable a la operación, evalúa su cumplimiento artículo por artículo y genera informes en PDF.",
-    color: "5b4fd6",
-  },
-  {
-    clave: "c-controla",
-    nombre: "C-Controla",
-    area: "Control Documental",
-    descripcion: "Controla versiones, aprobaciones y vigencias de procedimientos, registros y documentos críticos.",
-    color: "1f7a8c",
-  },
-  {
-    clave: "c-previene",
-    nombre: "C-Previene",
-    area: "Gestor Documental",
-    descripcion:
-      "Centraliza la documentación preventiva: matrices de riesgo, procedimientos de trabajo seguro (PTS) y planes de emergencia.",
-    color: "c2410c",
-  },
-  {
-    clave: "c-lidera",
-    nombre: "C-Lidera",
-    area: "Programas de Liderazgo",
-    descripcion:
-      "Planifica y da seguimiento a programas de liderazgo en seguridad: caminatas, observaciones y compromisos de la línea de mando.",
-    color: "15803d",
-  },
-  {
-    clave: "c-acredita",
-    nombre: "C-Acredita",
-    area: "Gestión del personal",
-    descripcion:
-      "Gestiona la acreditación de trabajadores y contratistas: documentos, exámenes, cursos y vencimientos en un solo lugar.",
-    color: "0e7490",
-  },
-  {
-    clave: "c-capacita",
-    nombre: "C-Capacita",
-    area: "Gestor del conocimiento",
-    descripcion:
-      "Organiza capacitaciones, evaluaciones y el conocimiento de la organización, con registro de asistencia y certificados.",
-    color: "a21caf",
-  },
-  {
-    clave: "c-investiga",
-    nombre: "C-Investiga",
-    area: "Reportabilidad e Incidentes",
-    descripcion:
-      "Reporta incidentes desde terreno, investiga sus causas y realiza seguimiento a las acciones correctivas.",
-    color: "b91c1c",
-  },
-];
+export type Autonomia = "revisar" | "automatico";
 
-export function moduloPorClave(clave: string | null | undefined): Modulo | undefined {
-  return MODULOS.find((m) => m.clave === clave);
-}
+/** Una sala se puede abrir solo con un repositorio verificado; sin él es «Próximamente» (gris, cerrada). */
+export const salaAbierta = (m: Pick<Modulo, "repo" | "repo_verificado_en">) => !!m.repo && !!m.repo_verificado_en;
 
 /** Portal gerencial: gerentes (executive) de la empresa Datasheq, o cualquier administrador (sin empresa, cualquier dominio). */
 export function puedeUsarPortal(u: { rol: string; empresa: string | null }): boolean {
