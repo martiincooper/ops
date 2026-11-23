@@ -1552,21 +1552,21 @@ async function main() {
 
   await prueba("módulos propuestos (#51): activar sobre un repositorio vacío → un commit en main con los archivos, y el panel muestra su enlace", async () => {
     const GH = process.env.GITHUB_FALSO;
-    assert.equal((await gGerente.pedir("/api/chat/salas", { metodo: "POST", json: { nombre: "C-Vacio", descripcion: "Repo vacío" } })).status, 201);
+    assert.equal((await gEquipo.pedir("/api/chat/salas", { metodo: "POST", json: { nombre: "C-Vacio", descripcion: "Repo vacío" } })).status, 201);
     let v;
     for (const t of ["Una función", "Lo usan tres personas cada semana", "Eso es todo"]) {
-      assert.equal((await escribir(gGerente, "c-vacio", t)).status, 200);
+      assert.equal((await escribir(gEquipo, "c-vacio", t)).status, 200);
       for (let i = 0; i < 100; i++) {
-        v = (await gGerente.pedir("/api/chat/salas/c-vacio")).datos;
+        v = (await gEquipo.pedir("/api/chat/salas/c-vacio")).datos;
         if (v.asistente === "idle" && v.mensajes.at(-1).rol === "asistente") break;
         await new Promise((f) => setTimeout(f, 100));
       }
       if (v.resumen) break;
     }
     assert.ok(v.resumen);
-    assert.equal((await gGerente.pedir("/api/chat/salas/c-vacio/terminar", { metodo: "POST" })).status, 200);
+    assert.equal((await gEquipo.pedir("/api/chat/salas/c-vacio/terminar", { metodo: "POST" })).status, 200);
     for (let i = 0; i < 100; i++) {
-      if ((await gGerente.pedir("/api/chat/salas/c-vacio")).datos.solicitudes.at(-1).envio === "guardado") break;
+      if ((await gEquipo.pedir("/api/chat/salas/c-vacio")).datos.solicitudes.at(-1).envio === "guardado") break;
       await new Promise((f) => setTimeout(f, 100));
     }
     const r = await gAdmin.pedir("/api/admin/chat/propuestos/c-vacio/activar", { metodo: "POST", json: { repo: "prueba/c-vacio" } });
