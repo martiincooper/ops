@@ -16,10 +16,10 @@ replaces the earlier draft design).
 | Area | State | Where |
 |---|---|---|
 | Rooms | 7 hard-coded modules (C-Legal, C-Controla, C-Previene, C-Lidera, C-Acredita, C-Capacita, C-Investiga) | `lib/chat/modulos.ts` |
-| Room → repo | Env var `GITHUB_REPOS="c-acredita=owner/repo,..."`; default maps only C-Legal → `datasheq-creator/clegal-railway` (`REPOS_POR_DEFECTO`). Change needs a Railway redeploy. Also set in `.github/workflows/ci.yml` and `scripts/e2e.mjs` | `lib/chat/repos.ts` |
+| Room → repo | Replaced by the per-room repo link saved in `chat_modulos` and verified on save (history: it was a static env-var map) | `lib/chat/catalogo.ts` |
 | Room visibility | Rooms without repo are **hidden** (not grey) and answer 404 | `lib/chat/salas.ts` (`estadoSalas`, `entrarSala`), `components/gerencia/Portal.tsx` |
-| Interview | **No LLM.** Claude was removed in PR #19. Fixed decision trees with buttons; the requirement is assembled by rules | `lib/chat/arboles.ts`, `lib/chat/flujo.ts`, `docs/arboles-de-decision.md`, `scripts/arboles-md.ts` |
-| Concurrency | **One person per room.** `chat_salas.modulo` is a primary key lock; others see "en uso"; freed on finish, logout or 15 min idle | `lib/chat/salas.ts`, `lib/migraciones.ts` v2 |
+| Interview | **No LLM.** Claude was removed in PR #19. Fixed button flows; the requirement is assembled by rules (replaced by the AI assistant) | — |
+| Concurrency | **One person per room.** a room was reserved for one person at a time (replaced by shared rooms) | — |
 | Output | **One issue** per conversation `[GER-000n][C-Legal] título`, labels module / prioridad / tipo / `gerencia` / `ready-for-human`, with transcript | `lib/chat/githubApi.ts` (`crearIssueEn`, `cuerpoIssue`) |
 | Delivery | Solid: token must belong to `datasheq-creator` (`verificarCuenta`), dedup by ticket prefix, retries at 1/2/5/15/30/60 min, manual "Reintentar". A pending send picks the room's **current** repo at send time (`envio.ts:68`); tracking follows `issue_repo` saved per conversation | `lib/chat/envio.ts`, `lib/chat/seguimiento.ts` |
 | Tracking | Issue state synced back; "Mis requerimientos" for the gerente; history in admin | `lib/chat/seguimiento.ts`, `components/gerencia/MisRequerimientos.tsx` |
@@ -36,7 +36,7 @@ are already closed; #2 (activation with a fine-grained token) is open and out of
 ## 2. Findings that shaped the design
 
 - Issues #21/#23 were created in `martiincooper/ops` before PR #24 introduced one repo per room.
-- The portal never lists GitHub repos; it shows hard-coded rooms that have an entry in `GITHUB_REPOS`.
+- The portal never lists GitHub repos; it showed hard-coded rooms that had a repo in a static map.
 - A **fine-grained PAT cannot reach collaborator repos of another user's personal account**: the portal needs a
   **classic PAT with `repo` scope** from `datasheq-creator`.
 - The fleet discovers work with `gh search issues --owner martiincooper --label ready-for-agent`, so issues must live
@@ -49,9 +49,9 @@ are already closed; #2 (activation with a fine-grained token) is open and out of
 ### Rooms and access
 - The portal starts with **zero rooms**. Migration v7 creates `chat_modulos` (clave, nombre, área, descripción,
   color, orden, `repo` nullable, `repo_verificado_en`, `autonomia` `revisar|automatico` default `revisar`,
-  archivado) and **wipes all chat data** (conversations, messages, locks) and restarts the counter at GER-0001.
+  archivado) and **wipes all chat data** (conversations and messages) and restarts the counter at GER-0001.
   Issues already on GitHub are left alone.
-- Removed: the 7 hard-coded rooms, the decision trees and their docs/script, `GITHUB_REPOS`, `REPOS_POR_DEFECTO`.
+- Removed: the 7 hard-coded rooms, the old fixed interview flows and the static room-to-repo map.
 - **Admin panel: any user with role `admin`**, whatever their email domain. Only admins create, edit, link,
   archive and restore rooms. The key is generated from the name and cannot be edited.
 - **Repo verification on save**: the link (URL or `owner/repo`) is checked with the `datasheq-creator` token
@@ -65,7 +65,7 @@ are already closed; #2 (activation with a fine-grained token) is open and out of
 
 ### The room: a group chat
 - Each room is **one shared chat like iMessage**: everyone sees the full history, each message shows its author,
-  one open request at a time, polling every 2 to 3 s, no lock and no 15-minute expiry.
+  one open request at a time, polling every 2 to 3 s, with no limit on how long a request stays open.
 - Text and photos (JPG, PNG, WEBP; ≤ 5 MB each, ≤ 6 per request), stored on the ops Railway volume under `/data`
   (reachable via `railway ssh`, included in backups). The issue lists login-protected links to ops, visible to
   admins and portal users.

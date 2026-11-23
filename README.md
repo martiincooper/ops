@@ -157,7 +157,6 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 [salas y mis requerimientos](docs/capturas/v09-22-portal-salas.png) ·
 [conversación](docs/capturas/v09-23-portal-sala-conversacion.png) ·
 [conversación en el celular](docs/capturas/v09-24-portal-sala-movil.png) ·
-[sala ocupada](docs/capturas/v09-25-portal-sala-ocupada.png) ·
 [acceso denegado](docs/capturas/v09-26-portal-acceso-denegado.png) ·
 [requerimiento generado](docs/capturas/v09-27-portal-requerimiento-generado.png) ·
 [panel del administrador](docs/capturas/v09-28-admin-portal-gerencial.png)
@@ -181,8 +180,7 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   se ve el historial completo de todas sus solicitudes, cada mensaje con autor y hora, los propios a la derecha. Al
   enviar, el mensaje se guarda y la respuesta vuelve al tiro; si la sala no tiene una solicitud abierta, el mensaje
   abre una (con su número `GER-000n`), y quien escribe queda como participante. Cualquier cantidad de gerentes puede
-  estar a la vez: **no hay bloqueo de sala, ni «en uso», ni latido, ni vencimiento por inactividad**; una solicitud
-  sigue abierta sin límite de tiempo. Los clientes consultan cada 2,5 segundos los mensajes con id mayor al último
+  estar a la vez, y una solicitud sigue abierta sin límite de tiempo. Los clientes consultan cada 2,5 segundos los mensajes con id mayor al último
   visto (`GET /api/chat/salas/<sala>?desde=<id>`), así los mensajes ajenos aparecen sin recargar. Modelo en
   `control.db`: `chat_solicitudes` (a lo más una abierta por sala), `chat_mensajes`, `chat_participantes` y
   `chat_modulos` (vacía; la usará el ticket de salas administradas).
@@ -212,6 +210,26 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   último estado conocido con su fecha.
 - **Límite de uso** (protege el servidor): cada cuenta puede enviar hasta 30 mensajes por minuto; si se pasa, ve
   «Vas muy rápido. Espera unos segundos y vuelve a intentar» sin perder lo escrito.
+
+### Puesta en marcha del portal gerencial
+
+1. **Token de GitHub** (`GITHUB_TOKEN`): un token **clásico** (*classic* PAT) con el alcance `repo`, creado desde la
+   cuenta `datasheq-creator` (`GITHUB_CUENTA`, por defecto `datasheq-creator`). Un token de grano fino no sirve:
+   no alcanza los repositorios de otra cuenta personal en los que `datasheq-creator` es colaborador.
+2. **Repositorios de los módulos**: en cada uno, invita a `datasheq-creator` como colaborador con permiso de
+   escritura y **acepta la invitación desde esa cuenta**. Los Issues deben estar habilitados en el repositorio.
+3. **Asistente de entrevista**: `INTERVIEW_URL` (la URL base del panel de la flota) e `INTERVIEW_TOKEN` (el mismo
+   valor que el `INTERVIEW_TOKEN` de la flota). Opcional: `INTERVIEW_TIMEOUT_MS`.
+4. **Crear las salas**: en `/admin?vista=chat` → **Salas**, crea cada sala y pega el enlace de su repositorio
+   (`https://github.com/dueño/repo` o `dueño/repo`). Al guardar se verifica con el token que el repositorio existe, que
+   `datasheq-creator` puede escribir en él y que tiene Issues habilitados; si no, se muestra el motivo en el
+   formulario. Sin repositorio verificado la sala sale en gris, «Próximamente», para los gerentes.
+5. **Líneas de salud** (arriba del panel **Portal gerencial**): *GitHub* en verde dice que el token es válido y de qué
+   cuenta es; en rojo, el motivo (falta el token, es de otra cuenta, fue revocado). *Asistente de entrevista* en verde
+   responde; en rojo falta configurarlo o no responde desde cierta fecha, con el motivo.
+6. **Cuando algo se traba**: **Reintentar** (en la sala) corre ahora el turno trabado del asistente, sin esperar el
+   siguiente reintento automático. **Cerrar conversación** cierra la solicitud abierta de la sala sin enviarla; es
+   necesario antes de cambiar el repositorio de una sala o archivarla.
 
 ## Contenido de esta versión
 
@@ -507,7 +525,7 @@ producción.
 | `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
-| `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token de la cuenta de DataSHEQ con permiso «Issues: write» sobre los repositorios de los módulos |
+| `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token clásico (`repo`) de la cuenta de DataSHEQ, colaboradora de los repositorios de los módulos |
 | `INTERVIEW_URL`, `INTERVIEW_TOKEN` | — (el asistente no responde; los mensajes se guardan y se reintenta) | URL y token (bearer) del asiento de entrevista de implement-all-cloud |
 | `PORTAL_URL` | — (los enlaces a fotos del Issue quedan relativos) | Dirección pública de ops, sin barra final; los Issues enlazan las fotos con ella |
 | `GITHUB_CUENTA` | `datasheq-creator` | Cuenta de GitHub de DataSHEQ: se rechazan los envíos con un token de otra cuenta |
