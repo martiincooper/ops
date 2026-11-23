@@ -82,8 +82,8 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
     const t = setInterval(() => {
       if (document.hidden) return;
       api<Vista>(`/api/chat/salas/${modulo.clave}?desde=${ultimoId.current}`)
-        .then((v) => aplicar(v, false))
-        .catch(() => {});
+        .then((v) => (aplicar(v, false), setError(null)))
+        .catch((e) => setError((e as ErrorApi).message));
     }, REFRESCO_MS);
     return () => clearInterval(t);
   }, [cargando, modulo.clave, aplicar]);
@@ -123,7 +123,6 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
       alFinal.current = true;
       setMensajes((actuales) => unir(actuales, [r.mensaje]));
       setSolicitudes((s) => (s.some((x) => x.id === r.solicitud.id) ? s : [...s, { ...r.solicitud, iniciada_en: r.mensaje.creado_en }]));
-      ultimoId.current = Math.max(ultimoId.current, r.mensaje.id);
     } catch (e) {
       setTexto(t);
       setError((e as ErrorApi).message);
