@@ -131,15 +131,14 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
 - **Acceso Administrador**: a button in the portal and room headers. An admin goes straight to the
   panel (`/admin?vista=chat`); anyone else is signed out and sent to `/login?portal=admin` (non-admin accounts land
   back in the portal with a notice).
-- **7 rooms**, one per module: C-Legal (legal compliance), C-Controla (document control), C-Previene (preventive
-  documents), C-Lidera (safety leadership programs), C-Acredita (worker and contractor accreditation), C-Capacita
-  (training and knowledge) and C-Investiga (incident reporting and investigation). The list stays hard-coded until
-  the admin-managed rooms ticket.
-- **One GitHub repository per module** (`lib/chat/repos.ts`): each room's requirements go to its module's
-  repository. By default only C-Legal has one (`datasheq-creator/clegal-railway`); `GITHUB_REPOS` assigns the rest
-  (`c-acredita=datasheq-creator/cacredita-railway,c-lidera=…`; `c-legal=-` removes it). **Rooms without a
-  repository are hidden from the portal**, cannot be entered (404) and are never suggested; the panel shows them as
-  "Oculta". Each Issue stores the repository it was created in.
+- **Admin-managed rooms** (`lib/chat/catalogo.ts`, table `chat_modulos`): admins manage them in `/admin?vista=chat`
+  → **Salas** (name, area, description, hex colour, order and autonomy `revisar` / `automático`, which has no effect
+  yet). The key is the slug of the name at creation and can never be edited. Rooms are never deleted: they are
+  **archived** (hidden from the portal, listed under "Archivadas" with their history kept) and can be restored. There
+  are no hard-coded rooms.
+- **"Próximamente" rooms**: the portal shows managers the active rooms in order; rooms without a verified repository
+  are grey, "Próximamente", and cannot be opened (404). Linking a repository comes in the next ticket. Each Issue
+  stores the repository it was created in.
 - **Every room is a shared group chat** (text only for now; no assistant, photos or "Terminar"): opening it shows
   the full history of all its requests, each message with author and time, your own on the right. Sending stores the
   message and returns at once; if the room has no open request the message opens one (numbered `GER-000n`), and the
@@ -229,7 +228,6 @@ every pull request and push to `main`; pushes to `main` also publish the `amd64`
 | `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
 | `GITHUB_TOKEN` | — (Issues stay pending) | DataSHEQ account token with "Issues: write" on the module repositories |
 | `GITHUB_CUENTA` | `datasheq-creator` | DataSHEQ's GitHub account: sends with another account's token are rejected |
-| `GITHUB_REPOS` | `c-legal=datasheq-creator/clegal-railway` | Repository per module (`key=owner/repo`, `,`-separated); rooms without one are hidden |
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub API (GitHub Enterprise or a mock GitHub in tests) |
 
 Production (reverse proxy, backups, first-day checklist): see the Spanish README, sections 3–4.

@@ -169,15 +169,14 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
 - **Acceso Administrador**: botón en la barra superior del portal y de cada sala. Un administrador va
   directo al panel (`/admin?vista=chat`); el resto cierra sesión y entra por `/login?portal=admin` con credenciales
   de administrador (si la cuenta no lo es, vuelve al portal con un aviso).
-- **7 salas**, una por módulo: C-Legal (Cumplimiento Legal), C-Controla (Control Documental), C-Previene (Gestor
-  Documental), C-Lidera (Programas de Liderazgo), C-Acredita (Gestión del personal), C-Capacita (Gestor del
-  conocimiento) y C-Investiga (Reportabilidad e Incidentes). La lista sigue fija en el código hasta el ticket de salas
-  administradas.
-- **Un repositorio de GitHub por módulo** (`lib/chat/repos.ts`): los requerimientos de cada sala se envían al
-  repositorio de su módulo. Por defecto solo C-Legal tiene uno (`datasheq-creator/clegal-railway`); los demás se
-  asignan con `GITHUB_REPOS` (`c-acredita=datasheq-creator/cacredita-railway,c-lidera=…`; `c-legal=-` lo quita).
-  **Las salas sin repositorio no se muestran en el portal**, no se puede entrar a ellas (404) y el asistente no las
-  sugiere; el panel las muestra como «Oculta». Cada Issue guarda el repositorio donde se creó.
+- **Salas administradas** (`lib/chat/catalogo.ts`, tabla `chat_modulos`): el administrador las gestiona en
+  `/admin?vista=chat` → **Salas** (nombre, área, descripción, color hex, orden y autonomía `revisar` / `automático`,
+  esta última sin efecto aún). La clave es el slug del nombre al crear la sala y no se puede editar. Una sala no se
+  borra: se **archiva** (desaparece del portal, queda en «Archivadas» con su historial) y se puede restaurar. No hay
+  salas fijas en el código.
+- **Salas «Próximamente»**: el portal muestra a los gerentes las salas activas en orden; las que aún no tienen un
+  repositorio verificado salen en gris, «Próximamente», y no se pueden abrir (404). Vincular el repositorio llega
+  en el siguiente ticket. Cada Issue guarda el repositorio donde se creó.
 - **Cada sala es un chat grupal compartido** (solo texto por ahora; sin asistente, fotos ni «Terminar»): al abrirla
   se ve el historial completo de todas sus solicitudes, cada mensaje con autor y hora, los propios a la derecha. Al
   enviar, el mensaje se guarda y la respuesta vuelve al tiro; si la sala no tiene una solicitud abierta, el mensaje
@@ -510,7 +509,6 @@ producción.
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token de la cuenta de DataSHEQ con permiso «Issues: write» sobre los repositorios de los módulos |
 | `GITHUB_CUENTA` | `datasheq-creator` | Cuenta de GitHub de DataSHEQ: se rechazan los envíos con un token de otra cuenta |
-| `GITHUB_REPOS` | `c-legal=datasheq-creator/clegal-railway` | Repositorio de cada módulo (`clave=dueño/repo`, separados por `,`); las salas sin repositorio se ocultan |
 | `GITHUB_API_URL` | `https://api.github.com` | API de GitHub (GitHub Enterprise o un GitHub simulado en pruebas) |
 
 `ADMIN_EMAIL` solo se usa cuando no hay administradores. Después se gestionan en `/admin` → **Administradores**.

@@ -1,9 +1,12 @@
 // Prueba de extremo a extremo contra un servidor en marcha con datos VACÍOS (dos empresas por defecto).
 // Uso: DATA_DIR=/tmp/aether-e2e ADMIN_EMAIL=admin@aether-tech.dev JWT_SECRET=... COOKIE_SECURE=false TIPO_CAMBIO_USD=950 \
-//        GITHUB_TOKEN= GITHUB_REPOS="c-previene=prueba/previene,c-lidera=prueba/lidera" \
-//        node .next/standalone/server.js        (en otra terminal, PORT=3100; C-Legal tiene repositorio por defecto)
-//      BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
+//        GITHUB_TOKEN= node .next/standalone/server.js        (en otra terminal, PORT=3100)
+//      DATA_DIR=/tmp/aether-e2e BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev node scripts/e2e.mjs
+//      (DATA_DIR: el mismo del servidor, o E2E_EJECUTAR_SQL con un comando que ejecute $SQL en control.db; la prueba del portal le asigna repositorio a las salas, que aún no se hace desde el panel)
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
+import path from "node:path";
+import Database from "better-sqlite3";
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:3100";
 const ADMIN = process.env.ADMIN_EMAIL ?? "admin@aether-tech.dev";
@@ -911,18 +914,86 @@ async function main() {
     // gerente de Datasheq: portal sí, panel no
     assert.equal((await gGerente.pedir("/api/chat/salas")).status, 200);
   });
-  await prueba("solo las salas con repositorio (C-Legal, C-Previene, C-Lidera); las demás ocultas y sin acceso", async () => {
+  await prueba("salas administradas (#29): el portal arranca sin salas; el administrador las crea y la clave es el slug del nombre", async () => {
+    assert.deepEqual((await gGerente.pedir("/api/chat/salas")).datos.salas, []); // sin módulos fijos
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal")).status, 404);
+    const dato = { area: "Cumplimiento Legal", descripcion: "Normativa aplicable", color: "#5b4fd6" };
+    for (const nombre of ["C-Legal", "C-Controla", "C-Previene", "C-Lidera"]) {
+      const r = await gAdmin.pedir("/api/admin/chat/salas", { metodo: "POST", json: { nombre, ...dato } });
+      assert.equal(r.status, 201, JSON.stringify(r.datos));
+      assert.deepEqual([r.datos.sala.clave, r.datos.sala.autonomia, r.datos.sala.archivado], [nombre.toLowerCase(), "revisar", false]);
+    }
+    const repetida = await gAdmin.pedir("/api/admin/chat/salas", { metodo: "POST", json: { nombre: "c legal" } });
+    assert.equal(repetida.status, 409, JSON.stringify(repetida.datos));
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas", { metodo: "POST", json: { nombre: "X", color: "rojo" } })).status, 400);
+  });
+  await prueba("salas administradas (#29): editar guarda los campos pero nunca la clave; gerentes sin acceso (403)", async () => {
+    const e = await gAdmin.pedir("/api/admin/chat/salas/c-lidera", {
+      metodo: "PATCH",
+      json: { nombre: "C-Lidera 2", area: "Liderazgo", descripcion: "Programas", color: "#15803D", orden: 9, autonomia: "automatico" },
+    });
+    assert.equal(e.status, 200, JSON.stringify(e.datos));
+    assert.deepEqual(
+      [e.datos.sala.clave, e.datos.sala.nombre, e.datos.sala.area, e.datos.sala.color, e.datos.sala.orden, e.datos.sala.autonomia],
+      ["c-lidera", "C-Lidera 2", "Liderazgo", "15803d", 9, "automatico"],
+    );
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-lidera", { metodo: "PATCH", json: { clave: "otra" } })).status, 400); // la clave no se edita
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-nada", { metodo: "PATCH", json: { nombre: "X" } })).status, 404);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-lidera", { metodo: "PATCH", json: { nombre: "C-Lidera" } })).status, 200);
+    for (const c of [gGerente, gEquipo, gTeam, gExecA]) {
+      for (const [ruta, json] of [["/api/admin/chat/salas", { nombre: "Intrusa" }], ["/api/admin/chat/salas/c-legal/archivo", { archivar: true }]]) {
+        assert.equal((await c.pedir(ruta, { metodo: "POST", json })).status, 403, ruta);
+      }
+      assert.equal((await c.pedir("/api/admin/chat/salas/c-legal", { metodo: "PATCH", json: { nombre: "Mía" } })).status, 403);
+    }
+    assert.equal((await gAdmin.pedir("/api/admin/chat")).datos.salas.find((x) => x.clave === "c-legal").nombre, "C-Legal");
+  });
+  await prueba("salas administradas (#29): archivar la oculta del portal y la lista en «Archivadas»; restaurar la devuelve", async () => {
+    const a = await gAdmin.pedir("/api/admin/chat/salas/c-controla/archivo", { metodo: "POST", json: { archivar: true } });
+    assert.deepEqual([a.status, a.datos.sala.archivado], [200, true]);
+    assert.ok(!(await gGerente.pedir("/api/chat/salas")).datos.salas.some((x) => x.clave === "c-controla"));
+    const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
+    assert.deepEqual(panel.archivadas.map((x) => x.clave), ["c-controla"]);
+    assert.ok(!panel.salas.some((x) => x.clave === "c-controla"));
+    assert.equal(panel.nombres["c-controla"], "C-Controla"); // su historial conserva el nombre
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-controla")).status, 404);
+    assert.equal((await gGerente.pedir("/gerencia/c-controla")).status, 404);
+    const r = await gAdmin.pedir("/api/admin/chat/salas/c-controla/archivo", { metodo: "POST", json: { archivar: false } });
+    assert.deepEqual([r.status, r.datos.sala.archivado], [200, false]);
+    assert.ok((await gGerente.pedir("/api/chat/salas")).datos.salas.some((x) => x.clave === "c-controla"));
+  });
+  await prueba("salas administradas (#29): sin repositorio verificado todas son «Próximamente», grises y no se abren", async () => {
+    const s = (await gGerente.pedir("/api/chat/salas")).datos.salas;
+    assert.deepEqual(s.map((x) => x.clave), ["c-legal", "c-controla", "c-previene", "c-lidera"]); // en orden
+    assert.ok(s.every((x) => !x.disponible && !x.abierta && x.repo === undefined));
+    const cerrada = await gGerente.pedir("/api/chat/salas/c-legal");
+    assert.deepEqual([cerrada.status, cerrada.datos.error], [404, "Esta sala no está disponible"]);
+    assert.equal((await escribir(gGerente, "c-legal", "hola")).status, 404);
+    assert.equal((await gGerente.pedir("/gerencia/c-legal")).status, 404);
+    // El portal las muestra como tarjetas «Próximamente»; el panel trae el editor de salas
+    assert.equal((await gGerente.pedir("/gerencia")).status, 200);
+  });
+  // Vincular el repositorio llega en otro ticket: aquí se les asigna directo en la base, como lo haría ese flujo
+  const SQL_REPOS = "UPDATE chat_modulos SET repo = 'prueba/' || clave, repo_verificado_en = '2026-10-01T00:00:00.000Z' WHERE clave IN ('c-legal', 'c-previene', 'c-lidera')";
+  if (process.env.DATA_DIR) {
+    const control = new Database(path.join(process.env.DATA_DIR, "control.db"));
+    control.prepare(SQL_REPOS).run();
+    control.close();
+  } else if (process.env.E2E_EJECUTAR_SQL) {
+    execSync(process.env.E2E_EJECUTAR_SQL, { env: { ...process.env, SQL: SQL_REPOS } }); // p. ej. dentro del contenedor
+  } else throw new Error("Define DATA_DIR (carpeta de datos del servidor) o E2E_EJECUTAR_SQL para asignar repositorios a las salas");
+  await prueba("con repositorio verificado la sala se abre; las demás siguen «Próximamente»", async () => {
     const s = await gGerente.pedir("/api/chat/salas");
-    assert.deepEqual(s.datos.salas.map((x) => x.clave), ["c-legal", "c-previene", "c-lidera"]);
+    assert.deepEqual(s.datos.salas.map((x) => [x.clave, x.disponible]), [["c-legal", true], ["c-controla", false], ["c-previene", true], ["c-lidera", true]]);
     assert.ok(s.datos.salas.every((x) => !x.abierta && x.repo === undefined)); // el repositorio solo lo ve el panel
     const oculta = await gGerente.pedir("/api/chat/salas/c-controla");
     assert.deepEqual([oculta.status, oculta.datos.error], [404, "Esta sala no está disponible"]);
     assert.equal((await gGerente.pedir("/gerencia/c-controla")).status, 404);
     const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
-    assert.equal(panel.salas.length, 7); // el panel las ve todas
+    assert.equal(panel.salas.length, 4);
     assert.deepEqual(
       [panel.salas.find((x) => x.clave === "c-legal").repo, panel.salas.find((x) => x.clave === "c-controla").repo, panel.config.cuenta],
-      ["datasheq-creator/clegal-railway", null, "datasheq-creator"],
+      ["prueba/c-legal", null, "datasheq-creator"],
     );
   });
   await prueba("sala vacía: sin historial; el primer mensaje abre la solicitud GER-0001 y otra persona la ve con autor y hora", async () => {
@@ -955,7 +1026,7 @@ async function main() {
     assert.deepEqual(hist.mensajes.map((m) => m.autor_nombre), ["Gonzalo Gerente", "Elena Equipo", "Gonzalo Gerente"]);
     assert.equal(new Set(hist.mensajes.map((m) => m.solicitud_id)).size, 1); // las dos personas, una sola solicitud
   });
-  await prueba("mensajes vacíos o demasiado largos, sala sin repositorio y límite de 30 mensajes por minuto", async () => {
+  await prueba("mensajes vacíos o demasiado largos, sala sin repositorio verificado y límite de 30 mensajes por minuto", async () => {
     for (const texto of ["", "   ", "x".repeat(4001)]) assert.equal((await escribir(gGerente, "c-legal", texto)).status, 400, `«${texto.slice(0, 5)}»`);
     const oculta = await escribir(gGerente, "c-controla", "hola");
     assert.deepEqual([oculta.status, oculta.datos.error], [404, "Esta sala no está disponible"]);
@@ -1025,7 +1096,7 @@ async function main() {
     for (const ruta of ["/api/chat/conversaciones/x/mensaje", "/api/chat/conversaciones/x/latido", "/api/chat/conversaciones/x/generar"]) {
       assert.equal((await gGerente.pedir(ruta, { metodo: "POST", json: {} })).status, 404, ruta);
     }
-    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal", { metodo: "DELETE" })).status, 404); // sin «liberar sala»
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal", { metodo: "DELETE" })).status, 405); // las salas no se borran (se archivan) ni se «liberan»
   });
   await prueba("panel del portal: solo administradores (cualquier dominio); historial con participantes", async () => {
     const r = await gAdmin.pedir("/api/admin/chat");

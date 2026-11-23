@@ -21,7 +21,6 @@ ADMIN=admin@aether-tech.dev
 
 env -i PATH="$PATH" HOME="$HOME" NODE_ENV=production PORT="$PUERTO" HOSTNAME=127.0.0.1 DATA_DIR="$DATOS" \
   ADMIN_EMAIL="$ADMIN" JWT_SECRET="$(openssl rand -hex 32)" COOKIE_SECURE=false TIPO_CAMBIO_USD=950 GITHUB_TOKEN= \
-  GITHUB_REPOS="c-previene=prueba/previene,c-lidera=prueba/lidera" \
   node .next/standalone/server.js >"$REGISTRO" 2>&1 &
 PID=$!
 trap 'kill "$PID" 2>/dev/null || true; rm -rf "$DATOS"' EXIT
@@ -33,4 +32,4 @@ for _ in $(seq 1 60); do
 done
 curl -sf "http://127.0.0.1:$PUERTO/api/health" >/dev/null || { echo "El servidor no respondió en el puerto $PUERTO"; cat "$REGISTRO"; exit 1; }
 
-BASE="http://127.0.0.1:$PUERTO" ADMIN_EMAIL="$ADMIN" node scripts/e2e.mjs || { echo "--- registro del servidor"; tail -50 "$REGISTRO"; exit 1; }
+DATA_DIR="$DATOS" BASE="http://127.0.0.1:$PUERTO" ADMIN_EMAIL="$ADMIN" node scripts/e2e.mjs || { echo "--- registro del servidor"; tail -50 "$REGISTRO"; exit 1; }

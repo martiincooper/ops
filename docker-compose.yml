@@ -25,7 +25,6 @@ services:
       # Portal gerencial: límites de las salas e Issues en GitHub
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_CUENTA: ${GITHUB_CUENTA:-}
-      GITHUB_REPOS: ${GITHUB_REPOS:-}
       GITHUB_API_URL: ${GITHUB_API_URL:-}
 
 volumes:
