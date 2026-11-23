@@ -6,10 +6,16 @@
 import fs from "node:fs";
 import http from "node:http";
 
+// Issues creados (para las pruebas): GET /control/issues los lista; GET /repos/{dueño}/{repo}/issues los devuelve como GitHub.
+const issues = [];
 const servidor = http.createServer((req, res) => {
   const { pathname } = new URL(req.url ?? "/", "http://x");
   const responder = (status, json = {}) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(json));
-  req.resume();
+  let cuerpo = "";
+  req.on("data", (c) => (cuerpo += c));
+  req.on("end", () => atender(pathname, cuerpo, responder, req));
+});
+function atender(pathname, cuerpo, responder, req) {
   const repo = pathname.match(/^\/repos\/([^/]+)\/([^/]+)$/);
   if (pathname === "/user") return responder(200, { login: "datasheq-creator" });
   if (repo) {
@@ -17,11 +23,23 @@ const servidor = http.createServer((req, res) => {
     if (nombre.includes("no-existe")) return responder(404, { message: "Not Found" });
     return responder(200, { full_name: `${repo[1]}/${nombre}`, permissions: { push: !nombre.includes("solo-lectura") }, has_issues: !nombre.includes("sin-issues") });
   }
-  if (req.method === "POST" && /\/issues$/.test(pathname)) return responder(201, { number: 1, html_url: `http://github.falso${pathname}/1` });
+  if (pathname === "/control/issues") return responder(200, issues);
+  if (req.method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues$/.test(pathname)) {
+    const repoDe = pathname.replace(/^\/repos\//, "").replace(/\/issues$/, "");
+    return responder(200, issues.filter((i) => i.repo === repoDe).map((i) => ({ number: i.number, html_url: i.url, title: i.title, state: "open", assignees: [] })).reverse());
+  }
+  if (req.method === "POST" && /\/issues$/.test(pathname)) {
+    const datos = JSON.parse(cuerpo || "{}");
+    const repo = pathname.replace(/^\/repos\//, "").replace(/\/issues$/, "");
+    const numero = issues.filter((i) => i.repo === repo).length + 1;
+    const url = `http://github.falso${pathname}/${numero}`;
+    issues.push({ repo, number: numero, url, title: datos.title, body: datos.body, labels: datos.labels });
+    return responder(201, { number: numero, html_url: url });
+  }
   if (req.method === "POST" && /\/labels$/.test(pathname)) return responder(201, {});
   if (/\/labels\//.test(pathname)) return responder(200, {});
   responder(404, { message: "Not Found" });
-});
+}
 servidor.listen(Number(process.env.GITHUB_FALSO_PORT ?? 0), process.env.GITHUB_FALSO_HOST ?? "127.0.0.1", () => {
   const { port } = servidor.address();
   if (process.argv[2]) fs.writeFileSync(process.argv[2], String(port));

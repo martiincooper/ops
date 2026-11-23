@@ -199,6 +199,14 @@ export const MIGRACIONES_CONTROL: string[] = [
   ALTER TABLE chat_solicitudes ADD COLUMN asistente_intentos INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE chat_solicitudes ADD COLUMN asistente_error TEXT;
   `,
+  // v10 — «Terminar»: la especificación que devuelve el asiento al cerrar (el Issue lleva este texto) y el estado del
+  //       cierre (reintentos y último error) mientras la solicitud aún no tiene especificación.
+  `
+  ALTER TABLE chat_solicitudes ADD COLUMN spec TEXT;
+  ALTER TABLE chat_solicitudes ADD COLUMN cierre_intentos INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_solicitudes ADD COLUMN cierre_error TEXT;
+  ALTER TABLE chat_solicitudes ADD COLUMN cierre_proximo_intento TEXT;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [
