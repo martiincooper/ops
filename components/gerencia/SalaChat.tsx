@@ -199,8 +199,8 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
         subtitulo={`Sala ${modulo.nombre} · ${modulo.area}`}
         esAdmin={esAdmin}
         volver={
-          <Link href="/gerencia" aria-label="Volver al portal" title="Volver al portal" className="boton-icono bg-superficie">
-            <ArrowLeft size={18} />
+          <Link href="/gerencia" aria-label="Volver a las salas" title="Volver a las salas" className="boton-suave bg-superficie">
+            <ArrowLeft size={16} aria-hidden /> <span className="hidden sm:inline">Salas</span>
           </Link>
         }
       />
