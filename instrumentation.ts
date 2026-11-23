@@ -14,7 +14,8 @@ export async function register() {
 
     const { iniciarReintentos } = await import("./lib/chat/envio");
     const { configDesdeEntorno } = await import("./lib/chat/githubApi");
+    const { procesarDocs } = await import("./lib/chat/docs");
     const { asientoDesdeEntorno, procesarCierres, procesarTurnos } = await import("./lib/chat/asistente");
-    iniciarReintentos(getDbControl, () => configDesdeEntorno(), 60_000, async (db) => (await procesarTurnos(db, asientoDesdeEntorno())) + (await procesarCierres(db, asientoDesdeEntorno(), configDesdeEntorno())));
+    iniciarReintentos(getDbControl, () => configDesdeEntorno(), 60_000, async (db) => (await procesarTurnos(db, asientoDesdeEntorno())) + (await procesarCierres(db, asientoDesdeEntorno(), configDesdeEntorno())) + (await procesarDocs(db, configDesdeEntorno())));
   }
 }

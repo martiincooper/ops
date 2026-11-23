@@ -3,6 +3,7 @@
 import type Database from "better-sqlite3";
 import { ErrorModulo, type DatosModulo, crearModulo, editarModulo, fijarRepo, moduloPorClave, exigirSinConversacion } from "./catalogo";
 import { ErrorGithub, type OpcionesPeticion, peticion, verificarCuenta } from "./githubApi";
+import { type EstadoDocs, publicarDocs } from "./docs";
 import { enviarIssue } from "./envio";
 import { type Modulo, codigoTicket } from "./modulos";
 import { type Solicitud, solicitud } from "./salas";
@@ -95,6 +96,8 @@ export interface ResultadoActivacion {
   /** Causa por la que el repositorio no se verificó: la sala sigue propuesta. */
   error_repo?: string;
   /** Una por especificación guardada, de la más antigua a la más nueva (vacío si no se activó). */
+  /** Documentos iniciales en el repositorio (PR o primer commit); null si no se activó. */
+  docs: EstadoDocs | null;
   envios: { id: string; ticket: string; titulo: string; ok: boolean; error?: string; issue_url: string | null; issue_estado: "open" | "closed" | null }[];
 }
 
@@ -104,7 +107,7 @@ export const MSG_NO_PROPUESTA = "La sala no es un módulo propuesto";
 /**
  * Activa un módulo propuesto con el repositorio que el administrador creó a mano: lo normaliza y verifica (como en el
  * editor de salas), lo guarda, pasa la sala a «activo» y envía por el envío normal cada especificación guardada, la
- * más antigua primero. Sin repositorio verificado la sala sigue propuesta (`error_repo`). 409 con una conversación
+ * más antigua primero, y escribe los documentos iniciales en el repositorio (./docs). Sin repositorio verificado la sala sigue propuesta (`error_repo`). 409 con una conversación
  * abierta con mensajes o con un repositorio que ya es de otra sala. Lo que no se pudo enviar queda con su error para
  * «Reintentar» (o el reintento automático).
  */
@@ -127,7 +130,7 @@ export async function activarModulo(
     await verificarRepo(cuenta, repo, op);
   } catch (e) {
     if (!(e instanceof ErrorRepo)) throw e;
-    return { sala: previo, error_repo: e.message, envios: [] };
+    return { sala: previo, error_repo: e.message, docs: null, envios: [] };
   }
   // durante la verificación pudo cambiar todo: se vuelve a comprobar y se activa de una vez
   const sala = db.transaction(() => {
@@ -152,5 +155,7 @@ export async function activarModulo(
     const s = solicitud(db, id) as Solicitud;
     envios.push({ id, ticket: codigoTicket(s.ticket), titulo: s.titulo ?? "", ok: r.ok, ...(r.error ? { error: r.error } : {}), issue_url: s.issue_url, issue_estado: s.issue_estado });
   }
-  return { sala, envios };
+  // después de los Issues, para que CLAUDE.md y el PR los enlacen
+  const docs = await publicarDocs(db, cuenta, clave, op);
+  return { sala, docs: { url: docs.url, numero: docs.numero, error: docs.error, reintento_en: docs.reintento_en }, envios };
 }

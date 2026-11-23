@@ -233,6 +233,14 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   con mensajes o si el repositorio ya es el de otra sala. El panel muestra el Issue y su estado de cada
   especificación y **Reintentar** si alguno falló. Desde ahí la sala es una sala normal: los requerimientos nuevos usan el
   repositorio y el `CONTEXT.md` y los ADR dejan de actualizarse.
+  **Documentos iniciales**: tras los Issues, ops escribe en el repositorio (con `datasheq-creator`) `CONTEXT.md`,
+  `docs/adr/000k-<slug>.md`, `CLAUDE.md` (nombre, descripción, enlaces a los Issues y la línea
+  `Design system: follow martiincooper/ui-guidelines`) y la configuración de la flota (`.claude/implement-all.json` =
+  `{ "permissions": "skip", "chrome": false, "review": true }` y `.claude/implement-all.cloud.json` =
+  `{ "chrome": false }`). En un repositorio vacío son el primer commit de `main`; si no, la rama `modulo/docs-iniciales`
+  con un commit y un PR «Documentación inicial del módulo <nombre>» que enlaza los Issues (una rama o PR abierto con ese
+  nombre se reutiliza). El panel muestra el enlace al PR o al commit, o el error con **Reintentar**; los errores
+  transitorios se reintentan solos a 1, 2, 5, 15, 30 y 60 minutos. El primer ticket del módulo fija `setup` y `ci`.
 - **Seguimiento de requerimientos**: el estado de cada Issue se trae de GitHub (Issues con la etiqueta `gerencia`)
   como máximo cada 10 minutos, al abrir el panel o el portal; el botón **Actualizar** del panel fuerza la consulta
   (como máximo una vez por minuto). Estados: **Pendiente de envío**, **Abierto**, **En curso** (tiene persona
