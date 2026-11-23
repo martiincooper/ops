@@ -220,6 +220,19 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   solicitud sin enviarla) y **Reintentar** (el turno trabado del asistente). Más abajo, el historial de solicitudes con
   ticket, participantes, estado, transcripción y enlace directo al Issue (o **Reintentar** si quedó pendiente de
   envío).
+- **Módulos propuestos** (gerente → administrador): un gerente crea una sala nueva desde el portal (nombre y
+  descripción); queda abierta, marcada **Propuesto**, sin repositorio, y el asistente la entrevista con el contexto de los
+  repositorios existentes. **Terminar** guarda la especificación en ops (sin Issue), junto con el `CONTEXT.md` y los ADR
+  de la sala. El administrador ve la sala en **Módulos propuestos** y la **activa** así: (1) crea a mano el repositorio
+  en GitHub; (2) invita a `datasheq-creator` con acceso de escritura y acepta la invitación; (3) pega el enlace del
+  repositorio (o `dueno/repo`) en **Activar** y pulsa el botón; (4) ops verifica el repositorio (token de
+  `datasheq-creator`, escritura, Issues activados; si falla, muestra el error en línea y la sala sigue propuesta),
+  guarda el repositorio, pasa la sala a **activo** y publica cada especificación guardada como un Issue, la más antigua
+  primero, con las etiquetas `gerencia`, `spec`, el nombre de la sala, `ready-for-human` y `modulo-nuevo`; (5) en el
+  repositorio, ejecuta `/to-tickets` sobre esos Issues de especificación. Se rechaza (409) con una conversación abierta
+  con mensajes o si el repositorio ya es el de otra sala. El panel muestra el Issue y su estado de cada
+  especificación y **Reintentar** si alguno falló. Desde ahí la sala es una sala normal: los requerimientos nuevos usan el
+  repositorio y el `CONTEXT.md` y los ADR dejan de actualizarse.
 - **Seguimiento de requerimientos**: el estado de cada Issue se trae de GitHub (Issues con la etiqueta `gerencia`)
   como máximo cada 10 minutos, al abrir el panel o el portal; el botón **Actualizar** del panel fuerza la consulta
   (como máximo una vez por minuto). Estados: **Pendiente de envío**, **Abierto**, **En curso** (tiene persona

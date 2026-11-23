@@ -3,7 +3,9 @@
 import type Database from "better-sqlite3";
 import { ErrorModulo, type DatosModulo, crearModulo, editarModulo, fijarRepo, moduloPorClave, exigirSinConversacion } from "./catalogo";
 import { ErrorGithub, type OpcionesPeticion, peticion, verificarCuenta } from "./githubApi";
-import type { Modulo } from "./modulos";
+import { enviarIssue } from "./envio";
+import { type Modulo, codigoTicket } from "./modulos";
+import { type Solicitud, solicitud } from "./salas";
 import { type ConfigCuenta, paraRepo } from "./seguimiento";
 
 type DB = Database.Database;
@@ -86,4 +88,69 @@ export async function guardarSala(
     return { sala: fijarRepo(db, sala.clave, objetivo, null), error_repo: e.message };
   }
   return { sala: fijarRepo(db, sala.clave, objetivo, new Date().toISOString()) };
+}
+
+export interface ResultadoActivacion {
+  sala: Modulo;
+  /** Causa por la que el repositorio no se verificó: la sala sigue propuesta. */
+  error_repo?: string;
+  /** Una por especificación guardada, de la más antigua a la más nueva (vacío si no se activó). */
+  envios: { id: string; ticket: string; titulo: string; ok: boolean; error?: string; issue_url: string | null; issue_estado: "open" | "closed" | null }[];
+}
+
+export const MSG_REPO_EN_USO = "Ese repositorio ya es el de otra sala";
+export const MSG_NO_PROPUESTA = "La sala no es un módulo propuesto";
+
+/**
+ * Activa un módulo propuesto con el repositorio que el administrador creó a mano: lo normaliza y verifica (como en el
+ * editor de salas), lo guarda, pasa la sala a «activo» y envía por el envío normal cada especificación guardada, la
+ * más antigua primero. Sin repositorio verificado la sala sigue propuesta (`error_repo`). 409 con una conversación
+ * abierta con mensajes o con un repositorio que ya es de otra sala. Lo que no se pudo enviar queda con su error para
+ * «Reintentar» (o el reintento automático).
+ */
+export async function activarModulo(
+  db: DB,
+  cuenta: ConfigCuenta | null,
+  clave: string,
+  repoTexto: string | null | undefined,
+  op: OpcionesPeticion & { ahora?: () => Date } = {},
+): Promise<ResultadoActivacion> {
+  const previo = moduloPorClave(db, clave);
+  if (!previo) throw new ErrorModulo(404, "Sala no encontrada");
+  if (previo.estado_modulo !== "propuesto") throw new ErrorModulo(409, MSG_NO_PROPUESTA);
+  const repo = normalizarRepo(repoTexto);
+  if (!repo) throw new ErrorModulo(400, "Pega el repositorio: https://github.com/dueno/repo o dueno/repo");
+  exigirSinConversacion(db, clave);
+  const enUso = db.prepare("SELECT 1 FROM chat_modulos WHERE repo = ? COLLATE NOCASE AND clave <> ?").get(repo, clave);
+  if (enUso) throw new ErrorModulo(409, MSG_REPO_EN_USO);
+  try {
+    await verificarRepo(cuenta, repo, op);
+  } catch (e) {
+    if (!(e instanceof ErrorRepo)) throw e;
+    return { sala: previo, error_repo: e.message, envios: [] };
+  }
+  // durante la verificación pudo cambiar todo: se vuelve a comprobar y se activa de una vez
+  const sala = db.transaction(() => {
+    const m = moduloPorClave(db, clave);
+    if (!m || m.estado_modulo !== "propuesto") throw new ErrorModulo(409, MSG_NO_PROPUESTA);
+    exigirSinConversacion(db, clave);
+    if (db.prepare("SELECT 1 FROM chat_modulos WHERE repo = ? COLLATE NOCASE AND clave <> ?").get(repo, clave)) throw new ErrorModulo(409, MSG_REPO_EN_USO);
+    db.prepare("UPDATE chat_modulos SET repo = ?, repo_verificado_en = ?, estado_modulo = 'activo', actualizado_en = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE clave = ?").run(
+      repo,
+      (op.ahora?.() ?? new Date()).toISOString(),
+      clave,
+    );
+    db.prepare("UPDATE chat_solicitudes SET modulo_nuevo = 1, issue_error = NULL WHERE sala = ? AND estado = 'terminada' AND spec IS NOT NULL AND issue_numero IS NULL").run(clave);
+    return moduloPorClave(db, clave) as Modulo;
+  })();
+  const pendientes = db
+    .prepare("SELECT id FROM chat_solicitudes WHERE sala = ? AND estado = 'terminada' AND spec IS NOT NULL AND issue_numero IS NULL ORDER BY ticket")
+    .all(clave) as { id: string }[];
+  const envios: ResultadoActivacion["envios"] = [];
+  for (const { id } of pendientes) {
+    const r = await enviarIssue(db, id, cuenta, op);
+    const s = solicitud(db, id) as Solicitud;
+    envios.push({ id, ticket: codigoTicket(s.ticket), titulo: s.titulo ?? "", ok: r.ok, ...(r.error ? { error: r.error } : {}), issue_url: s.issue_url, issue_estado: s.issue_estado });
+  }
+  return { sala, envios };
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { Archive, ArrowLeft, Download, FileArchive, FileText, Lightbulb, MessageSquareOff, Pencil, Rocket } from "lucide-react";
+import { Archive, ArrowLeft, Download, ExternalLink, FileArchive, FileText, Lightbulb, MessageSquareOff, Pencil, RefreshCw, Rocket } from "lucide-react";
 import { useState } from "react";
 import type { ResumenPropuesto } from "@/lib/chat/propuestos";
 import type { Modulo } from "@/lib/chat/modulos";
+import type { ResultadoActivacion } from "@/lib/chat/repos";
 import type { Mensaje, Participante } from "@/lib/chat/salas";
 import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, fechaHora, useAccion, useDatos } from "./comun";
@@ -89,9 +90,118 @@ function Plegable({ titulo, children, abierto }: { titulo: React.ReactNode; chil
   );
 }
 
+type Envio = ResultadoActivacion["envios"][number];
+
+/** Resultado de la activación: cada especificación enviada, con su Issue y su estado, y «Reintentar» si falló. */
+function Activado({ nombre, envios: inicial, volver }: { nombre: string; envios: Envio[]; volver: () => void }) {
+  const [envios, setEnvios] = useState(inicial);
+  const { ocupado, aviso, ejecutar } = useAccion();
+  const reintentar = (e: Envio) =>
+    ejecutar(e.id, async () => {
+      try {
+        const r = await api<{ issue_url: string | null; issue_estado: Envio["issue_estado"] }>(`/api/admin/chat/${e.id}/issue`, { method: "POST" });
+        setEnvios((x) => x.map((y) => (y.id === e.id ? { ...y, ok: true, error: undefined, issue_url: r.issue_url, issue_estado: r.issue_estado } : y)));
+        return `${e.ticket} enviado`;
+      } catch (err) {
+        setEnvios((x) => x.map((y) => (y.id === e.id ? { ...y, error: (err as Error).message } : y)));
+        throw err;
+      }
+    });
+  return (
+    <div className="space-y-5" data-activado>
+      <Aviso aviso={aviso} />
+      <div className="tarjeta space-y-3 p-5">
+        <h2 className="text-xl font-semibold text-tinta">
+          {nombre} <span className="chip bg-ok-fondo align-middle text-ok-tinta">Activo</span>
+        </h2>
+        <p className="text-sm text-tinta-2">
+          La sala ya es un módulo normal. {envios.length ? "Estas son sus especificaciones publicadas en el repositorio:" : "No tenía especificaciones guardadas."}
+        </p>
+        <ul className="space-y-2">
+          {envios.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-center gap-2 text-sm" data-envio={e.ticket}>
+              <span className="font-semibold tabular-nums text-tinta">{e.ticket}</span>
+              <span className="text-tinta-2">{e.titulo}</span>
+              {e.issue_url ? (
+                <>
+                  <a href={e.issue_url} target="_blank" rel="noreferrer" className="boton-texto">
+                    <ExternalLink size={13} aria-hidden /> Issue
+                  </a>
+                  <span className="chip bg-indigo-suave text-indigo-tinta">{e.issue_estado === "closed" ? "Cerrado" : "Abierto"}</span>
+                </>
+              ) : (
+                <>
+                  <span className="chip bg-error-fondo text-error-tinta">No enviado</span>
+                  {e.error && <span className="text-xs text-tinta-3">{e.error}</span>}
+                  <button type="button" onClick={() => reintentar(e)} disabled={ocupado === e.id} className="boton-suave" data-reintentar={e.ticket}>
+                    <RefreshCw size={13} aria-hidden /> Reintentar
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+        <button type="button" onClick={volver} className="boton-texto">
+          <ArrowLeft size={15} aria-hidden /> Módulos propuestos
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Activar({ clave, nombre, bloqueado, alActivar }: { clave: string; nombre: string; bloqueado: boolean; alActivar: (envios: Envio[]) => void }) {
+  const [repo, setRepo] = useState("");
+  const [errorRepo, setErrorRepo] = useState<string | null>(null);
+  const { ocupado, aviso, ejecutar } = useAccion();
+  return (
+    <form
+      data-activar
+      className="ml-auto w-full space-y-2 border-t border-linea pt-3"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        setErrorRepo(null);
+        void ejecutar("activar", async () => {
+          const r = await api<ResultadoActivacion>(`/api/admin/chat/propuestos/${clave}/activar`, { method: "POST", json: { repo } });
+          if (r.error_repo) return void setErrorRepo(r.error_repo);
+          alActivar(r.envios);
+        });
+      }}
+    >
+      <Aviso aviso={aviso} />
+      <label htmlFor="activar-repo" className="text-sm font-semibold text-tinta">
+        <Rocket size={13} className="mr-1 inline" aria-hidden /> Activar «{nombre}»
+      </label>
+      <p className="text-xs text-tinta-3">
+        Crea el repositorio a mano, invita a datasheq-creator (con acceso de escritura) y acepta la invitación; luego pega aquí el enlace.
+      </p>
+      <div className="flex flex-wrap items-start gap-2">
+        <input
+          id="activar-repo"
+          value={repo}
+          onChange={(e) => setRepo(e.target.value)}
+          placeholder="https://github.com/dueno/repo o dueno/repo"
+          className="campo min-w-64 flex-1 text-sm"
+          required
+        />
+        <button type="submit" disabled={ocupado === "activar" || bloqueado || !repo.trim()} className="boton-primario" data-activar-enviar>
+          {ocupado === "activar" ? "Activando…" : "Activar"}
+        </button>
+      </div>
+      {bloqueado && <p className="text-xs text-tinta-3">Cierra la conversación abierta antes de activar.</p>}
+      {errorRepo && (
+        <p role="alert" className="text-sm text-error-tinta" data-error-repo>
+          {errorRepo}
+        </p>
+      )}
+    </form>
+  );
+}
+
 function DetallePropuesto({ clave, volver, irASalas }: { clave: string; volver: () => void; irASalas: () => void }) {
   const { datos, error, cargando, recargar } = useDatos<Detalle>(`/api/admin/chat/propuestos/${clave}`);
   const { ocupado, aviso, ejecutar } = useAccion();
+  const [activado, setActivado] = useState<Envio[] | null>(null);
+  if (activado) return <Activado nombre={datos?.modulo.nombre ?? clave} envios={activado} volver={volver} />;
   if (!datos) return <Cargando cargando={cargando} error={error} />;
   const { modulo: m } = datos;
   return (
@@ -153,11 +263,8 @@ function DetallePropuesto({ clave, volver, irASalas }: { clave: string; volver: 
           >
             <Archive size={13} aria-hidden /> Archivar
           </button>
-          {/* Espacio reservado para «Activar» (siguiente ticket: pegar el repositorio y publicar las especificaciones) */}
-          <div data-slot-activar className="ml-auto flex items-center gap-2 text-xs text-tinta-3">
-            <Rocket size={13} aria-hidden /> «Activar» llegará pronto
-          </div>
         </div>
+        <Activar clave={clave} nombre={m.nombre} bloqueado={datos.abierta} alActivar={setActivado} />
       </div>
 
       <section className="space-y-3">

@@ -38,8 +38,8 @@ import {
 } from "../lib/chat/asistente";
 import { markdownAHtml } from "../lib/markdown";
 import { detallePropuesto, documentosPropuesto, listarPropuestos, zipPropuesto } from "../lib/chat/propuestos";
-import { guardarSala, normalizarRepo } from "../lib/chat/repos";
-import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, proponerModulo, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
+import { MSG_REPO_EN_USO, activarModulo, guardarSala, normalizarRepo } from "../lib/chat/repos";
+import { ErrorModulo, MSG_CONVERSACION_ABIERTA, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, proponerModulo, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
 import { type Modulo, codigoTicket, salaAbierta as salaAbiertaDe, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
@@ -1952,6 +1952,102 @@ async function main() {
     const pa = a.peticiones[a.peticiones.length - 1];
     assert.equal(pa.repo, "dueno/repo");
     assert.deepEqual([pa.kind, pa.contextRepos, pa.module], [undefined, undefined, undefined]);
+  });
+  await prueba("activar (#50): verificación fallida o 409 dejan la sala propuesta; con dos especificaciones crea dos Issues en orden con «modulo-nuevo», sin duplicar", async () => {
+    const d = dbControl();
+    proponerModulo(d, { nombre: "C-Activa", descripcion: "A" }, "ana@datasheq.com");
+    const s0 = terminada(d, "c-activa", ana);
+    manejar = () => ({ status: 404 });
+    const r = await activarModulo(d, cfgFalso, "c-activa", "https://github.com/dueno/activa", sinEspera);
+    assert.match(r.error_repo ?? "", /datasheq-creator no es colaborador/);
+    assert.deepEqual(r.envios, []);
+    const m = moduloPorClave(d, "c-activa")!;
+    assert.deepEqual([m.estado_modulo, m.repo, m.repo_verificado_en], ["propuesto", null, null]);
+    assert.equal(solicitud(d, s0)!.issue_numero, null);
+    manejar = () => repoFalso({ push: false });
+    assert.match((await activarModulo(d, cfgFalso, "c-activa", "dueno/activa", sinEspera)).error_repo ?? "", /acceso de escritura/);
+    assert.match((await activarModulo(d, null, "c-activa", "dueno/activa", sinEspera)).error_repo ?? "", /GITHUB_TOKEN/);
+    // repo vacío: 400; sala activa o inexistente: 409 / 404
+    await assert.rejects(activarModulo(d, cfgFalso, "c-activa", " ", sinEspera), (e: ErrorModulo) => e.status === 400);
+    await assert.rejects(activarModulo(d, cfgFalso, "c-legal", "dueno/activa", sinEspera), (e: ErrorModulo) => e.status === 409);
+    await assert.rejects(activarModulo(d, cfgFalso, "c-nada", "dueno/activa", sinEspera), (e: ErrorModulo) => e.status === 404);
+    // repo de otra sala (c-legal usa dueno/repo)
+    manejar = () => repoFalso();
+    await assert.rejects(activarModulo(d, cfgFalso, "c-activa", "https://github.com/Dueno/Repo", sinEspera), (e: ErrorModulo) => e.status === 409 && e.message === MSG_REPO_EN_USO);
+    // conversación abierta con mensajes
+    enviarMensaje(d, "c-activa", ana, "otra cosa", mas(1));
+    await assert.rejects(activarModulo(d, cfgFalso, "c-activa", "dueno/activa", sinEspera), (e: ErrorModulo) => e.status === 409 && e.message === MSG_CONVERSACION_ABIERTA);
+    assert.equal(moduloPorClave(d, "c-activa")!.estado_modulo, "propuesto");
+    cerrarConversacion(d, "c-activa", mas(2));
+    // con dos especificaciones: crea dos Issues en orden con «modulo-nuevo», sin duplicar; la sala pasa a ser normal
+    olvidarEtiquetas();
+    const s1 = s0;
+    const s2 = terminada(d, "c-activa", beto);
+    const orden = [solicitud(d, s1)!.ticket, solicitud(d, s2)!.ticket];
+    assert.ok(orden[0] < orden[1]);
+    const creados: { title: string; labels: string[] }[] = [];
+    let n = 100;
+    manejar = (req, url, cuerpo) => {
+      if (url.pathname === "/repos/dueno/activa") return repoFalso();
+      if (url.pathname.endsWith("/labels")) return { status: 201 };
+      if (req.method === "POST" && url.pathname === "/repos/dueno/activa/issues") {
+        creados.push(JSON.parse(cuerpo));
+        return { status: 201, json: { number: ++n, html_url: `https://github.example/dueno/activa/issues/${n}` } };
+      }
+      return { status: 200, json: [] };
+    };
+    const act = await activarModulo(d, cfgFalso, "c-activa", "https://github.com/dueno/activa.git", sinEspera);
+    assert.equal(act.error_repo, undefined);
+    assert.deepEqual([act.sala.estado_modulo, act.sala.repo, !!act.sala.repo_verificado_en], ["activo", "dueno/activa", true]);
+    assert.deepEqual(creados.map((c) => c.title.split(" ")[0]), orden.map((t) => `[${codigoTicket(t)}][C-Activa]`));
+    for (const c of creados) assert.deepEqual(c.labels, ["C-Activa", "gerencia", "spec", "ready-for-human", "modulo-nuevo"]);
+    assert.deepEqual(act.envios.map((e) => [e.ok, e.issue_url?.endsWith(`/${101 + act.envios.indexOf(e)}`), e.issue_estado]), [[true, true, "open"], [true, true, "open"]]);
+    // volver a correr no duplica: la sala ya no es propuesta y los envíos ya tienen Issue
+    await assert.rejects(activarModulo(d, cfgFalso, "c-activa", "dueno/activa", sinEspera), (e: ErrorModulo) => e.status === 409);
+    assert.equal((await enviarIssue(d, s1, cfgFalso, sinEspera)).ok, true);
+    assert.equal(await procesarPendientes(d, cfgFalso, sinEspera), 0);
+    assert.equal(creados.length, 2);
+    assert.equal(repoDe(d, "c-activa"), "dueno/activa");
+    assert.ok(!listarPropuestos(d).some((x) => x.clave === "c-activa"));
+    // una solicitud nueva ya no lleva «modulo-nuevo»
+    const s3 = terminada(d, "c-activa", ana);
+    assert.equal((await enviarIssue(d, s3, cfgFalso, sinEspera)).ok, true);
+    assert.ok(!creados[2].labels.includes("modulo-nuevo"));
+  });
+  await prueba("activar (#50): un envío que falla queda con su error y se reenvía sin duplicar; tras activar, el asiento recibe el repo y no kind", async () => {
+    const d = dbControl();
+    olvidarEtiquetas();
+    proponerModulo(d, { nombre: "C-Fallo", descripcion: "F" }, "ana@datasheq.com");
+    const s1 = terminada(d, "c-fallo", ana);
+    const s2 = terminada(d, "c-fallo", ana);
+    let falla = true;
+    let creados = 0;
+    manejar = (req, url) => {
+      if (url.pathname === "/repos/dueno/fallo") return repoFalso();
+      if (url.pathname.endsWith("/labels")) return { status: 201 };
+      if (req.method === "POST" && url.pathname.endsWith("/issues")) return falla && creados === 1 ? { status: 422, json: { message: "no" } } : (creados++, { status: 201, json: { number: 200 + creados, html_url: `https://github.example/dueno/fallo/issues/${200 + creados}` } });
+      return { status: 200, json: [] };
+    };
+    const r = await activarModulo(d, cfgFalso, "c-fallo", "dueno/fallo", sinEspera);
+    assert.deepEqual(r.envios.map((e) => e.ok), [true, false]);
+    assert.match(r.envios[1].error ?? "", /422/);
+    assert.equal(moduloPorClave(d, "c-fallo")!.estado_modulo, "activo");
+    falla = false;
+    assert.equal((await enviarIssue(d, s2, cfgFalso, sinEspera)).ok, true); // «Reintentar»
+    assert.equal(creados, 2);
+    assert.ok(solicitud(d, s1)!.issue_numero && solicitud(d, s2)!.issue_numero);
+    // la sala se comporta como activa: turno normal con repo y sin kind
+    const a = asientoGuion();
+    const { solicitud: sn } = enviarMensaje(d, "c-fallo", ana, "hola", mas(3));
+    await dispararTurno(d, sn.id, a.cliente);
+    const p = a.peticiones[a.peticiones.length - 1];
+    assert.equal(p.repo, "dueno/fallo");
+    assert.deepEqual([p.kind, p.contextRepos, p.module], [undefined, undefined, undefined]);
+    // «contexto» y «adrs» ya no se tocan al cerrar
+    d.prepare("UPDATE chat_modulos SET contexto = 'previo' WHERE clave = 'c-fallo'").run();
+    d.prepare("UPDATE chat_solicitudes SET estado = 'terminada', terminado = 1 WHERE id = ?").run(sn.id);
+    await correrCierre(d, sn.id, a.cliente, null, { ...sinEspera, ahora: () => mas(4) });
+    assert.equal((d.prepare("SELECT contexto FROM chat_modulos WHERE clave = 'c-fallo'").get() as { contexto: string }).contexto, "previo");
   });
   await prueba("«Mis requerimientos» (#33): lista las solicitudes en que la persona escribió, con su estado", async () => {
     const d = dbControl();
