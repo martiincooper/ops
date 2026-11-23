@@ -3,7 +3,7 @@ import { requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { manejar } from "@/lib/http";
 import { configGithub, githubConfigurado } from "@/lib/chat/github";
-import { CUENTA_DATASHEQ } from "@/lib/chat/githubApi";
+import { CUENTA_DATASHEQ, saludToken } from "@/lib/chat/githubApi";
 import { codigoTicket } from "@/lib/chat/modulos";
 import { listarModulos, todosLosModulos } from "@/lib/chat/catalogo";
 import { estadoSalas } from "@/lib/chat/salas";
@@ -52,6 +52,7 @@ export const GET = manejar(async (req) => {
     seguimiento,
     config: {
       github: githubConfigurado(),
+      token: await saludToken(configGithub()),
       cuenta: configGithub()?.cuenta ?? (process.env.GITHUB_CUENTA || CUENTA_DATASHEQ),
       reintentos_max: MAX_REINTENTOS,
     },

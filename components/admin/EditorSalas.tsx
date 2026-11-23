@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, Pencil, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, MessageSquareOff, Pencil, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { slugSala } from "@/lib/chat/catalogo";
 import type { Autonomia, Modulo } from "@/lib/chat/modulos";
@@ -16,10 +16,11 @@ interface Borrador {
   descripcion: string;
   color: string;
   orden: string;
+  repo: string;
   autonomia: Autonomia;
 }
 
-const NUEVA: Borrador = { clave: null, nombre: "", area: "", descripcion: "", color: "#5b4fd6", orden: "", autonomia: "revisar" };
+const NUEVA: Borrador = { clave: null, nombre: "", area: "", descripcion: "", color: "#5b4fd6", orden: "", repo: "", autonomia: "revisar" };
 
 const deSala = (s: EstadoSala | Modulo): Borrador => ({
   clave: s.clave,
@@ -28,6 +29,7 @@ const deSala = (s: EstadoSala | Modulo): Borrador => ({
   descripcion: s.descripcion,
   color: `#${s.color}`,
   orden: String(s.orden),
+  repo: s.repo ?? "",
   autonomia: ("autonomia" in s && s.autonomia) || "revisar",
 });
 
@@ -43,6 +45,7 @@ export default function EditorSalas({
 }) {
   const { ocupado, aviso, ejecutar } = useAccion();
   const [b, setB] = useState<Borrador | null>(null);
+  const [errorRepo, setErrorRepo] = useState<string | null>(null);
   const poner = (c: Partial<Borrador>) => setB((x) => (x ? { ...x, ...c } : x));
 
   const guardar = async () => {
@@ -53,16 +56,35 @@ export default function EditorSalas({
       descripcion: b.descripcion,
       color: b.color,
       autonomia: b.autonomia,
+      repo: b.repo.trim(),
       ...(b.orden.trim() !== "" ? { orden: Number(b.orden) } : {}),
     };
+    setErrorRepo(null);
+    let fallo: string | null = null;
     const ok = await ejecutar("guardar", async () => {
-      if (b.clave) await api(`/api/admin/chat/salas/${b.clave}`, { method: "PATCH", json: cuerpo });
-      else await api("/api/admin/chat/salas", { method: "POST", json: cuerpo });
+      const r = b.clave
+        ? await api<{ error_repo?: string }>(`/api/admin/chat/salas/${b.clave}`, { method: "PATCH", json: cuerpo })
+        : await api<{ error_repo?: string }>("/api/admin/chat/salas", { method: "POST", json: cuerpo });
       await recargar();
-      return b.clave ? `Sala «${b.nombre.trim()}» guardada` : `Sala «${b.nombre.trim()}» creada`;
+      fallo = r.error_repo ?? null;
+      const nombre = b.nombre.trim();
+      if (fallo) return `Sala «${nombre}» guardada, pero sin verificar: sigue gris`;
+      return b.clave ? `Sala «${nombre}» guardada` : `Sala «${nombre}» creada`;
     });
-    if (ok) setB(null);
+    if (!ok) return;
+    if (fallo) {
+      // la sala ya existe: el editor sigue abierto sobre ella para corregir el repositorio
+      setErrorRepo(fallo);
+      setB((x) => (x && !x.clave ? { ...x, clave: slugSala(x.nombre) } : x));
+    } else setB(null);
   };
+
+  const cerrarConversacion = (clave: string, nombre: string) =>
+    ejecutar(clave, async () => {
+      await api(`/api/admin/chat/salas/${clave}/cerrar`, { method: "POST" });
+      await recargar();
+      return `Conversación de «${nombre}» cerrada sin enviar`;
+    });
 
   const archivar = (clave: string, nombre: string, archivar: boolean) =>
     ejecutar(clave, async () => {
@@ -115,6 +137,28 @@ export default function EditorSalas({
             Orden
             <input className="campo" type="number" min={0} max={9999} value={b.orden} placeholder="Al final" onChange={(e) => poner({ orden: e.target.value })} />
           </label>
+          <label className="etiqueta sm:col-span-2">
+            Repositorio de GitHub
+            <input
+              className="campo"
+              value={b.repo}
+              placeholder="https://github.com/dueno/repo o dueno/repo"
+              aria-invalid={!!errorRepo}
+              aria-describedby="error-repo"
+              onChange={(e) => {
+                poner({ repo: e.target.value });
+                setErrorRepo(null);
+              }}
+            />
+            <span className="mt-1 block text-xs font-normal text-tinta-3">
+              Se verifica al guardar con datasheq-creator (escritura e Issues activados). Sin repositorio verificado la sala queda gris.
+            </span>
+            {errorRepo && (
+              <span id="error-repo" role="alert" data-error-repo className="mt-1 block text-sm font-medium text-alerta-tinta">
+                {errorRepo}
+              </span>
+            )}
+          </label>
           <label className="etiqueta">
             Autonomía
             <select className="campo" value={b.autonomia} onChange={(e) => poner({ autonomia: e.target.value as Autonomia })}>
@@ -146,11 +190,19 @@ export default function EditorSalas({
                 <p className="font-semibold text-tinta">
                   {s.nombre} <span className="font-normal text-tinta-3">· {s.clave} · orden {s.orden}</span>
                 </p>
+                <p className="truncate text-xs text-tinta-3" data-repo>
+                  {s.repo ? `${s.repo} · ${s.disponible ? "verificado" : "sin verificar (gris)"}` : "Sin repositorio (gris)"}
+                </p>
                 <p className="truncate text-xs text-tinta-3">{s.area || "Sin área"} · autonomía {s.autonomia === "automatico" ? "automático" : "revisar"}</p>
               </div>
               <button type="button" onClick={() => setB(deSala(s))} className="boton-suave" aria-label={`Editar ${s.nombre}`}>
                 <Pencil size={13} aria-hidden /> Editar
               </button>
+              {s.abierta && (
+                <button type="button" disabled={ocupado === s.clave} onClick={() => cerrarConversacion(s.clave, s.nombre)} className="boton-texto" aria-label={`Cerrar conversación de ${s.nombre}`}>
+                  <MessageSquareOff size={13} aria-hidden /> Cerrar conversación
+                </button>
+              )}
               <button type="button" disabled={ocupado === s.clave} onClick={() => archivar(s.clave, s.nombre, true)} className="boton-texto" aria-label={`Archivar ${s.nombre}`}>
                 <Archive size={13} aria-hidden /> Archivar
               </button>

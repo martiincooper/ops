@@ -113,9 +113,31 @@ export function editarModulo(db: DB, clave: string, d: Partial<DatosModulo>): Mo
   return moduloPorClave(db, clave) as Modulo;
 }
 
-/** Archiva (true) o restaura (false) una sala; su historial se conserva. */
+export const MSG_CONVERSACION_ABIERTA =
+  "La sala tiene una conversación abierta con mensajes: ciérrala con «Cerrar conversación» antes de cambiar el repositorio o archivarla";
+
+/** Rechaza (409) mientras la sala tenga una solicitud abierta con mensajes. */
+export function exigirSinConversacion(db: DB, clave: string): void {
+  const f = db
+    .prepare("SELECT 1 FROM chat_solicitudes s WHERE s.sala = ? AND s.estado = 'abierta' AND EXISTS (SELECT 1 FROM chat_mensajes m WHERE m.solicitud_id = s.id)")
+    .get(clave);
+  if (f) throw new ErrorModulo(409, MSG_CONVERSACION_ABIERTA);
+}
+
+/** Fija el repositorio (dueño/repo o null) y cuándo se verificó (null: sin verificar, la sala queda gris). */
+export function fijarRepo(db: DB, clave: string, repo: string | null, verificadoEn: string | null): Modulo {
+  db.prepare("UPDATE chat_modulos SET repo = ?, repo_verificado_en = ?, actualizado_en = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE clave = ?").run(
+    repo,
+    repo ? verificadoEn : null,
+    clave,
+  );
+  return moduloPorClave(db, clave) as Modulo;
+}
+
+/** Archiva (true) o restaura (false) una sala; su historial se conserva. Archivar se rechaza con una conversación abierta. */
 export function archivarModulo(db: DB, clave: string, archivar: boolean): Modulo {
   if (!moduloPorClave(db, clave)) throw new ErrorModulo(404, "Sala no encontrada");
+  if (archivar) exigirSinConversacion(db, clave);
   db.prepare("UPDATE chat_modulos SET archivado = ?, actualizado_en = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE clave = ?").run(archivar ? 1 : 0, clave);
   return moduloPorClave(db, clave) as Modulo;
 }

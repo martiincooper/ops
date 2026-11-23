@@ -10,12 +10,23 @@ export const esquemaDatosSala = z.object({
   color: z.string().optional(),
   orden: z.number().optional(),
   autonomia: z.enum(["revisar", "automatico"]).optional(),
+  /** URL de GitHub o dueño/repo; "" o null: sin repositorio. */
+  repo: z.string().nullable().optional(),
 });
 
 /** Convierte los errores del catálogo de salas en errores HTTP. */
 export function enModulo<T>(fn: () => T): T {
   try {
     return fn();
+  } catch (e) {
+    if (e instanceof ErrorModulo) throw new HttpError(e.status, e.message);
+    throw e;
+  }
+}
+
+export async function enModuloAsync<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
   } catch (e) {
     if (e instanceof ErrorModulo) throw new HttpError(e.status, e.message);
     throw e;

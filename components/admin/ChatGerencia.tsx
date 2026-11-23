@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Bot, ChevronDown, Clock, ExternalLink, MessagesSquare, RefreshCw, ScrollText } from "lucide-react";
+import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Clock, ExternalLink, MessagesSquare, RefreshCw, ScrollText } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { ChipEstadoIssue, IconoModulo } from "@/components/gerencia/comun";
 import type { Modulo } from "@/lib/chat/modulos";
@@ -40,6 +40,7 @@ interface Datos {
   seguimiento: EstadoSincronizacion;
   config: {
     github: boolean;
+    token: { ok: boolean; login?: string; motivo?: string };
     cuenta: string;
     reintentos_max: number;
   };
@@ -125,6 +126,15 @@ export default function ChatGerencia() {
             requerimientos se guardan y se envían con «Reintentar».
           </p>
         </div>
+      )}
+
+      {datos.config.github && (
+        <p data-salud-github className={cx("flex items-center gap-2 text-sm", datos.config.token.ok ? "text-ok-tinta" : "text-alerta-tinta")}>
+          {datos.config.token.ok ? <CheckCircle2 size={16} aria-hidden /> : <AlertTriangle size={16} aria-hidden />}
+          {datos.config.token.ok
+            ? `GitHub: el token es válido y pertenece a ${datos.config.token.login}`
+            : `GitHub: ${datos.config.token.motivo ?? "el token no se pudo verificar"}`}
+        </p>
       )}
 
       <EditorSalas salas={datos.salas} archivadas={datos.archivadas} recargar={recargar} />

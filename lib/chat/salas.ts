@@ -103,6 +103,11 @@ export function solicitudAbierta(db: DB, sala: string): Solicitud | undefined {
   return db.prepare("SELECT * FROM chat_solicitudes WHERE sala = ? AND estado = 'abierta'").get(sala) as Solicitud | undefined;
 }
 
+/** Cierra la solicitud abierta de la sala sin enviarla (desbloquea cambiar el repositorio o archivar). false: no había. */
+export function cerrarConversacion(db: DB, sala: string, ahora = new Date()): boolean {
+  return db.prepare("UPDATE chat_solicitudes SET estado = 'cerrada', terminada_en = ? WHERE sala = ? AND estado = 'abierta'").run(iso(ahora), sala).changes > 0;
+}
+
 export function participantes(db: DB, solicitudId: string): Participante[] {
   return db
     .prepare("SELECT email, nombre FROM chat_participantes WHERE solicitud_id = ? ORDER BY desde, email")
