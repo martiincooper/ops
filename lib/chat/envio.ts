@@ -40,6 +40,7 @@ function datosDelIssue(db: DB, id: string): DatosIssue {
     titulo: s.titulo,
     spec: s.spec,
     solicitantes: participantes(db, id),
+    moduloNuevo: !!s.modulo_nuevo,
     fotos: mensajes(db, id).flatMap((m) => m.adjuntos.map((a) => ({ nombre: a.nombre, url: enlaceFoto(a.id) }))),
   };
 }

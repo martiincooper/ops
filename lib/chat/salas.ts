@@ -75,6 +75,8 @@ export interface Solicitud {
   issue_actualizado_en: string | null;
   issue_intentos: number;
   issue_proximo_intento: string | null;
+  /** Guardada mientras la sala era un módulo propuesto (el Issue lleva «modulo-nuevo»). */
+  modulo_nuevo: 0 | 1;
 }
 
 export interface Mensaje {

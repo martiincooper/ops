@@ -222,6 +222,11 @@ export const MIGRACIONES_CONTROL: string[] = [
   ALTER TABLE chat_modulos ADD COLUMN docs_reintento_en TEXT;
   ALTER TABLE chat_modulos ADD COLUMN docs_intentos INTEGER NOT NULL DEFAULT 0;
   `,
+  // v12 — activar un módulo propuesto: las solicitudes guardadas mientras la sala era propuesta llevan la etiqueta
+  //       «modulo-nuevo» al publicarse como Issue.
+  `
+  ALTER TABLE chat_solicitudes ADD COLUMN modulo_nuevo INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

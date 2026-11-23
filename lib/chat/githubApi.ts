@@ -13,6 +13,9 @@ export const ETIQUETA_REVISION = "ready-for-human";
 /** Etiqueta de los Issues que son una especificación completa (no un ticket suelto). */
 export const ETIQUETA_SPEC = "spec";
 
+/** Etiqueta extra de los Issues que salen de las especificaciones guardadas en una sala propuesta al activarse. */
+export const ETIQUETA_MODULO_NUEVO = "modulo-nuevo";
+
 /**
  * GITHUB_TOKEN (de la cuenta de DataSHEQ), GITHUB_CUENTA (su login, por defecto datasheq-creator) y GITHUB_API_URL
  * (GitHub Enterprise o pruebas). El repositorio de cada módulo se elige al enviar (./repos).
@@ -181,6 +184,8 @@ export interface DatosIssue {
   fotos: { nombre: string; url: string }[];
   /** Quienes escribieron en la solicitud. */
   solicitantes: { nombre: string; email: string }[];
+  /** Guardada mientras la sala era un módulo propuesto: lleva además la etiqueta «modulo-nuevo». */
+  moduloNuevo?: boolean;
 }
 
 /** Título del Issue: empieza con el ticket, que es lo que se busca para no duplicarlo. */
@@ -229,6 +234,7 @@ export async function crearIssueEn(
     [ETIQUETA_SPEC, "1d76db", "Especificación completa lista para revisar"],
     [ETIQUETA_REVISION, "0e8a16", "Listo para que una persona lo revise"],
   ];
+  if (d.moduloNuevo) etiquetas.push([ETIQUETA_MODULO_NUEVO, "fbca04", "Especificación de un módulo propuesto, publicada al activarlo"]);
   for (const [nombre, color, descripcion] of etiquetas) await asegurarEtiqueta(cfg, nombre, color, descripcion, op);
   const res = await peticion(
     cfg,

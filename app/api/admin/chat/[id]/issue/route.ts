@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { solicitud } from "@/lib/chat/salas";
 import { publicarIssue, requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { HttpError, manejar } from "@/lib/http";
@@ -11,5 +12,6 @@ export const POST = manejar<Ctx>(async (req, { params }) => {
   const { id } = await params;
   const r = await publicarIssue(getDbControl(), id);
   if (!r.ok) throw new HttpError(502, r.error ?? "No se pudo crear el Issue");
-  return NextResponse.json({ ok: true });
+  const s = solicitud(getDbControl(), id);
+  return NextResponse.json({ ok: true, issue_url: s?.issue_url ?? null, issue_estado: s?.issue_estado ?? null });
 });
