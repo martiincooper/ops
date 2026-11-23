@@ -207,6 +207,21 @@ export const MIGRACIONES_CONTROL: string[] = [
   ALTER TABLE chat_solicitudes ADD COLUMN cierre_error TEXT;
   ALTER TABLE chat_solicitudes ADD COLUMN cierre_proximo_intento TEXT;
   `,
+  // v11 — módulos propuestos: una sala nueva que crean los gerentes y está abierta sin repositorio. estado_modulo
+  //       (las salas existentes quedan «activo»), quién la creó (null: la creó el administrador), el CONTEXT.md vivo
+  //       de la sala y sus ADR (JSON [{ archivo, titulo, contenido }]), y los campos de la activación posterior
+  //       (repositorio de documentos, su número, error, próximo reintento e intentos).
+  `
+  ALTER TABLE chat_modulos ADD COLUMN estado_modulo TEXT NOT NULL DEFAULT 'activo' CHECK (estado_modulo IN ('propuesto', 'activo'));
+  ALTER TABLE chat_modulos ADD COLUMN creado_por TEXT;
+  ALTER TABLE chat_modulos ADD COLUMN contexto TEXT NOT NULL DEFAULT '';
+  ALTER TABLE chat_modulos ADD COLUMN adrs TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE chat_modulos ADD COLUMN docs_url TEXT;
+  ALTER TABLE chat_modulos ADD COLUMN docs_numero INTEGER;
+  ALTER TABLE chat_modulos ADD COLUMN docs_error TEXT;
+  ALTER TABLE chat_modulos ADD COLUMN docs_reintento_en TEXT;
+  ALTER TABLE chat_modulos ADD COLUMN docs_intentos INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

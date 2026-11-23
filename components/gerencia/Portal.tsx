@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Clock, Lock, MessagesSquare } from "lucide-react";
+import { ArrowRight, Clock, Lock, MessagesSquare, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { EstadoSala } from "@/lib/chat/salas";
@@ -34,6 +34,24 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
     return () => clearInterval(t);
   }, [cargar]);
 
+  const [form, setForm] = useState<{ nombre: string; descripcion: string } | null>(null);
+  const [creando, setCreando] = useState(false);
+  const [errorForm, setErrorForm] = useState<string | null>(null);
+
+  const crear = async () => {
+    if (!form) return;
+    setCreando(true);
+    setErrorForm(null);
+    try {
+      const r = await api<{ sala: EstadoSala }>("/api/chat/salas", { method: "POST", json: form });
+      await cargar();
+      window.location.href = `/gerencia/${r.sala.clave}`;
+    } catch (e) {
+      setErrorForm((e as Error).message);
+      setCreando(false);
+    }
+  };
+
   const primerNombre = nombre.trim().split(/\s+/)[0];
 
   return (
@@ -58,6 +76,48 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
       )}
       {error && <p className="mb-5 rounded-2xl bg-error-fondo px-4 py-3 text-sm text-error-tinta">{error}</p>}
 
+      <div className="mb-5">
+        {!form ? (
+          <button type="button" data-nuevo-modulo onClick={() => setForm({ nombre: "", descripcion: "" })} className="boton">
+            <Plus size={16} aria-hidden /> Nuevo módulo
+          </button>
+        ) : (
+          <form
+            data-form-modulo
+            className="tarjeta grid gap-3 p-4 sm:grid-cols-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              crear();
+            }}
+          >
+            <div className="flex items-center justify-between sm:col-span-2">
+              <h2 className="font-semibold text-tinta">Nuevo módulo</h2>
+              <button type="button" onClick={() => setForm(null)} className="boton-texto" aria-label="Cancelar">
+                <X size={15} aria-hidden /> Cancelar
+              </button>
+            </div>
+            <label className="etiqueta">
+              Nombre (p. ej. C-Compras)
+              <input className="campo" value={form.nombre} maxLength={60} required onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
+            </label>
+            <label className="etiqueta">
+              Descripción en una línea
+              <input className="campo" value={form.descripcion} maxLength={500} required onChange={(e) => setForm({ ...form, descripcion: e.target.value })} />
+            </label>
+            {errorForm && (
+              <p role="alert" data-error-modulo className="text-sm font-medium text-alerta-tinta sm:col-span-2">
+                {errorForm}
+              </p>
+            )}
+            <div className="sm:col-span-2">
+              <button type="submit" disabled={creando} className="boton">
+                Crear sala
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
       {!salas && !error && <p className="mb-5 text-sm text-tinta-3">Cargando las salas…</p>}
       {salas && !salas.length && (
         <p className="mb-5 rounded-2xl bg-suave px-4 py-3 text-sm text-tinta-3">
@@ -74,6 +134,8 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
                 <span className="chip bg-suave text-tinta-2">
                   <Clock size={13} aria-hidden /> Próximamente
                 </span>
+              ) : s.estado_modulo === "propuesto" ? (
+                <span className="chip bg-pastel-azul text-indigo-tinta">Propuesto</span>
               ) : (
                 s.abierta && (
                   <span className="chip bg-indigo-suave text-indigo-tinta">

@@ -20,7 +20,7 @@ import {
   nombreSeguro,
 } from "./adjuntos";
 import { listarModulos, moduloPorClave } from "./catalogo";
-import { type Autonomia, salaAbierta } from "./modulos";
+import { type Autonomia, type EstadoModulo, salaAbierta } from "./modulos";
 
 type DB = Database.Database;
 
@@ -301,6 +301,10 @@ export interface EstadoSala {
   orden: number;
   /** La sala se puede abrir (repositorio verificado); si no, el portal la muestra gris, «Próximamente». */
   disponible: boolean;
+  /** propuesto: sala creada por gerentes, sin repositorio; activo: sala normal. */
+  estado_modulo: EstadoModulo;
+  /** Quién la creó (solo administradores; null: el administrador). */
+  creado_por?: string | null;
   /** Hay una solicitud abierta en la sala. */
   abierta: boolean;
   /** Mensajes de la solicitud abierta. */
@@ -333,10 +337,12 @@ export function estadoSalas(db: DB, conDetalle = false): EstadoSala[] {
       color: m.color,
       orden: m.orden,
       disponible: salaAbierta(m),
+      estado_modulo: m.estado_modulo,
       abierta: !!f,
       mensajes: f?.n ?? 0,
       ...(conDetalle
         ? {
+            creado_por: m.creado_por,
             repo: m.repo,
             autonomia: m.autonomia,
             asistente: (() => {

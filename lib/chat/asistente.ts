@@ -218,6 +218,7 @@ export async function correrTurnos(db: DB, id: string, asiento: ClienteAsiento |
   for (;;) {
     const s = solicitud(db, id);
     if (!s || s.estado !== "abierta" || enCurso.has(id)) return hechos;
+    if (moduloPorClave(db, s.sala)?.estado_modulo === "propuesto") return hechos; // aún sin asistente: solo guarda mensajes
     if (s.asistente_estado === "esperando_reintento" && !op.forzar && (s.asistente_proximo_intento ?? "") > iso(ahora())) return hechos;
     if (s.asistente_estado === "idle" && !hayPendientes(db, s)) return hechos;
     enCurso.add(id);

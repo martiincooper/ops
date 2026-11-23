@@ -1300,6 +1300,40 @@ async function main() {
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal/archivo", { metodo: "POST", json: { archivar: true } })).status, 200);
   });
 
+  await prueba("módulos propuestos (#47): un gerente crea «C-Prueba»; otro lo ve «Propuesto» y ambos escriben sin que el asistente responda", async () => {
+    const crear = (c, json) => c.pedir("/api/chat/salas", { metodo: "POST", json });
+    const r = await crear(gGerente, { nombre: "C-Prueba", descripcion: "Módulo de prueba" });
+    assert.equal(r.status, 201, JSON.stringify(r.datos));
+    assert.deepEqual([r.datos.sala.clave, r.datos.sala.estado_modulo, r.datos.sala.disponible, r.datos.sala.area], ["c-prueba", "propuesto", true, ""]);
+    const vista = (await gEquipo.pedir("/api/chat/salas")).datos.salas.find((x) => x.clave === "c-prueba");
+    assert.deepEqual([vista.estado_modulo, vista.disponible, vista.color], ["propuesto", true, "5b4fd6"]);
+    assert.equal((await escribir(gGerente, "c-prueba", "Necesitamos compras")).status, 200);
+    assert.equal((await escribir(gEquipo, "c-prueba", "Y también aprobaciones")).status, 200);
+    await new Promise((res) => setTimeout(res, 1500));
+    const v = (await gGerente.pedir("/api/chat/salas/c-prueba")).datos;
+    assert.deepEqual(v.mensajes.map((m) => m.rol), ["gerente", "gerente"]); // ningún turno del asistente
+    assert.equal(v.asistente, "idle");
+    // el panel muestra el estado y el creador; editar y archivar siguen funcionando
+    const panel = (await gAdmin.pedir("/api/admin/chat")).datos.salas.find((x) => x.clave === "c-prueba");
+    assert.deepEqual([panel.estado_modulo, panel.creado_por], ["propuesto", "portal.gerente@datasheq.com"]);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba", { metodo: "PATCH", json: { area: "Compras" } })).status, 200);
+    // gerentes no editan salas
+    assert.equal((await gGerente.pedir("/api/admin/chat/salas/c-prueba", { metodo: "PATCH", json: { nombre: "X" } })).status, 403);
+  });
+  await prueba("módulos propuestos (#47): nombre repetido (activa o archivada) da 409; equipo 403; sala sin repositorio sigue gris", async () => {
+    const crear = (c, json) => c.pedir("/api/chat/salas", { metodo: "POST", json });
+    const dup = await crear(gEquipo, { nombre: "c prueba", descripcion: "otra" });
+    assert.deepEqual([dup.status, dup.datos.error], [409, "Ya existe una sala con ese nombre"]);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba/cerrar", { metodo: "POST" })).status, 200); // la conversación abierta bloquea archivar
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba/archivo", { metodo: "POST", json: { archivar: true } })).status, 200);
+    assert.equal((await crear(gGerente, { nombre: "C-Prueba", descripcion: "otra" })).status, 409); // archivada también cuenta
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-prueba/archivo", { metodo: "POST", json: { archivar: false } })).status, 200);
+    assert.equal((await crear(gTeam, { nombre: "C-Otra", descripcion: "x" })).status, 403);
+    assert.equal((await crear(gGerente, { nombre: "", descripcion: "x" })).status, 400);
+    const grises = (await gGerente.pedir("/api/chat/salas")).datos.salas.filter((x) => x.estado_modulo === "activo" && !x.repo && !x.disponible);
+    assert.ok(grises.length > 0);
+  });
+
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);
   process.exitCode = fallos ? 1 : 0;
 }
