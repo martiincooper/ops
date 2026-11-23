@@ -509,6 +509,7 @@ producción.
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token de la cuenta de DataSHEQ con permiso «Issues: write» sobre los repositorios de los módulos |
 | `INTERVIEW_URL`, `INTERVIEW_TOKEN` | — (el asistente no responde; los mensajes se guardan y se reintenta) | URL y token (bearer) del asiento de entrevista de implement-all-cloud |
+| `PORTAL_URL` | — (los enlaces a fotos del Issue quedan relativos) | Dirección pública de ops, sin barra final; los Issues enlazan las fotos con ella |
 | `GITHUB_CUENTA` | `datasheq-creator` | Cuenta de GitHub de DataSHEQ: se rechazan los envíos con un token de otra cuenta |
 | `GITHUB_API_URL` | `https://api.github.com` | API de GitHub (GitHub Enterprise o un GitHub simulado en pruebas) |
 

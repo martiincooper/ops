@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Bot, ImagePlus, LoaderCircle, SendHorizontal, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ImagePlus, LoaderCircle, SendHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui";
@@ -24,6 +24,8 @@ interface Solicitud {
   ticket: number;
   estado: "abierta" | "terminada" | "cerrada";
   iniciada_en: string;
+  envio?: "enviando" | "enviado" | null;
+  envio_error?: string | null;
 }
 
 interface Vista {
@@ -31,6 +33,8 @@ interface Vista {
   mensajes: Mensaje[];
   ultimo_id: number;
   asistente: "idle" | "pensando" | "esperando_reintento" | null;
+  resumen: string | null;
+  botones: boolean;
 }
 
 const FOTOS_MAX = 6;
@@ -60,6 +64,9 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asistente, setAsistente] = useState<Vista["asistente"]>(null);
+  const [resumen, setResumen] = useState<string | null>(null);
+  const [botones, setBotones] = useState(false);
+  const [pulsando, setPulsando] = useState(false);
   const ultimoId = useRef(0);
   const entrada = useRef<HTMLTextAreaElement>(null);
   const alFinal = useRef(true);
@@ -70,6 +77,8 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
   const aplicar = useCallback((v: Vista, reemplazar: boolean) => {
     setSolicitudes(v.solicitudes);
     setAsistente(v.asistente);
+    setResumen(v.resumen);
+    setBotones(v.botones);
     setMensajes((actuales) => (reemplazar ? v.mensajes : unir(actuales, v.mensajes)));
     ultimoId.current = Math.max(ultimoId.current, v.ultimo_id);
   }, []);
@@ -138,6 +147,23 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
       return f.filter((_, j) => j !== i);
     });
 
+  /** «Terminar» / «Se me olvidó algo»: si otra persona pulsó antes (409), muestra lo que pasó y toma el estado actual. */
+  const pulsar = async (accion: "terminar" | "olvide") => {
+    if (pulsando) return;
+    setPulsando(true);
+    setError(null);
+    try {
+      aplicar((await api<{ vista: Vista }>(`/api/chat/salas/${modulo.clave}/${accion}`, { method: "POST" })).vista, false);
+    } catch (e) {
+      const err = e as ErrorApi;
+      setError(err.message);
+      const vista = err.datos?.vista as Vista | undefined;
+      if (vista) aplicar(vista, false);
+    } finally {
+      setPulsando(false);
+    }
+  };
+
   const enviar = useCallback(async () => {
     const t = texto.trim();
     if ((!t && !fotos.length) || enviando) return;
@@ -154,6 +180,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
       setFotos([]);
       alFinal.current = true;
       setAsistente((a) => (a === "esperando_reintento" ? a : "pensando"));
+      setBotones(false);
       setMensajes((actuales) => unir(actuales, [r.mensaje]));
       setSolicitudes((s) => (s.some((x) => x.id === r.solicitud.id) ? s : [...s, { ...r.solicitud, iniciada_en: r.mensaje.creado_en }]));
     } catch (e) {
@@ -263,6 +290,20 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
                       </div>
                     </div>
                   )}
+                  {s?.estado === "terminada" && (!mensajes[i + 1] || mensajes[i + 1].solicitud_id !== m.solicitud_id) && (
+                    <p className="flex flex-col items-center gap-1 pt-1" data-testid="envio" data-envio={s.envio ?? ""}>
+                      {s.envio === "enviado" ? (
+                        <span className="chip bg-ok-fondo text-ok-tinta">
+                          <Check size={14} aria-hidden /> Guardado y enviado a revisión ✓
+                        </span>
+                      ) : (
+                        <span role="status" className="chip bg-suave text-tinta-2">
+                          <LoaderCircle size={14} className="animate-spin" aria-hidden /> enviando…
+                        </span>
+                      )}
+                      {s.envio !== "enviado" && s.envio_error && <span className="text-xs text-tinta-3">{s.envio_error}</span>}
+                    </p>
+                  )}
                 </li>
               );
             })}
@@ -273,6 +314,23 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
           <p role="status" data-testid="asistente-pensando" className="mt-2 flex items-center gap-2 px-2 text-sm text-tinta-3">
             <LoaderCircle size={16} className="animate-spin" aria-hidden /> El asistente está pensando…
           </p>
+        )}
+
+        {!cargando && resumen !== null && (
+          <section className="tarjeta mt-4 space-y-3 p-4" aria-labelledby="resumen-titulo" data-testid="resumen">
+            <h2 id="resumen-titulo" className="font-semibold text-tinta">Esto es lo que entendí</h2>
+            <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-tinta-2" data-testid="resumen-texto">{resumen}</p>
+            {botones && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => pulsar("terminar")} disabled={pulsando} className="boton" data-testid="terminar">
+                  Terminar
+                </button>
+                <button type="button" onClick={() => pulsar("olvide")} disabled={pulsando} className="boton-suave" data-testid="olvide">
+                  Se me olvidó algo
+                </button>
+              </div>
+            )}
+          </section>
         )}
 
         <div className="sticky bottom-0 -mx-3 mt-4 bg-fondo/90 px-3 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 backdrop-blur sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0">

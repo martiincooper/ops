@@ -47,4 +47,4 @@ for _ in $(seq 1 60); do
 done
 curl -sf "http://127.0.0.1:$PUERTO/api/health" >/dev/null || { echo "El servidor no respondió en el puerto $PUERTO"; cat "$REGISTRO"; exit 1; }
 
-DATA_DIR="$DATOS" ASIENTO="$ASIENTO_FALSO" BASE="http://127.0.0.1:$PUERTO" ADMIN_EMAIL="$ADMIN" node scripts/e2e.mjs || { echo "--- registro del servidor"; tail -50 "$REGISTRO"; exit 1; }
+DATA_DIR="$DATOS" ASIENTO="$ASIENTO_FALSO" GITHUB_FALSO="$GITHUB_FALSO" BASE="http://127.0.0.1:$PUERTO" ADMIN_EMAIL="$ADMIN" node scripts/e2e.mjs || { echo "--- registro del servidor"; tail -50 "$REGISTRO"; exit 1; }

@@ -2,7 +2,7 @@
 // GET /api/interview/health, POST /api/interview/turn y POST /api/interview/close, con `Authorization: Bearer <token>`.
 // Guion: hace dos preguntas y, en el tercer turno, informa `done` con un resumen. Al cerrar devuelve un título y una
 // especificación fijos. Un turno con una foto la menciona (así se comprueba que viajó en base64).
-// Control para las pruebas (sin token): POST /control {"falla": 503|0, "demora": ms} · GET /control (turnos recibidos).
+// Control para las pruebas (sin token): POST /control {"falla": 503|0, "fallaCierre": 503|0, "demora": ms} · GET /control (turnos recibidos).
 // Uso: INTERVIEW_TOKEN=... node scripts/asiento-falso.mjs [archivo-del-puerto]
 import fs from "node:fs";
 import http from "node:http";
@@ -10,6 +10,8 @@ import http from "node:http";
 const TOKEN = process.env.INTERVIEW_TOKEN ?? "token-asiento";
 let falla = 0;
 let demora = 0;
+let fallaCierre = 0;
+const cierres = [];
 const turnos = [];
 
 function turno(json, responder) {
@@ -33,8 +35,9 @@ const servidor = http.createServer((req, res) => {
       if (req.method === "POST") {
         falla = Number(json.falla) || 0;
         demora = Number(json.demora) || 0;
+        fallaCierre = Number(json.fallaCierre) || 0;
       }
-      return responder(200, { falla, demora, turnos });
+      return responder(200, { falla, demora, fallaCierre, turnos, cierres });
     }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return responder(401, { error: "token inválido" });
     if (pathname === "/api/interview/health") return responder(200, { ok: true });
@@ -42,7 +45,11 @@ const servidor = http.createServer((req, res) => {
       if (falla) return responder(falla, { error: "falla simulada" });
       return setTimeout(() => turno(json, responder), demora);
     }
-    if (pathname === "/api/interview/close" && req.method === "POST") return responder(200, { title: "Requerimiento de prueba", spec: "# Especificación de prueba" });
+    if (pathname === "/api/interview/close" && req.method === "POST") {
+      cierres.push({ requestId: json.requestId, session: json.session, mensajes: json.messages.length, fotos: json.messages.reduce((n, m) => n + m.photos.length, 0) });
+      if (fallaCierre) return responder(fallaCierre, { error: "falla simulada" });
+      return responder(200, { session: json.session, title: "Requerimiento de prueba", spec: "## Decisiones del negocio\n\nEspecificación de prueba" });
+    }
     responder(404, { error: "no existe" });
   });
 });

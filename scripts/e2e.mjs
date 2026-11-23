@@ -1124,6 +1124,7 @@ async function main() {
     assert.equal((await vista(gEquipo)).asistente, "pensando");
     const v = await respuestas(gEquipo, 1);
     assert.equal(v.asistente, "idle");
+    assert.deepEqual([v.resumen, v.botones], [null, false]); // aún pregunta: ni resumen ni botones
     const resp = v.mensajes.findLast((m) => m.rol === "asistente");
     assert.deepEqual([resp.texto, resp.autor_nombre, resp.solicitud_id === v.solicitudes.at(-1).id], ["¿Qué necesitan resolver exactamente?", "Asistente", true]);
     assert.deepEqual((await vista(gGerente)).mensajes.map((m) => m.id), v.mensajes.map((m) => m.id)); // la ven todos
@@ -1175,6 +1176,65 @@ async function main() {
     assert.equal(fin.mensajes.at(-1).rol, "asistente");
     assert.equal(fin.mensajes.at(-1).texto, "Entendido todo. Este es el resumen."); // 3.ª respuesta: el asistente da por terminada la entrevista
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-lidera/reintentar-turno", { metodo: "POST" })).status, 409);
+  });
+  await prueba("Terminar (#33): resumen y botones para todos; «Se me olvidó algo» reabre; dos pulsaciones: una gana, la otra 409; el Issue sale con la spec", async () => {
+    const GITHUB = process.env.GITHUB_FALSO;
+    assert.ok(GITHUB, "falta GITHUB_FALSO (URL del GitHub simulado)");
+    const esperar = async (fn, que) => {
+      for (let i = 0; i < 80; i++) {
+        const r = await fn();
+        if (r) return r;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      assert.fail(`no ocurrió: ${que}`);
+    };
+    const vista = async (c) => (await c.pedir("/api/chat/salas/c-lidera")).datos;
+    // el asistente ya terminó la entrevista de la prueba anterior: todos ven el resumen y los botones
+    for (const c of [gGerente, gEquipo, gAdmin]) {
+      const v = await vista(c);
+      assert.deepEqual([v.resumen, v.botones], ["Resumen de prueba del requerimiento.", true]);
+    }
+    const solicitud = (await vista(gGerente)).solicitudes.at(-1);
+    // sin permiso o sin sala
+    assert.equal((await gTeam.pedir("/api/chat/salas/c-lidera/terminar", { metodo: "POST" })).status, 403);
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-nada/terminar", { metodo: "POST" })).status, 404);
+    // «Se me olvidó algo»: oculta los botones y el siguiente mensaje corre un turno en la misma solicitud
+    const olvido = await gEquipo.pedir("/api/chat/salas/c-lidera/olvide", { metodo: "POST" });
+    assert.equal(olvido.status, 200);
+    assert.deepEqual([olvido.datos.vista.botones, olvido.datos.vista.resumen], [false, null]);
+    const turnos = (await (await fetch(`${process.env.ASIENTO}/control`)).json()).turnos.length;
+    assert.equal((await escribir(gGerente, "c-lidera", "Se me olvidó decir que es para el área de minas")).status, 200);
+    const v2 = await esperar(async () => ((await vista(gGerente)).asistente === "idle" && (await vista(gGerente)).resumen ? vista(gGerente) : null), "otro turno con resumen");
+    assert.equal(v2.solicitudes.at(-1).id, solicitud.id);
+    assert.equal((await (await fetch(`${process.env.ASIENTO}/control`)).json()).turnos.length, turnos + 1);
+    // dos pulsaciones a la vez: una gana
+    const [a, b] = await Promise.all([gGerente.pedir("/api/chat/salas/c-lidera/terminar", { metodo: "POST" }), gEquipo.pedir("/api/chat/salas/c-lidera/terminar", { metodo: "POST" })]);
+    assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+    const perdedor = a.status === 409 ? a : b;
+    assert.match(perdedor.datos.error, /ya se está enviando|ya se guardó/);
+    assert.ok(perdedor.datos.vista, "el 409 trae el estado actual");
+    // «Se me olvidó algo» después de terminar también es 409
+    assert.equal((await gEquipo.pedir("/api/chat/salas/c-lidera/olvide", { metodo: "POST" })).status, 409);
+    // el Issue se crea una sola vez, con el título, el cuerpo y las cuatro etiquetas
+    const issue = await esperar(async () => (await (await fetch(`${GITHUB}/control/issues`)).json()).find((i) => i.repo === "prueba/c-lidera"), "Issue creado");
+    assert.equal(issue.title, `[GER-${String(solicitud.ticket).padStart(4, "0")}][C-Lidera] Requerimiento de prueba`);
+    assert.deepEqual([...issue.labels].sort(), ["C-Lidera", "gerencia", "ready-for-human", "spec"]);
+    assert.match(issue.body, /^## Decisiones del negocio\n\nEspecificación de prueba\n\n## Fotos\n\n- \[hoy\.jpg\]\(.*\/api\/chat\/adjuntos\/\d+\)\n\n---\nEnviado desde el portal gerencial por .*Gonzalo Gerente/);
+    assert.equal((await (await fetch(`${GITHUB}/control/issues`)).json()).filter((i) => i.repo === "prueba/c-lidera").length, 1);
+    assert.equal((await (await fetch(`${process.env.ASIENTO}/control`)).json()).cierres.length >= 1, true);
+    // marcador para todos; el siguiente mensaje abre otra solicitud
+    for (const c of [gGerente, gEquipo]) {
+      const v = await esperar(async () => ((await vista(c)).solicitudes.find((x) => x.id === solicitud.id).envio === "enviado" ? vista(c) : null), "marcador de enviado");
+      assert.deepEqual([v.botones, v.resumen], [false, null]);
+    }
+    const nueva = await escribir(gEquipo, "c-lidera", "Otro tema distinto");
+    assert.equal(nueva.status, 200);
+    assert.deepEqual([nueva.datos.nueva, nueva.datos.solicitud.id === solicitud.id], [true, false]);
+    // «Mis requerimientos» lista la solicitud para quienes escribieron en ella
+    for (const c of [gGerente, gEquipo]) {
+      const mia = (await c.pedir("/api/chat/mis-requerimientos")).datos.requerimientos.find((r) => r.id === solicitud.id);
+      assert.deepEqual([mia.sala, mia.titulo, mia.estado], ["c-lidera", "Requerimiento de prueba", "abierto"]);
+    }
   });
   await prueba("sin bloqueo de sala: cerrar sesión no cambia nada y las rutas del flujo anterior ya no existen", async () => {
     const salida = new Cliente("salida");
