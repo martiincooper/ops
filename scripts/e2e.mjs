@@ -873,9 +873,9 @@ async function main() {
 
   // ── Portal gerencial (/gerencia): entrevista por árbol de decisión, sin GITHUB_TOKEN (Issues pendientes)
   console.log("Portal gerencial");
-  const DENEGADO = "Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com";
+  const DENEGADO = "El portal gerencial es solo para gerencia de Datasheq";
   const OCUPADA = "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde";
-  let gAdmin, gGerente, gEquipo, convLegal;
+  let gAdmin, gGerente, gEquipo, gTeam, gExecA, convLegal;
   const turnoChat = (c, id, accion, texto) =>
     c.pedir(`/api/chat/conversaciones/${id}/${accion === "generar" || accion === "latido" || accion === "finalizar" ? accion : "mensaje"}`, {
       metodo: "POST",
@@ -887,22 +887,34 @@ async function main() {
     assert.equal(r.status, 307);
     assert.match(r.headers.get("location"), /\/login\?portal=gerencia$/);
   });
-  await prueba("cuentas @datasheq.com del portal: administrador, gerencia y equipo", async () => {
+  await prueba("cuentas del portal: administrador, dos gerentes de Datasheq, equipo y gerente de otra empresa", async () => {
     const r = await admin.pedir("/api/admin/administradores", { metodo: "POST", json: { email: "portal.admin@datasheq.com", nombre: "Paula Admin" } });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
     gAdmin = await primerIngreso("portal.admin@datasheq.com", "730518");
     gGerente = (await cuenta(admin, D, "portal.gerente@datasheq.com", "Gonzalo Gerente", "executive", "640291")).cliente;
-    gEquipo = (await cuenta(admin, D, "portal.equipo@datasheq.com", "Elena Equipo", "team", "518306")).cliente;
+    gEquipo = (await cuenta(admin, D, "portal.equipo@datasheq.com", "Elena Equipo", "executive", "518306")).cliente;
+    gTeam = (await cuenta(admin, D, "portal.team@datasheq.com", "Tomás Team", "team", "362915")).cliente;
+    gExecA = (await cuenta(admin, A, "gerente@aether-tech.dev", "Gabriela Aether", "executive", "483726")).cliente;
   });
-  await prueba("otro dominio: acceso denegado en la página, la API y el panel del portal", async () => {
-    const p = await admin.pedir("/gerencia"); // administrador @aether-tech.dev
-    assert.equal(p.status, 200);
-    assert.ok(Buffer.from(p.datos).toString("utf8").includes(DENEGADO));
-    for (const [ruta, metodo] of [["/api/chat/salas", "GET"], ["/api/chat/salas/c-legal", "POST"], ["/api/admin/chat", "GET"]]) {
-      const r = await admin.pedir(ruta, { metodo });
-      assert.equal(r.status, 403, ruta);
-      assert.equal(r.datos.error, DENEGADO, ruta);
+  await prueba("acceso (#27): gerente de otra empresa y equipo de Datasheq denegados; administrador de otro dominio entra", async () => {
+    for (const c of [gExecA, gTeam]) {
+      const p = await c.pedir("/gerencia");
+      assert.equal(p.status, 200);
+      assert.ok(Buffer.from(p.datos).toString("utf8").includes(DENEGADO));
+      for (const [ruta, metodo] of [["/api/chat/salas", "GET"], ["/api/chat/salas/c-legal", "POST"], ["/api/chat/mis-requerimientos", "GET"]]) {
+        const r = await c.pedir(ruta, { metodo });
+        assert.equal(r.status, 403, ruta);
+        assert.equal(r.datos.error, DENEGADO, ruta);
+      }
     }
+    // administrador @aether-tech.dev: portal y panel del portal
+    const p = await admin.pedir("/gerencia");
+    assert.equal(p.status, 200);
+    assert.ok(!Buffer.from(p.datos).toString("utf8").includes(DENEGADO));
+    assert.equal((await admin.pedir("/api/chat/salas")).status, 200);
+    assert.equal((await admin.pedir("/api/admin/chat")).status, 200);
+    // gerente de Datasheq: portal sí, panel no
+    assert.equal((await gGerente.pedir("/api/chat/salas")).status, 200);
   });
   await prueba("solo las salas con repositorio (C-Legal, C-Previene, C-Lidera); las demás ocultas y sin acceso", async () => {
     const s = await gGerente.pedir("/api/chat/salas");
@@ -1005,7 +1017,7 @@ async function main() {
     assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera", { metodo: "POST" })).datos.turnos, 30); // el rechazado no se guardó
     assert.equal((await turnoChat(gAdmin, id, "finalizar")).status, 200);
   });
-  await prueba("panel del portal: solo administradores @datasheq.com; liberar sala y reintentar Issue", async () => {
+  await prueba("panel del portal: solo administradores (cualquier dominio); liberar sala y reintentar Issue", async () => {
     const r = await gAdmin.pedir("/api/admin/chat");
     assert.equal(r.status, 200);
     const gen = r.datos.historial.find((f) => f.ticket === "GER-0001");
@@ -1016,7 +1028,7 @@ async function main() {
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-previene", { metodo: "DELETE" })).status, 200);
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-previene", { metodo: "DELETE" })).status, 404);
     for (const [ruta, metodo] of [[`/api/admin/chat/${gen.id}`, "GET"], [`/api/admin/chat/${gen.id}/issue`, "POST"], ["/api/admin/chat/salas/c-legal", "DELETE"]]) {
-      assert.equal((await admin.pedir(ruta, { metodo })).status, 403, ruta); // administrador @aether-tech.dev
+      for (const c of [gEquipo, gTeam, gExecA]) assert.equal((await c.pedir(ruta, { metodo })).status, 403, ruta);
     }
   });
   await prueba("seguimiento (#6): «Mis requerimientos» muestra solo los propios; estado en el panel", async () => {
@@ -1028,12 +1040,12 @@ async function main() {
     );
     assert.deepEqual(mios.datos.seguimiento, { sincronizado_en: null, error: null });
     assert.deepEqual((await gEquipo.pedir("/api/chat/mis-requerimientos")).datos.requerimientos, []); // no ve los ajenos
-    assert.equal((await admin.pedir("/api/chat/mis-requerimientos")).status, 403); // otro dominio
+    assert.equal((await gExecA.pedir("/api/chat/mis-requerimientos")).status, 403); // otra empresa
     const panel = await gAdmin.pedir("/api/admin/chat?actualizar=1");
     assert.equal(panel.datos.historial.find((f) => f.ticket === "GER-0001").estado_issue, "pendiente");
     assert.equal(panel.datos.historial.find((f) => !f.ticket).estado_issue, null); // conversación sin requerimiento
   });
-  await prueba("equipo @datasheq.com usa el portal sin permisos de administración; /login?portal=admin según rol", async () => {
+  await prueba("gerente de Datasheq usa el portal sin permisos de administración; /login?portal=admin según rol", async () => {
     assert.equal((await gEquipo.pedir("/gerencia")).status, 200);
     assert.equal((await gEquipo.pedir("/api/admin/chat")).status, 403);
     assert.equal((await gEquipo.pedir("/admin")).status, 307);

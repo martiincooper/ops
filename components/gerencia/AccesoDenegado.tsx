@@ -3,7 +3,7 @@ import BotonSalir from "@/components/BotonSalir";
 import Marca from "@/components/Marca";
 import { MENSAJE_ACCESO_DENEGADO } from "@/lib/chat/modulos";
 
-/** Pantalla para cuentas que no son @datasheq.com. */
+/** Pantalla para cuentas que no pueden entrar al portal gerencial. */
 export default function AccesoDenegado({ email }: { email: string }) {
   return (
     <main className="flex min-h-dvh items-center justify-center px-4 py-10">

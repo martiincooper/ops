@@ -8,7 +8,7 @@ const CLASE = "boton-suave bg-superficie";
 
 /**
  * «Acceso Administrador»: un administrador va directo al panel del portal (/admin → Portal gerencial).
- * El resto cierra su sesión y vuelve a ingresar con credenciales de administrador (@datasheq.com); si está en
+ * El resto cierra su sesión y vuelve a ingresar con credenciales de administrador ; si está en
  * una sala, primero confirma, porque al cerrar sesión su conversación termina y la sala queda libre.
  */
 export default function BotonAccesoAdmin({ esAdmin, enSala = false, className }: { esAdmin: boolean; enSala?: boolean; className?: string }) {
