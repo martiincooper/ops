@@ -970,6 +970,47 @@ async function main() {
     assert.equal(r.datos.error, "Vas muy rápido. Espera unos segundos y vuelve a intentar.");
     assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera")).datos.mensajes.length, 30); // el rechazado no se guardó
   });
+  await prueba("fotos (#30): mensaje con texto y fotos, errores específicos y la foto solo para el portal", async () => {
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 2)]);
+    const enviarFotos = (c, texto, fotos) => {
+      const form = new FormData();
+      form.set("texto", texto);
+      for (const [nombre, datos, tipo] of fotos) form.append("fotos", new Blob([datos], { type: tipo }), nombre);
+      return c.pedir("/api/chat/salas/c-previene/mensajes", { metodo: "POST", form });
+    };
+    const fot = (await cuenta(admin, D, "portal.fotos@datasheq.com", "Francisca Fotos", "executive", "270518")).cliente;
+    // tipos y tamaño: por contenido, no por nombre ni tipo declarado
+    let r = await enviarFotos(fot, "texto", [["falsa.png", Buffer.from("%PDF-1.4 no es una imagen"), "image/png"]]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Solo se aceptan fotos JPG, PNG o WEBP («falsa.png»)"]);
+    r = await enviarFotos(fot, "texto", [["grande.jpg", Buffer.concat([jpg, Buffer.alloc(5 * 1024 * 1024)]), "image/jpeg"]]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Cada foto debe pesar como máximo 5 MB («grande.jpg»)"]);
+    r = await enviarFotos(fot, "texto", Array.from({ length: 7 }, (_, i) => [`f${i}.jpg`, jpg, "image/jpeg"]));
+    assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 fotos"]);
+    assert.deepEqual((await fot.pedir("/api/chat/salas/c-previene")).datos.mensajes, []); // nada se guardó
+    // texto y fotos: se guarda y los demás lo ven con sus fotos
+    r = await enviarFotos(fot, "Así se ve la falla", [["falla.jpg", jpg, "image/jpeg"], ["otra.png", png, "image/png"]]);
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.deepEqual(r.datos.mensaje.adjuntos.map((a) => [a.nombre, a.tipo]), [["falla.jpg", "image/jpeg"], ["otra.png", "image/png"]]);
+    // la 6.ª pasa; la 7.ª de la misma solicitud, no
+    r = await enviarFotos(fot, "", Array.from({ length: 4 }, (_, i) => [`g${i}.jpg`, jpg, "image/jpeg"]));
+    assert.equal(r.status, 200, JSON.stringify(r.datos));
+    r = await enviarFotos(fot, "una más", [["h.jpg", jpg, "image/jpeg"]]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 fotos"]);
+    const vistas = (await gEquipo.pedir("/api/chat/salas/c-previene")).datos.mensajes;
+    assert.deepEqual(vistas.map((m) => [m.texto, m.adjuntos.length]), [["Así se ve la falla", 2], ["", 4]]);
+    // la foto: portal (gerente y administrador) sí; sin sesión 401; equipo y otra empresa 403
+    const ruta = `/api/chat/adjuntos/${vistas[0].adjuntos[0].id}`;
+    for (const c of [gEquipo, gAdmin]) {
+      const f = await c.pedir(ruta);
+      assert.equal(f.status, 200);
+      assert.equal(f.headers.get("content-type"), "image/jpeg");
+      assert.ok(Buffer.from(f.datos).equals(jpg));
+    }
+    assert.equal((await anon.pedir(ruta)).status, 401);
+    for (const c of [gTeam, gExecA]) assert.equal((await c.pedir(ruta)).status, 403);
+    assert.equal((await gEquipo.pedir("/api/chat/adjuntos/99999")).status, 404);
+  });
   await prueba("sin bloqueo de sala: cerrar sesión no cambia nada y las rutas del flujo anterior ya no existen", async () => {
     const salida = new Cliente("salida");
     salida.cookie = gEquipo.cookie;

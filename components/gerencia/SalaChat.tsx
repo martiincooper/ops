@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Bot, LoaderCircle, SendHorizontal } from "lucide-react";
+import { ArrowLeft, Bot, ImagePlus, LoaderCircle, SendHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui";
@@ -16,6 +16,7 @@ interface Mensaje {
   rol: "gerente" | "asistente" | "sistema";
   texto: string;
   creado_en: string;
+  adjuntos: { id: number; nombre: string }[];
 }
 
 interface Solicitud {
@@ -30,6 +31,9 @@ interface Vista {
   mensajes: Mensaje[];
   ultimo_id: number;
 }
+
+const FOTOS_MAX = 6;
+const FOTO_MAX_BYTES = 5 * 1024 * 1024;
 
 /** Cada cuánto se consultan los mensajes nuevos (2 a 3 segundos). */
 const REFRESCO_MS = 2500;
@@ -57,6 +61,9 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
   const ultimoId = useRef(0);
   const entrada = useRef<HTMLTextAreaElement>(null);
   const alFinal = useRef(true);
+  const selector = useRef<HTMLInputElement>(null);
+  const [fotos, setFotos] = useState<{ archivo: File; url: string }[]>([]);
+  const [ampliada, setAmpliada] = useState<{ id: number; nombre: string } | null>(null);
 
   const aplicar = useCallback((v: Vista, reemplazar: boolean) => {
     setSolicitudes(v.solicitudes);
@@ -112,14 +119,36 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
     el.style.height = `${el.scrollHeight}px`;
   }, [texto]);
 
+  const agregarFotos = (lista: FileList | null) => {
+    const nuevas = Array.from(lista ?? []);
+    if (selector.current) selector.current.value = "";
+    if (!nuevas.length) return;
+    if (fotos.length + nuevas.length > FOTOS_MAX) return setError(`Una solicitud admite como máximo ${FOTOS_MAX} fotos`);
+    const grande = nuevas.find((f) => f.size > FOTO_MAX_BYTES);
+    if (grande) return setError(`Cada foto debe pesar como máximo 5 MB («${grande.name}»)`);
+    setError(null);
+    setFotos((f) => [...f, ...nuevas.map((archivo) => ({ archivo, url: URL.createObjectURL(archivo) }))]);
+  };
+  const quitarFoto = (i: number) =>
+    setFotos((f) => {
+      URL.revokeObjectURL(f[i].url);
+      return f.filter((_, j) => j !== i);
+    });
+
   const enviar = useCallback(async () => {
     const t = texto.trim();
-    if (!t || enviando) return;
+    if ((!t && !fotos.length) || enviando) return;
     setEnviando(true);
     setError(null);
     setTexto("");
+    const enviadas = fotos;
     try {
-      const r = await api<{ mensaje: Mensaje; solicitud: Solicitud }>(`/api/chat/salas/${modulo.clave}/mensajes`, { method: "POST", json: { texto: t } });
+      const form = new FormData();
+      form.set("texto", t);
+      enviadas.forEach((f) => form.append("fotos", f.archivo));
+      const r = await api<{ mensaje: Mensaje; solicitud: Solicitud }>(`/api/chat/salas/${modulo.clave}/mensajes`, { method: "POST", body: form });
+      enviadas.forEach((f) => URL.revokeObjectURL(f.url));
+      setFotos([]);
       alFinal.current = true;
       setMensajes((actuales) => unir(actuales, [r.mensaje]));
       setSolicitudes((s) => (s.some((x) => x.id === r.solicitud.id) ? s : [...s, { ...r.solicitud, iniciada_en: r.mensaje.creado_en }]));
@@ -130,7 +159,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
       setEnviando(false);
       entrada.current?.focus();
     }
-  }, [texto, enviando, modulo.clave]);
+  }, [texto, fotos, enviando, modulo.clave]);
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -207,6 +236,22 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
                         >
                           <span className="sr-only">{propio ? "Tú" : m.autor_nombre}: </span>
                           {m.texto}
+                          {m.adjuntos?.length > 0 && (
+                            <span className={cx("grid gap-1.5", m.texto && "mt-2", m.adjuntos.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                              {m.adjuntos.map((a) => (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  onClick={() => setAmpliada(a)}
+                                  aria-label={`Ver foto ${a.nombre}`}
+                                  className="block overflow-hidden rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={`/api/chat/adjuntos/${a.id}`} alt={a.nombre} loading="lazy" className="max-h-48 w-full object-cover" />
+                                </button>
+                              ))}
+                            </span>
+                          )}
                           <time dateTime={m.creado_en} className={cx("mt-1 block text-[11px]", propio ? "text-white/70" : "text-tinta-3")}>
                             {horaDe(m.creado_en)}
                           </time>
@@ -226,6 +271,24 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
               {error}
             </p>
           )}
+          {fotos.length > 0 && (
+            <ul className="mb-2 flex flex-wrap gap-2" aria-label="Fotos por enviar">
+              {fotos.map((f, i) => (
+                <li key={f.url} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={f.url} alt={f.archivo.name} className="h-16 w-16 rounded-xl object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => quitarFoto(i)}
+                    aria-label={`Quitar ${f.archivo.name}`}
+                    className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-tinta text-white"
+                  >
+                    <X size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <form
             className="flex items-end gap-2"
             onSubmit={(e) => {
@@ -233,6 +296,27 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
               enviar();
             }}
           >
+            <input
+              ref={selector}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              aria-label="Elegir fotos"
+              data-testid="elegir-fotos"
+              tabIndex={-1}
+              onChange={(e) => agregarFotos(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => selector.current?.click()}
+              disabled={enviando}
+              aria-label="Adjuntar fotos"
+              title="Adjuntar fotos"
+              className="boton-icono h-11 w-11 shrink-0 bg-superficie sm:h-[3.25rem] sm:w-[3.25rem]"
+            >
+              <ImagePlus size={20} />
+            </button>
             <label htmlFor="mensaje" className="sr-only">Tu mensaje</label>
             <textarea
               id="mensaje"
@@ -253,7 +337,7 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
             />
             <button
               type="submit"
-              disabled={enviando || !texto.trim()}
+              disabled={enviando || (!texto.trim() && !fotos.length)}
               aria-label="Enviar"
               title="Enviar"
               className="boton-icono h-11 w-11 shrink-0 bg-indigo text-white hover:bg-indigo-hondo hover:text-white disabled:opacity-50 sm:h-[3.25rem] sm:w-[3.25rem]"
@@ -263,6 +347,35 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
           </form>
         </div>
       </main>
+
+      {ampliada && <Lightbox foto={ampliada} onCerrar={() => setAmpliada(null)} />}
+    </div>
+  );
+}
+
+/** Foto a pantalla completa; se cierra con Escape, con el fondo o con el botón. */
+function Lightbox({ foto, onCerrar }: { foto: { id: number; nombre: string }; onCerrar: () => void }) {
+  const cerrar = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cerrar.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCerrar();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCerrar]);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Foto ${foto.nombre}`}
+      data-testid="lightbox"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-tinta/80 p-4 backdrop-blur-sm"
+      onClick={onCerrar}
+    >
+      <button ref={cerrar} type="button" onClick={onCerrar} aria-label="Cerrar" title="Cerrar" className="boton-icono absolute right-4 top-4 bg-superficie">
+        <X size={18} />
+      </button>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={`/api/chat/adjuntos/${foto.id}`} alt={foto.nombre} className="max-h-full max-w-full rounded-2xl object-contain" onClick={(e) => e.stopPropagation()} />
     </div>
   );
 }

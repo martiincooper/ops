@@ -175,6 +175,23 @@ export const MIGRACIONES_CONTROL: string[] = [
     actualizado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
   );
   `,
+  // v8 — fotos adjuntas a los mensajes de las salas: por mensaje, nombre, tipo, tamaño y ruta (relativa a
+  //      DATA_DIR/adjuntos, p. ej. <solicitud>/1.jpg). n es el correlativo de la foto dentro de la solicitud (máximo 6).
+  `
+  CREATE TABLE chat_adjuntos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mensaje_id INTEGER NOT NULL REFERENCES chat_mensajes(id) ON DELETE CASCADE,
+    solicitud_id TEXT NOT NULL REFERENCES chat_solicitudes(id) ON DELETE CASCADE,
+    n INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    tipo TEXT NOT NULL CHECK (tipo IN ('image/jpeg', 'image/png', 'image/webp')),
+    tamano INTEGER NOT NULL CHECK (tamano > 0),
+    ruta TEXT NOT NULL,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    UNIQUE (solicitud_id, n)
+  );
+  CREATE INDEX idx_chat_adjuntos_mensaje ON chat_adjuntos (mensaje_id);
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [
