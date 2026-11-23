@@ -1477,7 +1477,7 @@ async function main() {
       assert.equal(vistaSala(d, "c-legal").asistente, "idle");
       // El siguiente mensaje manda todo de nuevo, con la sesión; sin mensajes nuevos no hay turno
       enviarMensaje(d, "c-legal", beto, "respuesta", mas(1));
-      await dispararTurno(d, s.id, a.cliente, { ahora: () => mas(1) });
+      await dispararTurno(d, s.id, a.cliente, { ahora: () => mas(1), dataDir: dir });
       assert.deepEqual(a.peticiones[1].messages.map((x) => x.role), ["gerente", "asistente", "gerente"]);
       assert.equal(a.peticiones[1].messages[0].photos.length, 1);
       assert.equal(a.peticiones[1].session, "S1");
