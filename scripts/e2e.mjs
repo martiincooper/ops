@@ -1300,7 +1300,7 @@ async function main() {
     assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal/archivo", { metodo: "POST", json: { archivar: true } })).status, 200);
   });
 
-  await prueba("módulos propuestos (#47): un gerente crea «C-Prueba»; otro lo ve «Propuesto» y ambos escriben sin que el asistente responda", async () => {
+  await prueba("módulos propuestos (#47): un gerente crea «C-Prueba»; otro lo ve «Propuesto» y ambos escriben y el asistente responde", async () => {
     const crear = (c, json) => c.pedir("/api/chat/salas", { metodo: "POST", json });
     const r = await crear(gGerente, { nombre: "C-Prueba", descripcion: "Módulo de prueba" });
     assert.equal(r.status, 201, JSON.stringify(r.datos));
@@ -1309,10 +1309,13 @@ async function main() {
     assert.deepEqual([vista.estado_modulo, vista.disponible, vista.color], ["propuesto", true, "5b4fd6"]);
     assert.equal((await escribir(gGerente, "c-prueba", "Necesitamos compras")).status, 200);
     assert.equal((await escribir(gEquipo, "c-prueba", "Y también aprobaciones")).status, 200);
-    await new Promise((res) => setTimeout(res, 1500));
-    const v = (await gGerente.pedir("/api/chat/salas/c-prueba")).datos;
-    assert.deepEqual(v.mensajes.map((m) => m.rol), ["gerente", "gerente"]); // ningún turno del asistente
-    assert.equal(v.asistente, "idle");
+    let v;
+    for (let i = 0; i < 80; i++) {
+      v = (await gGerente.pedir("/api/chat/salas/c-prueba")).datos;
+      if (v.asistente === "idle" && v.mensajes.some((m) => m.rol === "asistente")) break;
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    assert.ok(v.mensajes.some((m) => m.rol === "asistente")); // #48: el entrevistador responde en la sala propuesta
     // el panel muestra el estado y el creador; editar y archivar siguen funcionando
     const panel = (await gAdmin.pedir("/api/admin/chat")).datos.salas.find((x) => x.clave === "c-prueba");
     assert.deepEqual([panel.estado_modulo, panel.creado_por], ["propuesto", "portal.gerente@datasheq.com"]);
@@ -1332,6 +1335,53 @@ async function main() {
     assert.equal((await crear(gGerente, { nombre: "", descripcion: "x" })).status, 400);
     const grises = (await gGerente.pedir("/api/chat/salas")).datos.salas.filter((x) => x.estado_modulo === "activo" && !x.repo && !x.disponible);
     assert.ok(grises.length > 0);
+  });
+
+  await prueba("módulos propuestos (#48): el asiento recibe kind «propuesta»; Terminar guarda la spec, el contexto y el ADR, sin Issue; marcador y «Mis requerimientos»", async () => {
+    const ctl = async () => (await fetch(`${process.env.ASIENTO}/control`)).json();
+    const esperar = async (fn, que) => {
+      for (let i = 0; i < 100; i++) {
+        const r = await fn();
+        if (r) return r;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      assert.fail(`no ocurrió: ${que}`);
+    };
+    const vista = async (c) => (await c.pedir("/api/chat/salas/c-prueba")).datos;
+    // la conversación anterior se cerró: esta abre otra solicitud y se sigue la entrevista hasta el resumen
+    const textos = ["Compras y aprobaciones", "Lo usan tres personas cada semana", "Eso es todo"];
+    let v;
+    for (const t of textos) {
+      assert.equal((await escribir(gGerente, "c-prueba", t)).status, 200);
+      v = await esperar(async () => {
+        const x = await vista(gGerente);
+        return x.asistente === "idle" && x.mensajes.at(-1).rol === "asistente" ? x : null;
+      }, "respuesta del asistente");
+      if (v.resumen) break;
+    }
+    assert.ok(v.resumen, "el asistente terminó la entrevista");
+    assert.equal(v.botones, true);
+    const turnos = (await ctl()).turnos.filter((t) => t.cuerpo);
+    assert.ok(turnos.length >= 2);
+    const c = turnos.at(-1).cuerpo;
+    assert.equal(c.kind, "propuesta");
+    assert.equal(c.repo, undefined);
+    assert.ok(c.contextRepos.includes("martiincooper/ui-guidelines"));
+    assert.ok(c.module && Array.isArray(c.module.adrs) && Array.isArray(c.module.specs));
+    const issuesAntes = (await (await fetch(`${process.env.GITHUB_FALSO}/control/issues`)).json()).length;
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-prueba/terminar", { metodo: "POST" })).status, 200);
+    const vt = await esperar(async () => {
+      const x = await vista(gEquipo);
+      return x.solicitudes.at(-1).envio === "guardado" ? x : null;
+    }, "marcador «Guardado»");
+    assert.equal(vt.solicitudes.at(-1).envio_error, null);
+    const cierre = (await ctl()).cierres.at(-1);
+    assert.equal(cierre.kind, "propuesta");
+    assert.equal((await (await fetch(`${process.env.GITHUB_FALSO}/control/issues`)).json()).length, issuesAntes); // ningún Issue
+    const mis = (await gGerente.pedir("/api/chat/mis-requerimientos")).datos;
+    assert.ok(JSON.stringify(mis).includes('"guardado":true'));
+    const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
+    assert.ok(panel.historial.some((f) => f.sala === "c-prueba" && f.guardado));
   });
 
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);

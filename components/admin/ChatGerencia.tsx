@@ -29,6 +29,7 @@ interface Fila {
   issue_intentos: number;
   issue_proximo_intento: string | null;
   estado_issue: EstadoVisible | null;
+  guardado: boolean;
 }
 
 interface Datos {
@@ -299,6 +300,8 @@ export default function ChatGerencia() {
                             {f.issue_repo ? `${f.issue_repo}#` : "#"}
                             {f.issue_numero} <ExternalLink size={13} aria-hidden />
                           </a>
+                        ) : f.guardado ? (
+                          <span className="chip bg-ok-fondo text-ok-tinta">Guardado, módulo sin activar</span>
                         ) : f.estado === "terminada" ? (
                           <div className="space-y-1">
                             {f.issue_error && <p className="max-w-[14rem] text-xs text-error-tinta">{f.issue_error}</p>}

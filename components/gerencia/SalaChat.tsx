@@ -24,7 +24,7 @@ interface Solicitud {
   ticket: number;
   estado: "abierta" | "terminada" | "cerrada";
   iniciada_en: string;
-  envio?: "enviando" | "enviado" | null;
+  envio?: "enviando" | "enviado" | "guardado" | null;
   envio_error?: string | null;
 }
 
@@ -296,12 +296,16 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
                         <span className="chip bg-ok-fondo text-ok-tinta">
                           <Check size={14} aria-hidden /> Guardado y enviado a revisión ✓
                         </span>
+                      ) : s.envio === "guardado" ? (
+                        <span className="chip bg-ok-fondo text-ok-tinta">
+                          <Check size={14} aria-hidden /> Guardado ✓ — se enviará cuando el módulo se active
+                        </span>
                       ) : (
                         <span role="status" className="chip bg-suave text-tinta-2">
                           <LoaderCircle size={14} className="animate-spin" aria-hidden /> enviando…
                         </span>
                       )}
-                      {s.envio !== "enviado" && s.envio_error && <span className="text-xs text-tinta-3">{s.envio_error}</span>}
+                      {s.envio === "enviando" && s.envio_error && <span className="text-xs text-tinta-3">{s.envio_error}</span>}
                     </p>
                   )}
                 </li>

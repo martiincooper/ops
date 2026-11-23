@@ -5,13 +5,15 @@ import { manejar } from "@/lib/http";
 import { configGithub, githubConfigurado } from "@/lib/chat/github";
 import { CUENTA_DATASHEQ, saludToken } from "@/lib/chat/githubApi";
 import { codigoTicket } from "@/lib/chat/modulos";
-import { listarModulos, todosLosModulos } from "@/lib/chat/catalogo";
+import { listarModulos, moduloPorClave, todosLosModulos } from "@/lib/chat/catalogo";
 import { estadoSalas } from "@/lib/chat/salas";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
 import { asientoDesdeEntorno, saludAsiento } from "@/lib/chat/asistente";
 import { MAX_REINTENTOS } from "@/lib/chat/envio";
 
 interface Fila {
+  sala: string;
+  titulo: string | null;
   ticket: number;
   estado: string;
   issue_numero: number | null;
@@ -49,6 +51,8 @@ export const GET = manejar(async (req) => {
       ...f,
       ticket: codigoTicket(f.ticket),
       estado_issue: f.estado === "terminada" ? estadoVisible(f) : null,
+      // sala propuesta: la especificación espera en ops a que se active el módulo (no es un error)
+      guardado: f.estado === "terminada" && !!f.titulo && !f.issue_numero && moduloPorClave(db, f.sala)?.estado_modulo === "propuesto",
     })),
     seguimiento,
     config: {
