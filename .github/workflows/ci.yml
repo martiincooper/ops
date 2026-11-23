@@ -53,7 +53,7 @@ jobs:
       - name: Pruebas extremo a extremo contra el contenedor
         run: |
           # GitHub simulado en el host (sin token real); el contenedor lo alcanza por host.docker.internal
-          GITHUB_FALSO_PORT=3199 node scripts/github-falso.mjs &
+          GITHUB_FALSO_HOST=0.0.0.0 GITHUB_FALSO_PORT=3199 node scripts/github-falso.mjs &
           sleep 1
           docker run -d --name aether -p 127.0.0.1:3100:3000 --add-host=host.docker.internal:host-gateway \
             -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=admin@aether-tech.dev -e COOKIE_SECURE=false \

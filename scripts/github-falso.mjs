@@ -1,4 +1,5 @@
 // GitHub simulado para las pruebas e2e: sin token real. Responde como la cuenta datasheq-creator.
+// GITHUB_FALSO_HOST cambia la interfaz (por defecto solo 127.0.0.1; el CI con docker usa 0.0.0.0).
 // Uso: node scripts/github-falso.mjs [archivo-del-puerto]    (escucha en un puerto libre; lo escribe en el archivo)
 // GET /repos/{dueño}/{repo}: el nombre del repo elige el caso — «no-existe» (404), «solo-lectura» (sin escritura),
 // «sin-issues» (Issues desactivados); cualquier otro es un repositorio sano.
@@ -21,7 +22,7 @@ const servidor = http.createServer((req, res) => {
   if (/\/labels\//.test(pathname)) return responder(200, {});
   responder(404, { message: "Not Found" });
 });
-servidor.listen(Number(process.env.GITHUB_FALSO_PORT ?? 0), "127.0.0.1", () => {
+servidor.listen(Number(process.env.GITHUB_FALSO_PORT ?? 0), process.env.GITHUB_FALSO_HOST ?? "127.0.0.1", () => {
   const { port } = servidor.address();
   if (process.argv[2]) fs.writeFileSync(process.argv[2], String(port));
   console.log(`GitHub simulado en http://127.0.0.1:${port}`);
