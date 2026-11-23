@@ -17,6 +17,8 @@ interface Requerimiento {
   /** Estado del Issue (solo solicitudes terminadas). */
   estado: EstadoVisible | null;
   estado_al: string | null;
+  /** Sala propuesta: guardada, a la espera de que se active el módulo. */
+  guardado: boolean;
   issue_numero: number | null;
   issue_url: string | null; // solo para administradores
 }
@@ -61,7 +63,7 @@ export default function MisRequerimientos() {
               <p className="mt-0.5 text-tinta">{r.titulo ?? (r.estado_solicitud === "abierta" ? "Conversación abierta" : "Sin título")}</p>
             </div>
             <div className="flex flex-col items-end gap-1">
-              {r.estado ? <ChipEstadoIssue estado={r.estado} /> : <span className="chip bg-suave text-tinta-2">{r.estado_solicitud === "abierta" ? "Abierta" : "Cerrada"}</span>}
+              {r.guardado ? <span className="chip bg-ok-fondo text-ok-tinta">Guardado, módulo sin activar</span> : r.estado ? <ChipEstadoIssue estado={r.estado} /> : <span className="chip bg-suave text-tinta-2">{r.estado_solicitud === "abierta" ? "Abierta" : "Cerrada"}</span>}
               {r.issue_url ? (
                 <a href={r.issue_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-tinta hover:underline">
                   Issue #{r.issue_numero} <ExternalLink size={12} aria-hidden />

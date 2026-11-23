@@ -14,10 +14,11 @@ let fallaCierre = 0;
 const cierres = [];
 const turnos = [];
 
+// Salas propuestas (`kind: "propuesta"`): mismo guion, y se guardan los cuerpos recibidos (GET /control → turnos[].cuerpo)
 function turno(json, responder) {
   const hechas = json.messages.filter((m) => m.role === "asistente").length;
   const fotos = json.messages.reduce((n, m) => n + m.photos.length, 0);
-  turnos.push({ requestId: json.requestId, repo: json.repo, session: json.session, mensajes: json.messages.length, fotos });
+  turnos.push({ requestId: json.requestId, repo: json.repo, kind: json.kind, session: json.session, mensajes: json.messages.length, fotos, cuerpo: json.kind === "propuesta" ? json : undefined });
   const sesion = json.session ?? `sesion-${json.requestId}`;
   if (hechas === 0) return responder(200, { session: sesion, message: `¿Qué necesitan resolver exactamente?${fotos ? ` (recibí ${fotos} foto${fotos > 1 ? "s" : ""})` : ""}`, done: false, summary: null });
   if (hechas === 1) return responder(200, { session: sesion, message: "¿Quién usaría esto y cada cuánto?", done: false, summary: null });
@@ -46,8 +47,17 @@ const servidor = http.createServer((req, res) => {
       return setTimeout(() => turno(json, responder), demora);
     }
     if (pathname === "/api/interview/close" && req.method === "POST") {
-      cierres.push({ requestId: json.requestId, session: json.session, mensajes: json.messages.length, fotos: json.messages.reduce((n, m) => n + m.photos.length, 0) });
+      cierres.push({ requestId: json.requestId, kind: json.kind, session: json.session, mensajes: json.messages.length, fotos: json.messages.reduce((n, m) => n + m.photos.length, 0), cuerpo: json.kind === "propuesta" ? json : undefined });
       if (fallaCierre) return responder(fallaCierre, { error: "falla simulada" });
+      if (json.kind === "propuesta") {
+        return responder(200, {
+          session: json.session,
+          title: "Módulo propuesto de prueba",
+          spec: "## Decisiones del negocio\n\nEspecificación de prueba de un módulo propuesto",
+          context: "# Módulo propuesto\n\nGlosario de prueba.",
+          adrs: [{ file: "0001-decision-de-prueba.md", title: "Decisión de prueba", content: "# Decisión de prueba\n\nSe decidió algo." }],
+        });
+      }
       return responder(200, { session: json.session, title: "Requerimiento de prueba", spec: "## Decisiones del negocio\n\nEspecificación de prueba" });
     }
     responder(404, { error: "no existe" });

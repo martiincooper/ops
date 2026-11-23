@@ -8,10 +8,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { dirAdjuntos } from "./adjuntos";
-import { moduloPorClave, repoDe } from "./catalogo";
+import { listarModulos, moduloPorClave, repoDe } from "./catalogo";
+import { codigoTicket } from "./modulos";
 import { SIN_REPO, enviarIssue } from "./envio";
 import type { OpcionesPeticion } from "./githubApi";
 import { ErrorSala, type Mensaje, type Solicitud, mensajes, solicitud } from "./salas";
+import type { Modulo } from "./modulos";
 import type { ConfigCuenta } from "./seguimiento";
 
 type DB = Database.Database;
@@ -35,9 +37,27 @@ export interface MensajeTurno {
   at: string;
   photos: FotoTurno[];
 }
+export interface DocumentoModulo {
+  file: string;
+  title: string;
+  content: string;
+}
+/** Lo que el asiento sabe de un módulo propuesto: sus documentos vivos y las especificaciones ya guardadas. */
+export interface ModuloPropuesto {
+  context: string;
+  adrs: DocumentoModulo[];
+  specs: { ticket: string; title: string; spec: string }[];
+}
+/** Repositorio de la guía de interfaz de la casa: el asiento lo lee en las salas propuestas. */
+export const REPO_GUIA_UI = "martiincooper/ui-guidelines";
 export interface PeticionTurno {
   requestId: string;
-  repo: string;
+  /** Ausente en una sala propuesta (`kind: "propuesta"`); ahí viaja `contextRepos`. */
+  repo?: string;
+  /** Solo en salas propuestas; las activas no lo envían (el asiento asume «modulo»). */
+  kind?: "propuesta";
+  contextRepos?: string[];
+  module?: ModuloPropuesto;
   session: string | null;
   room: { nombre: string; descripcion: string };
   messages: MensajeTurno[];
@@ -53,6 +73,9 @@ export interface RespuestaCierre {
   session: string | null;
   title: string;
   spec: string;
+  /** Solo en salas propuestas: `CONTEXT.md` y ADRs completos y actualizados. */
+  context?: string;
+  adrs?: DocumentoModulo[];
 }
 
 /** Lo que ops necesita del asiento; en las pruebas se inyecta uno falso. */
@@ -110,7 +133,11 @@ export function asientoDesdeEntorno(): ClienteAsiento | null {
     async cierre(p) {
       const r = (await pedir("/api/interview/close", { method: "POST", body: JSON.stringify(p) }, TIMEOUT_TURNO_MS)) as Partial<RespuestaCierre>;
       if (typeof r.title !== "string" || !r.title.trim() || typeof r.spec !== "string" || !r.spec.trim()) throw new ErrorAsiento("Respuesta inválida del asiento de entrevista");
-      return { session: typeof r.session === "string" ? r.session : null, title: r.title.trim(), spec: r.spec };
+      const base = { session: typeof r.session === "string" ? r.session : null, title: r.title.trim(), spec: r.spec };
+      if (p.kind !== "propuesta") return base;
+      const ok = (a: unknown): a is DocumentoModulo => !!a && typeof a === "object" && ["file", "title", "content"].every((k) => typeof (a as Record<string, unknown>)[k] === "string");
+      if (typeof r.context !== "string" || !Array.isArray(r.adrs) || !r.adrs.every(ok)) throw new ErrorAsiento("Respuesta inválida del asiento de entrevista");
+      return { ...base, context: r.context, adrs: r.adrs.map(({ file, title, content }) => ({ file, title, content })) };
     },
   };
 }
@@ -172,14 +199,15 @@ function fotosDe(db: DB, m: Mensaje, dataDir?: string): FotoTurno[] {
 /** Transcripción completa de la solicitud para el asiento (sin los avisos del sistema), con las fotos en base64. */
 export function peticionTurno(db: DB, s: Solicitud, dataDir?: string): { peticion: PeticionTurno; hasta: number } {
   const m = moduloPorClave(db, s.sala);
+  const propuesta = m?.estado_modulo === "propuesto";
   const repo = repoDe(db, s.sala);
-  if (!m || !repo) throw new ErrorAsiento("La sala no tiene un repositorio de GitHub verificado");
+  if (!m || (!propuesta && !repo)) throw new ErrorAsiento("La sala no tiene un repositorio de GitHub verificado");
   const msgs = mensajes(db, s.id).filter((x) => x.rol !== "sistema");
   return {
     hasta: msgs.length ? msgs[msgs.length - 1].id : 0,
     peticion: {
       requestId: s.id,
-      repo,
+      ...(propuesta ? { kind: "propuesta" as const, contextRepos: reposDeContexto(db), module: moduloDe(db, m) } : { repo: repo! }),
       session: s.asistente_sesion,
       room: { nombre: m.nombre, descripcion: m.descripcion },
       messages: msgs.map((x) => ({
@@ -192,6 +220,24 @@ export function peticionTurno(db: DB, s: Solicitud, dataDir?: string): { peticio
       })),
     },
   };
+}
+
+/** Repos que el asiento lee en una sala propuesta: toda sala activa verificada y no archivada, más la guía de interfaz. */
+export function reposDeContexto(db: DB): string[] {
+  const repos = listarModulos(db).filter((x) => x.estado_modulo === "activo" && x.repo && x.repo_verificado_en).map((x) => x.repo as string);
+  return [...new Set([...repos, REPO_GUIA_UI])];
+}
+
+/** Documentos vivos de la sala y especificaciones de sus solicitudes ya terminadas, de la más antigua a la más nueva. */
+function moduloDe(db: DB, m: Modulo): ModuloPropuesto {
+  const fila = db.prepare("SELECT contexto, adrs FROM chat_modulos WHERE clave = ?").get(m.clave) as { contexto: string; adrs: string };
+  const adrs = (JSON.parse(fila.adrs) as { archivo: string; titulo: string; contenido: string }[]).map((a) => ({ file: a.archivo, title: a.titulo, content: a.contenido }));
+  const specs = (db.prepare("SELECT ticket, titulo, spec FROM chat_solicitudes WHERE sala = ? AND estado = 'terminada' AND spec IS NOT NULL ORDER BY ticket").all(m.clave) as { ticket: number; titulo: string; spec: string }[]).map((x) => ({
+    ticket: codigoTicket(x.ticket),
+    title: x.titulo,
+    spec: x.spec,
+  }));
+  return { context: fila.contexto, adrs, specs };
 }
 
 export interface OpcionesTurno {
@@ -218,7 +264,6 @@ export async function correrTurnos(db: DB, id: string, asiento: ClienteAsiento |
   for (;;) {
     const s = solicitud(db, id);
     if (!s || s.estado !== "abierta" || enCurso.has(id)) return hechos;
-    if (moduloPorClave(db, s.sala)?.estado_modulo === "propuesto") return hechos; // aún sin asistente: solo guarda mensajes
     if (s.asistente_estado === "esperando_reintento" && !op.forzar && (s.asistente_proximo_intento ?? "") > iso(ahora())) return hechos;
     if (s.asistente_estado === "idle" && !hayPendientes(db, s)) return hechos;
     enCurso.add(id);
@@ -365,15 +410,22 @@ export async function correrCierre(db: DB, id: string, asiento: ClienteAsiento |
   const s = solicitud(db, id);
   if (!s || s.estado !== "terminada" || cerrando.has(id)) return false;
   cerrando.add(id);
+  const propuesta = moduloPorClave(db, s.sala)?.estado_modulo === "propuesto";
   try {
     if (!s.spec) {
       try {
-        if (!repoDe(db, s.sala)) throw new ErrorAsiento(SIN_REPO);
+        if (!propuesta && !repoDe(db, s.sala)) throw new ErrorAsiento(SIN_REPO);
         const { peticion } = peticionTurno(db, s, op.dataDir);
         if (!asiento) throw new ErrorAsiento(SIN_ASIENTO);
         const r = await asiento.cierre(peticion);
         anotarSalud(true, null, ahora());
-        db.prepare("UPDATE chat_solicitudes SET titulo = ?, spec = ?, asistente_sesion = COALESCE(?, asistente_sesion), cierre_error = NULL, cierre_proximo_intento = NULL WHERE id = ?").run(r.title, r.spec, r.session, id);
+        db.transaction(() => {
+          db.prepare("UPDATE chat_solicitudes SET titulo = ?, spec = ?, asistente_sesion = COALESCE(?, asistente_sesion), cierre_error = NULL, cierre_proximo_intento = NULL WHERE id = ?").run(r.title, r.spec, r.session, id);
+          if (propuesta) {
+            const adrs = (r.adrs ?? []).map((a) => ({ archivo: a.file, titulo: a.title, contenido: a.content }));
+            db.prepare("UPDATE chat_modulos SET contexto = ?, adrs = ? WHERE clave = ?").run(r.context ?? "", JSON.stringify(adrs), s.sala);
+          }
+        })();
       } catch (e) {
         const motivo = e instanceof ErrorAsiento ? e.message : "Error inesperado al cerrar la solicitud";
         if (!(e instanceof ErrorAsiento)) console.error("[chat-cierre]", e);
@@ -386,6 +438,11 @@ export async function correrCierre(db: DB, id: string, asiento: ClienteAsiento |
     }
   } finally {
     cerrando.delete(id);
+  }
+  // Sala propuesta: la especificación queda guardada en ops hasta que se active el módulo (sin llamar a GitHub ni reintentar)
+  if (propuesta) {
+    db.prepare("UPDATE chat_solicitudes SET issue_error = ?, issue_proximo_intento = NULL WHERE id = ? AND issue_numero IS NULL").run(SIN_REPO, id);
+    return false;
   }
   return (await enviarIssue(db, id, cuenta, op)).ok;
 }

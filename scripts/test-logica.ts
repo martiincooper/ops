@@ -812,7 +812,7 @@ async function main() {
   const t0 = new Date("2026-10-07T13:00:00Z");
   const mas = (min: number) => new Date(t0.getTime() + min * 60_000);
 
-  await prueba("módulos propuestos (#47): migración conserva las salas como «activo»; proponer abre la sala sin repositorio y no inicia turnos", async () => {
+  await prueba("módulos propuestos (#47): migración conserva las salas como «activo»; proponer abre la sala sin repositorio", async () => {
     const d = new Database(":memory:");
     d.pragma("foreign_keys = ON");
     MIGRACIONES_CONTROL.slice(0, MIGRACIONES_CONTROL.length - 1).forEach((m) => d.exec(m));
@@ -829,12 +829,6 @@ async function main() {
     archivarModulo(d, "c-compras", true);
     assert.throws(() => proponerModulo(d, { nombre: "C-Compras", descripcion: "x" }, "b@datasheq.com"), (e) => e instanceof ErrorModulo && e.status === 409);
     archivarModulo(d, "c-compras", false);
-    const { solicitud: s } = enviarMensaje(d, "c-compras", ana, "hola", t0);
-    let turnos = 0;
-    const asiento = { turno: async () => (turnos++, { session: "s", message: "x", done: false, summary: null }), cierre: async () => ({ session: "s", title: "t", spec: "s" }) } as unknown as ClienteAsiento;
-    assert.equal(await dispararTurno(d, s.id, asiento), 0);
-    assert.equal(turnos, 0);
-    assert.equal(solicitud(d, s.id)!.asistente_estado, "idle");
   });
   await prueba("portal (#27): gerentes de Datasheq y administradores de cualquier dominio", () => {
     assert.equal(puedeUsarPortal({ rol: "executive", empresa: "datasheq" }), true);
@@ -1844,6 +1838,65 @@ async function main() {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+  await prueba("sala propuesta (#48): el turno lleva kind, contextRepos y module; «Terminar» guarda spec, CONTEXT.md y ADRs sin llamar a GitHub", async () => {
+    const d = dbControl();
+    const verif = "2026-10-01T00:00:00Z";
+    d.prepare("UPDATE chat_modulos SET repo = 'dueno/repo', repo_verificado_en = ? WHERE clave = 'c-legal'").run(verif);
+    d.prepare("INSERT INTO chat_modulos (clave, nombre, repo, repo_verificado_en, archivado) VALUES ('c-arch', 'C-Arch', 'dueno/archivado', ?, 1)").run(verif);
+    d.prepare("INSERT INTO chat_modulos (clave, nombre, repo) VALUES ('c-sinver', 'C-SinVer', 'dueno/sinverificar')").run();
+    proponerModulo(d, { nombre: "C-Compras", descripcion: "Compras" }, "ana@datasheq.com");
+    proponerModulo(d, { nombre: "C-Otra", descripcion: "Otra" }, "ana@datasheq.com");
+    const a = asientoGuion();
+    const base = a.cliente;
+    const cliente: ClienteAsiento = {
+      ...base,
+      cierre: async (p) => ({ ...(await base.cierre(p)), context: "# Compras\n\nGlosario", adrs: [{ file: "0001-x.md", title: "X", content: "# X" }] }),
+    };
+    let github = 0;
+    manejar = () => (github++, { status: 500 });
+    const enviar = async (txt: string, t: Date) => {
+      const { solicitud: s } = enviarMensaje(d, "c-compras", ana, txt, t);
+      await dispararTurno(d, s.id, cliente);
+      return s.id;
+    };
+    const id1 = await enviar("necesitamos compras", t0);
+    const p1 = a.peticiones[0];
+    assert.equal(p1.kind, "propuesta");
+    assert.equal(p1.repo, undefined);
+    assert.deepEqual(p1.contextRepos, ["dueno/repo", "martiincooper/ui-guidelines"]);
+    assert.deepEqual(p1.module, { context: "", adrs: [], specs: [] });
+    assert.equal(solicitud(d, id1)!.asistente_estado, "idle");
+    // el asistente termina (2 preguntas más) y el gerente pulsa «Terminar»
+    for (const [i, t] of [1, 2].entries()) await enviar(`respuesta ${i}`, mas(t));
+    assert.equal(solicitud(d, id1)!.terminado, 1);
+    terminarSolicitud(d, "c-compras", mas(5));
+    assert.equal(await correrCierre(d, id1, cliente, cfgFalso, { ...sinEspera, ahora: () => mas(5) }), false);
+    const s1 = solicitud(d, id1)!;
+    assert.deepEqual([s1.estado, s1.titulo, s1.issue_numero, s1.issue_proximo_intento, s1.issue_error], ["terminada", "Informe DS 594", null, null, SIN_REPO]);
+    assert.equal(a.cierres[0].kind, "propuesta");
+    const sala = d.prepare("SELECT contexto, adrs FROM chat_modulos WHERE clave = 'c-compras'").get() as { contexto: string; adrs: string };
+    assert.equal(sala.contexto, "# Compras\n\nGlosario");
+    assert.deepEqual(JSON.parse(sala.adrs), [{ archivo: "0001-x.md", titulo: "X", contenido: "# X" }]);
+    assert.equal(github, 0);
+    assert.deepEqual(pendientesDeReintento(d, mas(500)), []);
+    const v = vistaSala(d, "c-compras").solicitudes[0];
+    assert.deepEqual([v.envio, v.envio_error], ["guardado", null]);
+    // segunda solicitud: lleva la primera en module.specs
+    await enviar("otra función", mas(10));
+    const p2 = a.peticiones[a.peticiones.length - 1];
+    assert.equal(p2.requestId !== id1, true);
+    assert.deepEqual(p2.module, {
+      context: "# Compras\n\nGlosario",
+      adrs: [{ file: "0001-x.md", title: "X", content: "# X" }],
+      specs: [{ ticket: codigoTicket(s1.ticket), title: "Informe DS 594", spec: s1.spec! }],
+    });
+    // sala activa: sin kind ni contextRepos
+    const { solicitud: sa } = enviarMensaje(d, "c-legal", ana, "hola", mas(11));
+    await dispararTurno(d, sa.id, cliente);
+    const pa = a.peticiones[a.peticiones.length - 1];
+    assert.equal(pa.repo, "dueno/repo");
+    assert.deepEqual([pa.kind, pa.contextRepos, pa.module], [undefined, undefined, undefined]);
   });
   await prueba("«Mis requerimientos» (#33): lista las solicitudes en que la persona escribió, con su estado", async () => {
     const d = dbControl();

@@ -50,6 +50,8 @@ export const GET = manejar(async (req) => {
       /** Estado del Issue; solo una solicitud terminada tiene Issue. */
       estado: f.estado === "terminada" ? estadoVisible(f) : null,
       estado_al: f.issue_actualizado_en,
+      /** Terminada en una sala propuesta: guardada en ops hasta que se active el módulo. */
+      guardado: f.estado === "terminada" && !f.issue_numero && moduloPorClave(db, f.sala)?.estado_modulo === "propuesto",
       issue_numero: f.issue_numero,
       issue_url: u.rol === "admin" ? f.issue_url : null,
     })),

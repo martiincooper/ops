@@ -233,8 +233,8 @@ export interface SolicitudVista {
   iniciada_en: string;
   terminada_en: string | null;
   issue_url: string | null;
-  /** Solo en solicitudes terminadas: «enviando» (aún sin Issue) o «enviado» (el marcador «Guardado y enviado a revisión ✓»). */
-  envio: "enviando" | "enviado" | null;
+  /** Solo en solicitudes terminadas: «enviando» (aún sin Issue) o «enviado» (el marcador «Guardado y enviado a revisión ✓»); «guardado»: sala propuesta, la especificación espera a que se active el módulo. */
+  envio: "enviando" | "enviado" | "guardado" | null;
   /** Por qué sigue «enviando» (p. ej. «pendiente: sala sin repositorio»), si hay un error. */
   envio_error: string | null;
 }
@@ -259,15 +259,20 @@ export interface VistaSala {
  * mayor (para consultar cada 2 a 3 segundos).
  */
 export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
+  const propuesta = moduloPorClave(db, sala)?.estado_modulo === "propuesto";
   const solicitudes = (
     db
-      .prepare("SELECT id, ticket, estado, iniciada_en, terminada_en, issue_url, issue_numero, cierre_error, issue_error FROM chat_solicitudes WHERE sala = ? ORDER BY ticket")
-      .all(sala) as (Omit<SolicitudVista, "envio" | "envio_error"> & { issue_numero: number | null; cierre_error: string | null; issue_error: string | null })[]
-  ).map(({ issue_numero, cierre_error, issue_error, ...f }) => ({
-    ...f,
-    envio: f.estado !== "terminada" ? null : issue_numero ? ("enviado" as const) : ("enviando" as const),
-    envio_error: f.estado === "terminada" && !issue_numero ? (cierre_error ?? issue_error) : null,
-  }));
+      .prepare("SELECT id, ticket, estado, iniciada_en, terminada_en, issue_url, issue_numero, cierre_error, issue_error, spec IS NOT NULL AS con_spec FROM chat_solicitudes WHERE sala = ? ORDER BY ticket")
+      .all(sala) as (Omit<SolicitudVista, "envio" | "envio_error"> & { issue_numero: number | null; cierre_error: string | null; issue_error: string | null; con_spec: number })[]
+  ).map(({ issue_numero, cierre_error, issue_error, con_spec, ...f }) => {
+    // en una sala propuesta, «sin repositorio» es lo esperado: no es un error
+    const guardado = f.estado === "terminada" && !issue_numero && !!con_spec && propuesta;
+    return {
+      ...f,
+      envio: f.estado !== "terminada" ? null : issue_numero ? ("enviado" as const) : guardado ? ("guardado" as const) : ("enviando" as const),
+      envio_error: f.estado === "terminada" && !issue_numero && !guardado ? (cierre_error ?? issue_error) : null,
+    };
+  });
   const msgs = conAdjuntos(
     db,
     db
