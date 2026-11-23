@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { manejar } from "@/lib/http";
 import { configGithub } from "@/lib/chat/github";
+import { moduloPorClave } from "@/lib/chat/catalogo";
 import { codigoTicket } from "@/lib/chat/modulos";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
 import { requireGerencia } from "@/lib/chat/servicio";
@@ -42,6 +43,7 @@ export const GET = manejar(async (req) => {
       id: f.id,
       ticket: codigoTicket(f.ticket),
       sala: f.sala,
+      sala_nombre: moduloPorClave(db, f.sala)?.nombre ?? f.sala,
       titulo: f.titulo,
       fecha: f.iniciada_en,
       estado_solicitud: f.estado,

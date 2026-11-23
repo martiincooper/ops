@@ -5,8 +5,8 @@
 // primero si el Issue ya existe. Sin "server-only": lo prueba scripts/test-logica.ts con un GitHub simulado.
 import type Database from "better-sqlite3";
 import { type DatosIssue, ErrorGithub, type OpcionesPeticion, crearIssueEn } from "./githubApi";
-import { type Modulo, moduloPorClave } from "./modulos";
-import { type Entorno, repoDe } from "./repos";
+import { moduloPorClave, repoDe } from "./catalogo";
+import type { Modulo } from "./modulos";
 import { mensajes, participantes, solicitud } from "./salas";
 import type { ConfigCuenta } from "./seguimiento";
 
@@ -16,7 +16,7 @@ type DB = Database.Database;
 export const ESPERAS_MIN = [1, 2, 5, 15, 30, 60];
 export const MAX_REINTENTOS = ESPERAS_MIN.length;
 export const SIN_TOKEN = "GITHUB_TOKEN no está configurado en el servidor";
-export const SIN_REPO = "El módulo no tiene un repositorio de GitHub asignado (GITHUB_REPOS)";
+export const SIN_REPO = "El módulo no tiene un repositorio de GitHub verificado";
 
 const enCurso = new Set<string>();
 
@@ -32,7 +32,7 @@ function datosDelIssue(db: DB, id: string): DatosIssue {
   if (!s || s.estado !== "terminada" || !s.titulo || !s.resumen) throw new Error("La solicitud no está terminada");
   return {
     ticket: s.ticket,
-    modulo: moduloPorClave(s.sala) as Modulo,
+    modulo: moduloPorClave(db, s.sala) as Modulo,
     titulo: s.titulo,
     resumen: s.resumen,
     solicitantes: participantes(db, id),
@@ -52,7 +52,7 @@ export async function enviarIssue(
   db: DB,
   id: string,
   cuenta: ConfigCuenta | null,
-  op: OpcionesPeticion & { ahora?: () => Date; env?: Entorno } = {},
+  op: OpcionesPeticion & { ahora?: () => Date } = {},
 ): Promise<ResultadoEnvio> {
   const ahora = op.ahora ?? (() => new Date());
   const datos = datosDelIssue(db, id);
@@ -63,7 +63,7 @@ export async function enviarIssue(
   try {
     if (!cuenta) throw new ErrorGithub(SIN_TOKEN, false);
     // Cada módulo envía a su propio repositorio
-    const repo = repoDe(c.sala, op.env);
+    const repo = repoDe(db, c.sala);
     if (!repo) throw new ErrorGithub(SIN_REPO, false);
     // Si hubo un intento anterior, pudo llegar a GitHub aunque se perdiera la respuesta: buscar antes de crear
     const issue = await crearIssueEn(cuenta, repo, datos, { ...op, comprobarDuplicado: c.issue_intentos > 0 || !!c.issue_error });
@@ -112,7 +112,7 @@ export function pendientesDeReintento(db: DB, ahora = new Date()): string[] {
 export async function procesarPendientes(
   db: DB,
   cuenta: ConfigCuenta | null,
-  op: OpcionesPeticion & { ahora?: () => Date; env?: Entorno } = {},
+  op: OpcionesPeticion & { ahora?: () => Date } = {},
 ): Promise<number> {
   if (!cuenta) return 0;
   let enviados = 0;

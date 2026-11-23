@@ -3,10 +3,11 @@
 import { AlertTriangle, Bot, ChevronDown, Clock, ExternalLink, MessagesSquare, RefreshCw, ScrollText } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { ChipEstadoIssue, IconoModulo } from "@/components/gerencia/comun";
-import { MODULOS, moduloPorClave } from "@/lib/chat/modulos";
+import type { Modulo } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
 import { type EstadoSincronizacion, type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
 import { api, cx } from "@/lib/cliente";
+import EditorSalas from "./EditorSalas";
 import { Aviso, Cargando, Vacio, fechaHora, useAccion, useDatos } from "./comun";
 
 interface Fila {
@@ -32,12 +33,14 @@ interface Fila {
 
 interface Datos {
   salas: EstadoSala[];
+  archivadas: Modulo[];
+  /** Nombre de cada sala (también las archivadas), para el historial. */
+  nombres: Record<string, string>;
   historial: Fila[];
   seguimiento: EstadoSincronizacion;
   config: {
     github: boolean;
     cuenta: string;
-    repositorios: Record<string, string | null>;
     reintentos_max: number;
   };
 }
@@ -118,16 +121,18 @@ export default function ChatGerencia() {
           <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden />
           <p>
             <b>GitHub sin configurar:</b> define <code>GITHUB_TOKEN</code> con un token de la cuenta de DataSHEQ{" "}
-            <code>{datos.config.cuenta}</code> (permiso «Issues: write» sobre el repositorio de cada módulo). Los
+            <code>{datos.config.cuenta}</code> (permiso «Issues: write» sobre el repositorio de cada sala). Los
             requerimientos se guardan y se envían con «Reintentar».
           </p>
         </div>
       )}
 
+      <EditorSalas salas={datos.salas} archivadas={datos.archivadas} recargar={recargar} />
+
       <div>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="tarjeta p-4">
-            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.abierta).length}/{datos.salas.filter((s) => s.repo).length}</p>
+            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.abierta).length}/{datos.salas.length}</p>
             <p className="text-sm text-tinta-3">salas con una solicitud abierta</p>
           </div>
           <div className="tarjeta p-4">
@@ -150,17 +155,16 @@ export default function ChatGerencia() {
         </div>
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {datos.salas.map((s) => {
-            const m = moduloPorClave(s.clave)!;
             return (
               <li key={s.clave} className="tarjeta flex flex-col gap-2 p-4">
                 <div className="flex items-center gap-3">
-                  <IconoModulo clave={m.clave} color={m.color} tamano={18} />
+                  <IconoModulo clave={s.clave} color={s.color} tamano={18} />
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-tinta">{m.nombre}</p>
-                    <p className="truncate text-xs text-tinta-3">{m.area}</p>
+                    <p className="font-semibold text-tinta">{s.nombre}</p>
+                    <p className="truncate text-xs text-tinta-3">{s.area}</p>
                   </div>
-                  {!s.repo ? (
-                    <span className="chip bg-suave text-tinta-3">Oculta</span>
+                  {!s.disponible ? (
+                    <span className="chip bg-suave text-tinta-3">Próximamente</span>
                   ) : s.abierta ? (
                     <span className="chip bg-indigo-suave text-indigo-tinta">
                       <MessagesSquare size={12} aria-hidden /> Abierta
@@ -175,7 +179,7 @@ export default function ChatGerencia() {
                       Repositorio: <code>{s.repo}</code>
                     </>
                   ) : (
-                    "Sin repositorio: no se muestra en el portal (asígnalo en GITHUB_REPOS)"
+                    "Sin repositorio verificado: en el portal sale como «Próximamente»"
                   )}
                 </p>
                 {s.abierta && (
@@ -197,8 +201,8 @@ export default function ChatGerencia() {
               Módulo
               <select value={filtro} onChange={(e) => setFiltro(e.target.value)} className="campo w-auto py-2">
                 <option value="todos">Todos</option>
-                {MODULOS.map((m) => (
-                  <option key={m.clave} value={m.clave}>{m.nombre}</option>
+                {Object.entries(datos.nombres).map(([clave, nombre]) => (
+                  <option key={clave} value={clave}>{nombre}</option>
                 ))}
               </select>
             </label>
@@ -250,7 +254,7 @@ export default function ChatGerencia() {
                   <Fragment key={f.id}>
                     <tr>
                       <td className="whitespace-nowrap font-semibold tabular-nums text-tinta">{f.ticket ?? "—"}</td>
-                      <td className="whitespace-nowrap">{moduloPorClave(f.sala)?.nombre ?? f.sala}</td>
+                      <td className="whitespace-nowrap">{datos.nombres[f.sala] ?? f.sala}</td>
                       <td>
                         <p className="text-tinta">{f.participantes ?? "—"}</p>
                       </td>

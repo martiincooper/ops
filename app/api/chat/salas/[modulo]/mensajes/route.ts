@@ -38,6 +38,6 @@ export const POST = manejar<Ctx>(async (req, { params }) => {
   const { modulo } = await params;
   const { texto, fotos } = await leerEnvio(req);
   if (!consumirCupo(p.email, "mensaje")) throw new HttpError(429, MENSAJE_CUPO);
-  const { mensaje, solicitud, nueva } = enSala(() => enviarMensaje(db, modulo, p, texto, new Date(), process.env, fotos));
+  const { mensaje, solicitud, nueva } = enSala(() => enviarMensaje(db, modulo, p, texto, new Date(), fotos));
   return NextResponse.json({ mensaje, solicitud: { id: solicitud.id, ticket: solicitud.ticket, estado: solicitud.estado }, nueva });
 });

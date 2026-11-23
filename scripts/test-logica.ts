@@ -16,10 +16,10 @@ import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCa
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
 import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
 import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas } from "../lib/chat/githubApi";
-import { REPOS_POR_DEFECTO, modulosActivos, repoDe, reposDeModulos, salaActiva } from "../lib/chat/repos";
+import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
-import { MODULOS, type Modulo, codigoTicket, moduloPorClave, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
+import { type Modulo, codigoTicket, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
 import {
   ErrorSala,
   SALA_NO_DISPONIBLE,
@@ -41,8 +41,8 @@ import { hashPin, motivoPinDebil, verificarPin } from "../lib/pin";
 import { METAS_DEFECTO, esquemaMetas, guardarMetas, leerMetas } from "../lib/metas";
 import { fechaLocal, horaLocal, sumarDias } from "../lib/tiempo";
 
-// Todas las salas con repositorio (las pruebas de salas usan varias); las de repositorios usan su propio entorno
-process.env.GITHUB_REPOS = MODULOS.map((m) => `${m.clave}=dueno/repo`).join(",");
+// Salas de prueba: las pruebas de salas usan varias, todas con repositorio verificado (las crea `dbControl`)
+const SALAS_PRUEBA = ["C-Legal", "C-Controla", "C-Previene", "C-Lidera", "C-Acredita", "C-Capacita", "C-Investiga"];
 
 let ok = 0;
 async function prueba(nombre: string, fn: () => void | Promise<void>) {
@@ -781,6 +781,8 @@ async function main() {
     const d = new Database(":memory:");
     d.pragma("foreign_keys = ON");
     MIGRACIONES_CONTROL.forEach((m) => d.exec(m));
+    for (const n of SALAS_PRUEBA) crearModulo(d, { nombre: n });
+    d.prepare("UPDATE chat_modulos SET repo = 'dueno/repo', repo_verificado_en = '2026-10-01T00:00:00.000Z'").run();
     return d;
   };
   const ana = { id: "g1", rol: "executive", email: "ana@datasheq.com", nombre: "Ana Pérez" };
@@ -800,9 +802,6 @@ async function main() {
     assert.equal(puedeAdministrarPortal({ rol: "admin" }), true);
     for (const rol of ["executive", "team"]) assert.equal(puedeAdministrarPortal({ rol }), false, rol);
   });
-  await prueba("siete salas con etiqueta C-…", () => {
-    assert.deepEqual(MODULOS.map((m) => m.nombre), ["C-Legal", "C-Controla", "C-Previene", "C-Lidera", "C-Acredita", "C-Capacita", "C-Investiga"]);
-  });
   await prueba("migración v7: borra los datos del chat, quita el bloqueo, crea el modelo nuevo y chat_modulos vacía", () => {
     const d = new Database(":memory:");
     d.pragma("foreign_keys = ON");
@@ -819,12 +818,14 @@ async function main() {
       assert.ok(tablas.includes(t), t);
       assert.deepEqual(d.prepare(`SELECT COUNT(*) n FROM ${t}`).get(), { n: 0 }, `${t} vacía`);
     }
-    // La primera solicitud tras la migración es GER-0001
+    // La primera solicitud tras la migración es GER-0001 (con una sala abierta, ya con repositorio verificado)
+    crearModulo(d, { nombre: "C-Legal" });
+    d.prepare("UPDATE chat_modulos SET repo = 'dueno/repo', repo_verificado_en = '2026-10-01T00:00:00.000Z'").run();
     const { solicitud: s } = enviarMensaje(d, "c-legal", ana, "hola", t0);
     assert.equal(codigoTicket(s.ticket), "GER-0001");
     // chat_modulos: autonomía por defecto «revisar» y solo «revisar» | «automatico»
     d.prepare("INSERT INTO chat_modulos (clave, nombre) VALUES ('c-x', 'C-X')").run();
-    assert.deepEqual(d.prepare("SELECT autonomia, archivado, repo FROM chat_modulos").get(), { autonomia: "revisar", archivado: 0, repo: null });
+    assert.deepEqual(d.prepare("SELECT autonomia, archivado, repo FROM chat_modulos WHERE clave = 'c-x'").get(), { autonomia: "revisar", archivado: 0, repo: null });
     assert.throws(() => d.prepare("UPDATE chat_modulos SET autonomia = 'otra'").run());
     // Rol del mensaje y estado del asistente restringidos
     assert.throws(() => d.prepare("INSERT INTO chat_mensajes (solicitud_id, autor_email, autor_nombre, rol, texto) VALUES (?, 'a', 'a', 'robot', 'x')").run(s.id));
@@ -896,7 +897,8 @@ async function main() {
     assert.throws(() => enviarMensaje(d, "c-legal", ana, "x".repeat(TEXTO_MAX + 1), t0), (e: ErrorSala) => e.status === 400);
     assert.equal(enviarMensaje(d, "c-legal", ana, "x".repeat(TEXTO_MAX), t0).nueva, true);
     assert.throws(() => enviarMensaje(d, "c-nada", ana, "hola", t0), (e: ErrorSala) => e.status === 404);
-    assert.throws(() => enviarMensaje(d, "c-lidera", ana, "hola", t0, {}), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
+    d.prepare("UPDATE chat_modulos SET repo = NULL WHERE clave = 'c-lidera'").run();
+    assert.throws(() => enviarMensaje(d, "c-lidera", ana, "hola", t0), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
     assert.equal((d.prepare("SELECT COUNT(*) n FROM chat_solicitudes WHERE sala = 'c-lidera'").get() as { n: number }).n, 0);
   });
   await prueba("tickets correlativos entre salas", () => {
@@ -913,7 +915,7 @@ async function main() {
     const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(50)]);
     const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(50)]);
     const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP"), Buffer.alloc(20)]);
-    const envio = (texto: string, fotos: { nombre: string; datos: Buffer }[], t = t0) => enviarMensaje(d, "c-legal", ana, texto, t, process.env, fotos, dir);
+    const envio = (texto: string, fotos: { nombre: string; datos: Buffer }[], t = t0) => enviarMensaje(d, "c-legal", ana, texto, t, fotos, dir);
     const falla = (fn: () => unknown, msg: string) => assert.throws(fn, (e: ErrorSala) => e.status === 400 && e.message === msg, msg);
     try {
       const a = envio("mira", [{ nombre: "uno.jpg", datos: jpg }, { nombre: "../dos.png", datos: png }, { nombre: "tres.webp", datos: webp }]);
@@ -941,7 +943,7 @@ async function main() {
       assert.equal(mensajesChat(d, a.solicitud.id).length, 4);
       assert.equal(fs.readdirSync(path.join(dir, "adjuntos", a.solicitud.id)).length, 6);
       // otra solicitud (otra sala) tiene su propio cupo de 6
-      assert.equal(enviarMensaje(d, "c-previene", beto, "x", t0, process.env, Array.from({ length: 6 }, (_, i) => ({ nombre: `${i}.jpg`, datos: jpg })), dir).mensaje.adjuntos.length, 6);
+      assert.equal(enviarMensaje(d, "c-previene", beto, "x", t0, Array.from({ length: 6 }, (_, i) => ({ nombre: `${i}.jpg`, datos: jpg })), dir).mensaje.adjuntos.length, 6);
       falla(() => envio("siete de golpe", Array.from({ length: 7 }, () => ({ nombre: "z.jpg", datos: jpg }))), "Una solicitud admite como máximo 6 fotos");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1005,7 +1007,7 @@ async function main() {
       reiniciarSincronizacion();
       const d = dbControl();
       const ids = [1, 2, 3, 99].map((n, i) => {
-        const id = enviarMensaje(d, MODULOS[i].clave, { ...ana, email: `p${i}@datasheq.com` }, "x", t0).solicitud.id;
+        const id = enviarMensaje(d, SALAS_PRUEBA[i].toLowerCase(), { ...ana, email: `p${i}@datasheq.com` }, "x", t0).solicitud.id;
         d.prepare("UPDATE chat_solicitudes SET issue_numero = ?, issue_repo = 'dueno/repo' WHERE id = ?").run(n, id);
         return id;
       });
@@ -1070,7 +1072,7 @@ async function main() {
   const issueCreado = { status: 201, json: { number: 41, html_url: "https://github.example/dueno/repo/issues/41" } };
   const datosIssue = (ticket = 7): DatosIssue => ({
     ticket,
-    modulo: moduloPorClave("c-legal") as Modulo,
+    modulo: moduloPorClave(dbControl(), "c-legal") as Modulo,
     titulo: "Informe DS 594",
     resumen: "r",
     solicitantes: [{ nombre: "Ana", email: "ana@datasheq.com" }],
@@ -1174,16 +1176,7 @@ async function main() {
     soltar();
     await primero;
   });
-  await prueba("repositorio por módulo: C-Legal por defecto, GITHUB_REPOS asigna, «-» oculta e ignora inválidos", () => {
-    assert.deepEqual(REPOS_POR_DEFECTO, { "c-legal": "datasheq-creator/clegal-railway" });
-    assert.deepEqual(modulosActivos({}), ["c-legal"]);
-    const env = { GITHUB_REPOS: "c-acredita=datasheq-creator/cacredita-railway; C-LEGAL=-\nc-lidera=no valido,c-nada=x/y" };
-    const r = reposDeModulos(env);
-    assert.equal(r["c-acredita"], "datasheq-creator/cacredita-railway");
-    assert.equal(r["c-legal"], null); // desactivada
-    assert.equal(r["c-lidera"], null); // inválido: se ignora
-    assert.deepEqual(modulosActivos(env), ["c-acredita"]);
-    assert.deepEqual([salaActiva("c-acredita", env), salaActiva("c-legal", env), repoDe("c-nada", env)], [true, false, null]);
+  await prueba("configDesdeEntorno: sin token no hay cuenta; con token, la de DataSHEQ", () => {
     assert.equal(configDesdeEntorno({}), null); // sin token
     assert.deepEqual(configDesdeEntorno({ GITHUB_TOKEN: "x" }), { api: "https://api.github.com", token: "x", cuenta: CUENTA_DATASHEQ });
   });
@@ -1216,26 +1209,27 @@ async function main() {
       olvidarEtiquetas();
     }
   });
-  await prueba("envío al repositorio de cada módulo: guarda issue_repo; sin repositorio, error definitivo", async () => {
+  await prueba("envío al repositorio de cada sala: guarda issue_repo; sin repositorio, error definitivo", async () => {
     const d = dbControl();
-    const env = { GITHUB_REPOS: "c-acredita=dueno/acredita,c-legal=-" };
-    const generar = (email: string, sala: string) => terminada(d, sala, { ...ana, email }); // con el entorno de las pruebas: todas activas
+    d.prepare("UPDATE chat_modulos SET repo = 'dueno/acredita' WHERE clave = 'c-acredita'").run();
+    const generar = (email: string, sala: string) => terminada(d, sala, { ...ana, email });
     pedidos.length = 0;
     manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : issueCreado);
     const acredita = generar("a@datasheq.com", "c-acredita");
-    assert.deepEqual(await enviarIssue(d, acredita, cfgFalso, { ...sinEspera, env }), { ok: true });
+    assert.deepEqual(await enviarIssue(d, acredita, cfgFalso, sinEspera), { ok: true });
     assert.ok(pedidos.includes("POST /repos/dueno/acredita/issues"), pedidos.join());
     assert.ok(!pedidos.some((p) => p.startsWith("POST /repos/dueno/repo/")));
     assert.deepEqual([solicitud(d, acredita)!.issue_repo, solicitud(d, acredita)!.issue_numero], ["dueno/acredita", 41]);
 
-    const legal = generar("b@datasheq.com", "c-legal"); // c-legal desactivada en este entorno
-    assert.deepEqual(await enviarIssue(d, legal, cfgFalso, { ...sinEspera, env }), { ok: false, error: SIN_REPO, reintento_en: null });
+    const legal = generar("b@datasheq.com", "c-legal");
+    d.prepare("UPDATE chat_modulos SET repo = NULL WHERE clave = 'c-legal'").run(); // se quita el repositorio
+    assert.deepEqual(await enviarIssue(d, legal, cfgFalso, sinEspera), { ok: false, error: SIN_REPO, reintento_en: null });
   });
   await prueba("seguimiento por repositorio: el mismo número en dos repositorios no se confunde", async () => {
     const d = dbControl();
     reiniciarSincronizacion();
     const ids = ["dueno/uno", "dueno/dos"].map((repo, i) => {
-      const id = enviarMensaje(d, MODULOS[i].clave, { ...ana, email: `s${i}@datasheq.com` }, "x", t0).solicitud.id;
+      const id = enviarMensaje(d, SALAS_PRUEBA[i].toLowerCase(), { ...ana, email: `s${i}@datasheq.com` }, "x", t0).solicitud.id;
       d.prepare("UPDATE chat_solicitudes SET issue_numero = 5, issue_repo = ? WHERE id = ?").run(repo, id);
       return id;
     });
@@ -1254,16 +1248,78 @@ async function main() {
       reiniciarSincronizacion();
     }
   });
-  await prueba("salas sin repositorio: ocultas en el portal y no se puede escribir en ellas", () => {
+  await prueba("salas sin repositorio verificado: «Próximamente» en el portal y no se puede escribir en ellas", () => {
     const d = dbControl();
-    const env = { GITHUB_REPOS: "c-acredita=dueno/acredita" }; // + C-Legal por defecto
-    assert.deepEqual(estadoSalas(d, false, env).map((s) => s.clave), ["c-legal", "c-acredita"]);
-    const admin = estadoSalas(d, true, env);
-    assert.equal(admin.length, MODULOS.length); // el panel las ve todas, con su repositorio
-    assert.deepEqual([admin.find((s) => s.clave === "c-acredita")?.repo, admin.find((s) => s.clave === "c-lidera")?.repo], ["dueno/acredita", null]);
-    assert.throws(() => enviarMensaje(d, "c-lidera", ana, "hola", t0, env), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
-    assert.equal(enviarMensaje(d, "c-acredita", ana, "hola", t0, env).nueva, true);
-    assert.deepEqual(estadoSalas(d, false, env).map((x) => [x.clave, x.abierta]), [["c-legal", false], ["c-acredita", true]]);
+    d.prepare("UPDATE chat_modulos SET repo = NULL, repo_verificado_en = NULL WHERE clave != 'c-acredita'").run();
+    const portal = estadoSalas(d);
+    assert.equal(portal.length, SALAS_PRUEBA.length); // el portal las lista todas, en orden
+    assert.deepEqual(portal.filter((s) => s.disponible).map((s) => s.clave), ["c-acredita"]);
+    assert.equal(portal[0].repo, undefined); // sin detalle no expone el repositorio
+    assert.equal(estadoSalas(d, true).find((s) => s.clave === "c-acredita")?.repo, "dueno/repo");
+    assert.throws(() => enviarMensaje(d, "c-lidera", ana, "hola", t0), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
+    assert.equal(enviarMensaje(d, "c-acredita", ana, "hola", t0).nueva, true);
+    assert.equal(estadoSalas(d).find((x) => x.clave === "c-acredita")?.abierta, true);
+  });
+  await prueba("salas (#29): crear, la clave es el slug del nombre y no se edita", () => {
+    const d = new Database(":memory:");
+    MIGRACIONES_CONTROL.forEach((m) => d.exec(m));
+    assert.deepEqual(listarModulos(d), []); // sin salas fijas
+    assert.equal(slugSala("Gestión de Riesgos"), "gestion-de-riesgos");
+    assert.equal(slugSala(" C-Legal! "), "c-legal");
+    const m = crearModulo(d, { nombre: "  Gestión de Riesgos ", area: "SSO", descripcion: "Riesgos", color: "#A21CAF", orden: 3 });
+    assert.deepEqual(
+      [m.clave, m.nombre, m.area, m.color, m.orden, m.autonomia, m.archivado, m.repo, m.repo_verificado_en],
+      ["gestion-de-riesgos", "Gestión de Riesgos", "SSO", "a21caf", 3, "revisar", false, null, null],
+    );
+    // Sin orden va al final; la clave repetida o sin letras se rechaza
+    assert.equal(crearModulo(d, { nombre: "Otra" }).orden, 4);
+    assert.throws(() => crearModulo(d, { nombre: "gestion de riesgos" }), (e: ErrorModulo) => e.status === 409);
+    assert.throws(() => crearModulo(d, { nombre: "!!!" }), (e: ErrorModulo) => e.status === 400);
+    assert.throws(() => crearModulo(d, { nombre: "  " }), (e: ErrorModulo) => e.status === 400);
+    assert.throws(() => crearModulo(d, { nombre: "X", color: "rojo" }), (e: ErrorModulo) => e.status === 400);
+    assert.throws(() => crearModulo(d, { nombre: "X", orden: -1 }), (e: ErrorModulo) => e.status === 400);
+    assert.throws(() => crearModulo(d, { nombre: "X", autonomia: "otra" as never }), (e: ErrorModulo) => e.status === 400);
+  });
+  await prueba("salas (#29): editar guarda nombre, área, descripción, color, orden y autonomía, nunca la clave", () => {
+    const d = new Database(":memory:");
+    MIGRACIONES_CONTROL.forEach((m) => d.exec(m));
+    crearModulo(d, { nombre: "Ventas" });
+    const e = editarModulo(d, "ventas", { nombre: "Comercial", area: "Ventas", descripcion: "d", color: "00FF00", orden: 9, autonomia: "automatico" });
+    assert.deepEqual(
+      [e.clave, e.nombre, e.area, e.descripcion, e.color, e.orden, e.autonomia],
+      ["ventas", "Comercial", "Ventas", "d", "00ff00", 9, "automatico"],
+    );
+    assert.equal(moduloPorClave(d, "comercial"), undefined); // la clave sigue siendo la del nombre original
+    assert.equal(editarModulo(d, "ventas", { area: "Otra" }).nombre, "Comercial"); // edición parcial
+    assert.throws(() => editarModulo(d, "nada", { nombre: "X" }), (x: ErrorModulo) => x.status === 404);
+    assert.throws(() => editarModulo(d, "ventas", { nombre: "" }), (x: ErrorModulo) => x.status === 400);
+  });
+  await prueba("salas (#29): archivar oculta la sala del portal y conserva el historial; restaurar la devuelve", () => {
+    const d = dbControl();
+    const id = enviarMensaje(d, "c-legal", ana, "hola", t0).solicitud.id;
+    archivarModulo(d, "c-legal", true);
+    assert.equal(moduloPorClave(d, "c-legal")?.archivado, true);
+    assert.ok(!estadoSalas(d).some((s) => s.clave === "c-legal"));
+    assert.ok(!listarModulos(d).some((s) => s.clave === "c-legal"));
+    assert.deepEqual(listarModulos(d, true).map((s) => s.clave), ["c-legal"]);
+    assert.equal(todosLosModulos(d).length, SALAS_PRUEBA.length); // los nombres del historial siguen disponibles
+    assert.throws(() => enviarMensaje(d, "c-legal", beto, "x", t0), (e: ErrorSala) => e.status === 404);
+    assert.equal(vistaSala(d, "c-legal").mensajes.length, 1); // el historial se conserva
+    archivarModulo(d, "c-legal", false);
+    assert.ok(estadoSalas(d).some((s) => s.clave === "c-legal"));
+    assert.equal(vistaSala(d, "c-legal").mensajes[0].texto, "hola");
+    assert.equal(solicitud(d, id)?.sala, "c-legal");
+    assert.equal(enviarMensaje(d, "c-legal", beto, "vuelvo", t0).nueva, false);
+    assert.throws(() => archivarModulo(d, "nada", true), (e: ErrorModulo) => e.status === 404);
+  });
+  await prueba("salas (#29): el portal las lista en orden, y repoDe solo devuelve repositorios verificados", () => {
+    const d = dbControl();
+    editarModulo(d, "c-investiga", { orden: 0 });
+    assert.equal(estadoSalas(d)[0].clave, "c-investiga");
+    assert.equal(repoDe(d, "c-legal"), "dueno/repo");
+    d.prepare("UPDATE chat_modulos SET repo_verificado_en = NULL WHERE clave = 'c-legal'").run();
+    assert.equal(repoDe(d, "c-legal"), null);
+    assert.equal(repoDe(d, "c-nada"), null);
   });
   falso.close();
 

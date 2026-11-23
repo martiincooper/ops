@@ -2,7 +2,6 @@
 
 import { ClipboardList, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
-import { moduloPorClave } from "@/lib/chat/modulos";
 import type { EstadoSincronizacion, EstadoVisible } from "@/lib/chat/seguimiento";
 import { api } from "@/lib/cliente";
 import { ChipEstadoIssue } from "./comun";
@@ -11,6 +10,7 @@ interface Requerimiento {
   id: string;
   ticket: string;
   sala: string;
+  sala_nombre: string;
   titulo: string | null;
   fecha: string | null;
   estado_solicitud: "abierta" | "terminada" | "cerrada";
@@ -55,7 +55,7 @@ export default function MisRequerimientos() {
           <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
             <div className="min-w-0 flex-1">
               <p className="text-sm text-tinta-3">
-                <span className="font-semibold tabular-nums text-tinta">{r.ticket}</span> · {moduloPorClave(r.sala)?.nombre ?? r.sala}
+                <span className="font-semibold tabular-nums text-tinta">{r.ticket}</span> · {r.sala_nombre}
                 {r.fecha && <> · {fmt.format(new Date(r.fecha))}</>}
               </p>
               <p className="mt-0.5 text-tinta">{r.titulo ?? (r.estado_solicitud === "abierta" ? "Conversación abierta" : "Sin título")}</p>

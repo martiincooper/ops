@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ modulo: string }> };
 export const GET = manejar<Ctx>(async (req, { params }) => {
   const { db } = await requireGerencia(req);
   const { modulo } = await params;
-  const sala = enSala(() => exigirSala(modulo));
+  const sala = enSala(() => exigirSala(db, modulo));
   const desde = Number(req.nextUrl.searchParams.get("desde"));
   return NextResponse.json(vistaSala(db, sala, Number.isInteger(desde) && desde > 0 ? desde : 0));
 });
