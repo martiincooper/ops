@@ -13,6 +13,7 @@ import {
   leerEtapas,
   tramos,
 } from "./etapas";
+import { type Hito, leerHitos } from "./hitos";
 import { ESTADOS_PAGO, type EstadoPago, type TipoCosto } from "./esquemas";
 import { calcularProgreso, porcentaje } from "./metricas";
 import { type Metas, leerMetas } from "./metas";
@@ -375,7 +376,12 @@ export interface ProyectoEnCurso {
   costo_clp: number;
   pct_costo: number | null;
   situacion_costo: SituacionCosto;
+  /** Hitos ya logrados, en orden cronológico. */
+  hitos: HitoExec[];
 }
+
+/** Hito de un proyecto tal como lo ve gerencia (sin datos de auditoría). */
+export type HitoExec = Pick<Hito, "id" | "etapa" | "titulo" | "detalle" | "fecha">;
 
 export interface ProyectoEntregado {
   id: string;
@@ -396,6 +402,8 @@ export interface ProyectoEntregado {
   pct_costo: number | null;
   situacion_costo: SituacionCosto;
   costo: EstadoKpi;
+  /** Hitos ya logrados, en orden cronológico. */
+  hitos: HitoExec[];
 }
 
 export interface EtapaPipeline {
@@ -683,6 +691,9 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
     compras: number;
   }[];
   const historial = leerEtapas(db);
+  const hitosPorProyecto = leerHitos(db);
+  const hitosDe = (id: string): HitoExec[] =>
+    (hitosPorProyecto.get(id) ?? []).map(({ id, etapa, titulo, detalle, fecha }) => ({ id, etapa, titulo, detalle, fecha }));
   const pctCosto = (p: { estimado_clp: number; total_clp: number }) =>
     p.estimado_clp > 0 ? Math.round((p.total_clp / p.estimado_clp) * 100) : null;
 
@@ -717,6 +728,7 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
         costo_clp: p.total_clp,
         pct_costo: pct,
         situacion_costo: situacionCosto(pct, metas.tolerancia_costo_pct),
+        hitos: hitosDe(p.id),
       } satisfies ProyectoEnCurso;
     });
   const desarrollo = enCurso
@@ -798,6 +810,7 @@ export function metricasExec(db: DB, hoy: string, metas: Metas = leerMetas(db)):
         pct_costo: pct,
         situacion_costo: sc,
         costo: KPI_COSTO[sc],
+        hitos: hitosDe(p.id),
       } satisfies ProyectoEntregado;
     })
     .sort((a, b) => (b.fecha_entregado ?? "").localeCompare(a.fecha_entregado ?? "") || a.codigo.localeCompare(b.codigo));
