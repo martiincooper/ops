@@ -1,8 +1,8 @@
 // Portal gerencial (chatbot): las 7 salas, su propósito y el dominio permitido.
 // Sin "server-only": lo usan también los componentes cliente (tarjetas de sala, login del portal).
 
-export const DOMINIO_GERENCIA = "datasheq.com";
-export const MENSAJE_ACCESO_DENEGADO = "Acceso denegado: Este sistema es de uso exclusivo para personal de @datasheq.com";
+export const EMPRESA_GERENCIA = "datasheq";
+export const MENSAJE_ACCESO_DENEGADO = "El portal gerencial es solo para gerencia de Datasheq";
 export const MENSAJE_SALA_OCUPADA = "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde";
 
 export type ClaveModulo =
@@ -130,8 +130,14 @@ export function moduloPorClave(clave: string | null | undefined): Modulo | undef
   return MODULOS.find((m) => m.clave === clave);
 }
 
-export function esDominioGerencia(email: string): boolean {
-  return email.slice(email.lastIndexOf("@") + 1).toLowerCase() === DOMINIO_GERENCIA;
+/** Portal gerencial: gerentes (executive) de la empresa Datasheq, o cualquier administrador (sin empresa, cualquier dominio). */
+export function puedeUsarPortal(u: { rol: string; empresa: string | null }): boolean {
+  return u.rol === "admin" || (u.rol === "executive" && u.empresa === EMPRESA_GERENCIA);
+}
+
+/** Panel del portal en /admin: cualquier administrador. */
+export function puedeAdministrarPortal(u: { rol: string }): boolean {
+  return u.rol === "admin";
 }
 
 export type Prioridad = "critica" | "alta" | "media" | "baja";

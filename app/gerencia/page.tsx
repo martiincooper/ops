@@ -2,7 +2,7 @@ import AccesoDenegado from "@/components/gerencia/AccesoDenegado";
 import { CabeceraPortal } from "@/components/gerencia/comun";
 import Portal from "@/components/gerencia/Portal";
 import { requirePagina } from "@/lib/auth";
-import { esDominioGerencia } from "@/lib/chat/modulos";
+import { puedeUsarPortal } from "@/lib/chat/modulos";
 import { fechaLarga, hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ const AVISOS: Record<string, string> = {
 
 export default async function Gerencia({ searchParams }: { searchParams: Promise<{ aviso?: string }> }) {
   const u = await requirePagina(["executive", "admin", "team"]);
-  if (!esDominioGerencia(u.email)) return <AccesoDenegado email={u.email} />;
+  if (!puedeUsarPortal(u)) return <AccesoDenegado email={u.email} />;
   const { aviso } = await searchParams;
   return (
     <div className="min-h-dvh">

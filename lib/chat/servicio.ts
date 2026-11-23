@@ -8,7 +8,7 @@ import { type ResultadoEnvio, enviarIssue } from "./envio";
 import { configGithub } from "./github";
 import { type Arbol, arbolDe } from "./arboles";
 import { type Linea, type Requerimiento, preguntaActual, requerimientoDesdeFlujo } from "./flujo";
-import { MENSAJE_ACCESO_DENEGADO, codigoTicket, esDominioGerencia, moduloPorClave, type Modulo } from "./modulos";
+import { MENSAJE_ACCESO_DENEGADO, codigoTicket, moduloPorClave, puedeUsarPortal, type Modulo } from "./modulos";
 import {
   type Conversacion,
   ErrorSala,
@@ -20,18 +20,16 @@ import {
 } from "./salas";
 import { TURNOS_MAX, turnosDelAsistente } from "./uso";
 
-/** Cualquier cuenta @datasheq.com (equipo, gerencia o administración); el resto, acceso denegado. */
+/** Gerentes de Datasheq y administradores (cualquier dominio); el resto, acceso denegado. */
 export async function requireGerencia(req: NextRequest): Promise<{ u: Usuario; p: Persona; db: DB }> {
   const u = await requireUsuario(req);
-  if (!esDominioGerencia(u.email)) throw new HttpError(403, MENSAJE_ACCESO_DENEGADO);
+  if (!puedeUsarPortal(u)) throw new HttpError(403, MENSAJE_ACCESO_DENEGADO);
   return { u, p: personaDe(u), db: getDbControl() };
 }
 
-/** Panel del portal en /admin: administradores con email @datasheq.com. */
+/** Panel del portal en /admin: cualquier administrador, sea cual sea su dominio. */
 export async function requireAdminPortal(req: NextRequest): Promise<Usuario> {
-  const u = await requireUsuario(req, ["admin"]);
-  if (!esDominioGerencia(u.email)) throw new HttpError(403, MENSAJE_ACCESO_DENEGADO);
-  return u;
+  return requireUsuario(req, ["admin"]);
 }
 
 export const personaDe = (u: Usuario): Persona => ({ id: u.id, rol: u.rol, email: u.email, nombre: u.nombre });

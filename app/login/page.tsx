@@ -4,7 +4,6 @@ import { ArrowLeft, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import Marca from "@/components/Marca";
 import PinPad from "@/components/PinPad";
-import { DOMINIO_GERENCIA, MENSAJE_ACCESO_DENEGADO, esDominioGerencia } from "@/lib/chat/modulos";
 import { ErrorApi, api } from "@/lib/cliente";
 
 export default function Login() {
@@ -13,7 +12,7 @@ export default function Login() {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reinicio, setReinicio] = useState(0);
-  // /login?portal=gerencia: portal gerencial · /login?portal=admin: «Acceso Administrador» (ambos solo @datasheq.com)
+  // /login?portal=gerencia: portal gerencial · /login?portal=admin: «Acceso Administrador»
   const [portal, setPortal] = useState<"gerencia" | "admin" | null>(null);
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get("portal");
@@ -61,7 +60,6 @@ export default function Login() {
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError("Ingresa un email válido");
-                if (portal && !esDominioGerencia(email.trim())) return setError(MENSAJE_ACCESO_DENEGADO);
                 setEmail(email.trim().toLowerCase());
                 setError(null);
                 setPaso("pin");
@@ -73,9 +71,9 @@ export default function Login() {
                 </h1>
                 <p className="mt-1 text-sm text-tinta-3">
                   {portal === "admin"
-                    ? `Ingresa con tus credenciales de administrador (@${DOMINIO_GERENCIA}) para ver el historial, las salas y los Issues de GitHub.`
+                    ? `Ingresa con tus credenciales de administrador para ver el historial, las salas y los Issues de GitHub.`
                     : portal
-                      ? `Uso exclusivo para personal de @${DOMINIO_GERENCIA}. Ingresa con tu email y tu código de 6 dígitos.`
+                      ? `Uso exclusivo para gerencia de Datasheq. Ingresa con tu email y tu código de 6 dígitos.`
                       : "Con tu email de trabajo y tu código de 6 dígitos."}
                 </p>
               </div>
@@ -90,7 +88,7 @@ export default function Login() {
                   autoFocus
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={portal ? `nombre@${DOMINIO_GERENCIA}` : "nombre@empresa.cl"}
+                  placeholder={"nombre@empresa.cl"}
                   className="campo"
                 />
               </div>

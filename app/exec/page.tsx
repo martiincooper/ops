@@ -24,7 +24,7 @@ import { ESTADO_PAGO } from "@/components/EstadoPago";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
 import { empresaDe, requirePagina } from "@/lib/auth";
-import { esDominioGerencia } from "@/lib/chat/modulos";
+import { puedeUsarPortal } from "@/lib/chat/modulos";
 import { getDbEmpresa } from "@/lib/db";
 import { EMPRESAS } from "@/lib/empresas";
 import { type DiasPorEtapa, NOMBRE_ESTADO, diasEntre } from "@/lib/etapas";
@@ -366,7 +366,7 @@ export default async function Exec({ searchParams }: { searchParams: Promise<{ e
                 <LayoutList size={18} />
               </Link>
             )}
-            {esDominioGerencia(u.email) && (
+            {puedeUsarPortal(u) && (
               <Link href="/gerencia" title="Portal gerencial (asistente)" className="boton-suave bg-superficie">
                 <MessagesSquare size={16} aria-hidden /> <span className="hidden sm:inline">Portal gerencial</span>
               </Link>

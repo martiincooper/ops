@@ -20,7 +20,7 @@ const PERMITIDAS_CAMBIO_PIN = ["/cambiar-pin"];
 const ACCESO_PAGINAS: { prefijo: string; roles: Rol[] }[] = [
   { prefijo: "/admin", roles: ["admin"] },
   { prefijo: "/exec", roles: ["executive", "admin"] },
-  { prefijo: "/gerencia", roles: ["executive", "admin", "team"] }, // solo @datasheq.com (lo valida la página)
+  { prefijo: "/gerencia", roles: ["executive", "admin", "team"] }, // gerentes de Datasheq y administradores (lo valida la página)
   { prefijo: "/checkin", roles: ["team"] },
   { prefijo: "/mi-progreso", roles: ["team"] },
 ];

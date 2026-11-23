@@ -18,7 +18,7 @@ import { type Entrada, type Linea, type PreguntaVista, type ResultadoTurno, avan
 import { RUTA_DOC, documento as documentoArboles } from "./arboles-md";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos, turnosDelAsistente } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
-import { type ClaveModulo, MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTicket, esDominioGerencia, moduloPorClave } from "../lib/chat/modulos";
+import { type ClaveModulo, MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTicket, moduloPorClave, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
 import {
   ErrorSala,
   INACTIVIDAD_MIN,
@@ -790,12 +790,17 @@ async function main() {
   const t0 = new Date("2026-10-07T13:00:00Z");
   const mas = (min: number) => new Date(t0.getTime() + min * 60_000);
 
-  await prueba("solo @datasheq.com entra al portal", () => {
-    assert.equal(esDominioGerencia("ana@datasheq.com"), true);
-    assert.equal(esDominioGerencia("Ana@DataSheq.com"), true);
-    for (const e of ["ana@gmail.com", "ana@hotmail.com", "ana@datasheq.cl", "ana@datasheq.com.evil.io", "ana@aether-tech.dev"]) {
-      assert.equal(esDominioGerencia(e), false, e);
-    }
+  await prueba("portal (#27): gerentes de Datasheq y administradores de cualquier dominio", () => {
+    assert.equal(puedeUsarPortal({ rol: "executive", empresa: "datasheq" }), true);
+    assert.equal(puedeUsarPortal({ rol: "admin", empresa: null }), true); // administrador: sin empresa, cualquier dominio
+    assert.equal(puedeUsarPortal({ rol: "executive", empresa: "aether-tech" }), false);
+    assert.equal(puedeUsarPortal({ rol: "team", empresa: "datasheq" }), false);
+    assert.equal(puedeUsarPortal({ rol: "team", empresa: "aether-tech" }), false);
+    assert.equal(puedeUsarPortal({ rol: "executive", empresa: null }), false);
+  });
+  await prueba("panel del portal (#27): solo administradores", () => {
+    assert.equal(puedeAdministrarPortal({ rol: "admin" }), true);
+    for (const rol of ["executive", "team"]) assert.equal(puedeAdministrarPortal({ rol }), false, rol);
   });
   await prueba("siete salas con etiqueta C-…", () => {
     assert.deepEqual(MODULOS.map((m) => m.nombre), ["C-Legal", "C-Controla", "C-Previene", "C-Lidera", "C-Acredita", "C-Capacita", "C-Investiga"]);
