@@ -10,30 +10,23 @@ import { ErrorGasto, crearGasto, editarGasto, eliminarGasto, necesitaTipoCambio 
 import { borrarTarea, crearTarea, marcarTarea, tareasAbiertas } from "../lib/tareas";
 import { AVISO_PROYECTOS_POR_ETAPA, type EstadoProyecto, leerEtapas, registrarCambioEtapa } from "../lib/etapas";
 import { MIGRACIONES_CONTROL, MIGRACIONES_EMPRESA } from "../lib/migraciones";
-import { ARBOLES, type Arbol, FIN, MAX_PREGUNTAS, arbolDe, erroresDeEsquema, largos, validarArbol } from "../lib/chat/arboles";
 import { ESPERAS_MIN, MAX_REINTENTOS, SIN_REPO, SIN_TOKEN, enviarIssue, pendientesDeReintento, procesarPendientes } from "../lib/chat/envio";
 import { CUENTA_DATASHEQ, type DatosIssue, ETIQUETA_REVISION, ErrorGithub, configDesdeEntorno, crearIssueEn, olvidarEtiquetas } from "../lib/chat/githubApi";
 import { REPOS_POR_DEFECTO, modulosActivos, repoDe, reposDeModulos, salaActiva } from "../lib/chat/repos";
-import { type Entrada, type Linea, type PreguntaVista, type ResultadoTurno, avanzar, preguntaActual, requerimientoDesdeFlujo } from "../lib/chat/flujo";
-import { RUTA_DOC, documento as documentoArboles } from "./arboles-md";
-import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos, turnosDelAsistente } from "../lib/chat/uso";
+import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
 import { estadoVisible, reiniciarSincronizacion, sincronizar } from "../lib/chat/seguimiento";
-import { type ClaveModulo, MENSAJE_SALA_OCUPADA, MODULOS, type Modulo, codigoTicket, moduloPorClave, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
+import { MODULOS, type Modulo, codigoTicket, moduloPorClave, puedeAdministrarPortal, puedeUsarPortal } from "../lib/chat/modulos";
 import {
   ErrorSala,
-  INACTIVIDAD_MIN,
   SALA_NO_DISPONIBLE,
-  agregarMensaje,
-  asignarTicket,
-  cerrarConversacion,
-  conversacion as conversacionChat,
-  entrarSala,
+  TEXTO_MAX,
+  enviarMensaje,
   estadoSalas,
-  exigirActiva,
-  liberarSala,
-  liberarSalasDe,
   mensajes as mensajesChat,
-  tocar,
+  participantes,
+  solicitud,
+  solicitudAbierta,
+  vistaSala,
 } from "../lib/chat/salas";
 import { ErrorObjetivo, agregarObjetivo, agregarObjetivoJefatura, bitacoraEditable, comenzarJornada, cambiarBloqueo, cambiarObjetivo, quitarObjetivo } from "../lib/objetivos";
 import { cuentaDeRegistros, eliminarCuenta, idsHeredados } from "../lib/registros";
@@ -778,7 +771,7 @@ async function main() {
     assert.equal(await verificarPin("482916", h), false);
   });
 
-  console.log("Portal gerencial (salas y entrevista)");
+  console.log("Portal gerencial (salas como chat grupal)");
   const dbControl = () => {
     const d = new Database(":memory:");
     d.pragma("foreign_keys = ON");
@@ -805,101 +798,117 @@ async function main() {
   await prueba("siete salas con etiqueta C-…", () => {
     assert.deepEqual(MODULOS.map((m) => m.nombre), ["C-Legal", "C-Controla", "C-Previene", "C-Lidera", "C-Acredita", "C-Capacita", "C-Investiga"]);
   });
-  await prueba("entrar bloquea la sala; otra persona recibe 409 con el aviso", () => {
+  await prueba("migración v7: borra los datos del chat, quita el bloqueo, crea el modelo nuevo y chat_modulos vacía", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    MIGRACIONES_CONTROL.slice(0, 6).forEach((m) => d.exec(m));
+    // Datos del modelo anterior (v6): conversación con mensajes, sala bloqueada y un Issue ya creado en GitHub
+    d.prepare("INSERT INTO chat_conversaciones (id, modulo, usuario_id, usuario_rol, usuario_email, usuario_nombre, ticket, issue_numero, issue_repo) VALUES ('v', 'c-legal', 'g1', 'executive', 'ana@datasheq.com', 'Ana', 41, 9, 'dueno/repo')").run();
+    d.prepare("INSERT INTO chat_mensajes (conversacion_id, autor, texto) VALUES ('v', 'usuario', 'hola')").run();
+    d.prepare("INSERT INTO chat_salas (modulo, conversacion_id, usuario_email) VALUES ('c-legal', 'v', 'ana@datasheq.com')").run();
+    d.exec(MIGRACIONES_CONTROL[6]);
+    const tablas = (d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+    assert.ok(!tablas.includes("chat_salas") && !tablas.includes("chat_conversaciones"), tablas.join());
+    for (const t of ["chat_solicitudes", "chat_mensajes", "chat_participantes", "chat_modulos"]) {
+      assert.ok(tablas.includes(t), t);
+      assert.deepEqual(d.prepare(`SELECT COUNT(*) n FROM ${t}`).get(), { n: 0 }, `${t} vacía`);
+    }
+    // La primera solicitud tras la migración es GER-0001
+    const { solicitud: s } = enviarMensaje(d, "c-legal", ana, "hola", t0);
+    assert.equal(codigoTicket(s.ticket), "GER-0001");
+    // chat_modulos: autonomía por defecto «revisar» y solo «revisar» | «automatico»
+    d.prepare("INSERT INTO chat_modulos (clave, nombre) VALUES ('c-x', 'C-X')").run();
+    assert.deepEqual(d.prepare("SELECT autonomia, archivado, repo FROM chat_modulos").get(), { autonomia: "revisar", archivado: 0, repo: null });
+    assert.throws(() => d.prepare("UPDATE chat_modulos SET autonomia = 'otra'").run());
+    // Rol del mensaje y estado del asistente restringidos
+    assert.throws(() => d.prepare("INSERT INTO chat_mensajes (solicitud_id, autor_email, autor_nombre, rol, texto) VALUES (?, 'a', 'a', 'robot', 'x')").run(s.id));
+    assert.throws(() => d.prepare("UPDATE chat_solicitudes SET asistente_estado = 'otro'").run());
+  });
+  await prueba("el primer mensaje abre una solicitud; los siguientes se unen y el autor queda como participante", () => {
     const d = dbControl();
-    const { conversacion: c, nueva } = entrarSala(d, "c-legal", ana, t0);
-    assert.equal(nueva, true);
-    assert.equal(
-      mensajesChat(d, c.id)[0].texto,
-      "Hola, Ana. Te damos la bienvenida al portal gerencial de DataSheq. Es un gusto saludarte. Estás en la sala C-Legal " +
-        "(Cumplimiento Legal), el módulo que identifica la normativa aplicable a la operación, evalúa su cumplimiento " +
-        "artículo por artículo y genera informes en PDF. ¿En qué puedo colaborar contigo hoy?",
+    assert.equal(solicitudAbierta(d, "c-legal"), undefined);
+    const a = enviarMensaje(d, "c-legal", ana, "  Necesito un informe  ", t0);
+    assert.equal(a.nueva, true);
+    assert.deepEqual([a.solicitud.estado, a.solicitud.ticket, a.solicitud.asistente_estado, a.solicitud.terminado], ["abierta", 1, "idle", 0]);
+    assert.deepEqual(
+      [a.mensaje.texto, a.mensaje.rol, a.mensaje.autor_email, a.mensaje.autor_nombre, a.mensaje.creado_en],
+      ["Necesito un informe", "gerente", "ana@datasheq.com", "Ana Pérez", t0.toISOString()],
     );
-    assert.throws(() => entrarSala(d, "c-legal", beto, mas(1)), (e: ErrorSala) => e.status === 409 && e.message === MENSAJE_SALA_OCUPADA);
-    // otra sala sí está libre
-    assert.equal(entrarSala(d, "c-previene", beto, mas(1)).nueva, true);
-    const salas = estadoSalas(d, beto, false, mas(1));
-    assert.deepEqual(salas.filter((s) => s.ocupada).map((s) => [s.clave, s.propia]), [["c-legal", false], ["c-previene", true]]);
-    assert.equal(salas.find((s) => s.clave === "c-legal")?.usuario_email, undefined); // no ve quién la ocupa
-  });
-  await prueba("la misma persona retoma su conversación al volver a entrar", () => {
-    const d = dbControl();
-    const a = entrarSala(d, "c-legal", ana, t0).conversacion;
-    const b = entrarSala(d, "c-legal", { ...ana, email: "ANA@datasheq.com" }, mas(2));
+    const b = enviarMensaje(d, "c-legal", { ...beto, email: "Beto@datasheq.com" }, "Yo también", mas(1));
     assert.equal(b.nueva, false);
-    assert.equal(b.conversacion.id, a.id);
+    assert.equal(b.solicitud.id, a.solicitud.id);
+    enviarMensaje(d, "c-legal", ana, "otro más", mas(2)); // Ana no se duplica como participante
+    assert.deepEqual(participantes(d, a.solicitud.id).map((x) => x.email), ["ana@datasheq.com", "beto@datasheq.com"]);
+    assert.deepEqual(mensajesChat(d, a.solicitud.id).map((m) => m.texto), ["Necesito un informe", "Yo también", "otro más"]);
+    // Cada sala tiene lo suyo
+    assert.equal(enviarMensaje(d, "c-previene", beto, "hola", mas(3)).solicitud.ticket, 2);
+    assert.equal(solicitudAbierta(d, "c-legal")?.id, a.solicitud.id);
   });
-  await prueba("se libera por inactividad (y un latido la mantiene)", () => {
+  await prueba("sin bloqueo: varias personas a la vez, sin límite de tiempo ni expiración", () => {
     const d = dbControl();
-    const c = entrarSala(d, "c-legal", ana, t0).conversacion;
-    agregarMensaje(d, c.id, "usuario", "Necesitamos evaluar el DS 594", undefined, mas(1));
-    tocar(d, c.id, mas(INACTIVIDAD_MIN - 1)); // latido
-    assert.throws(() => entrarSala(d, "c-legal", beto, mas(INACTIVIDAD_MIN + 1)), ErrorSala);
-    assert.equal(entrarSala(d, "c-legal", beto, mas(2 * INACTIVIDAD_MIN)).nueva, true);
-    assert.equal(conversacionChat(d, c.id)?.estado, "expirada"); // queda en el historial
-    assert.throws(() => exigirActiva(d, c.id, ana, mas(2 * INACTIVIDAD_MIN)), (e: ErrorSala) => e.status === 410);
+    const a = enviarMensaje(d, "c-legal", ana, "uno", t0).solicitud;
+    // Cuatro días después sigue abierta y otra persona escribe en ella
+    const lejos = new Date(t0.getTime() + 4 * 24 * 60 * 60_000);
+    const b = enviarMensaje(d, "c-legal", beto, "dos", lejos);
+    assert.equal(b.nueva, false);
+    assert.equal(b.solicitud.id, a.id);
+    assert.equal(solicitud(d, a.id)?.estado, "abierta");
+    // Ya no existen las tablas ni funciones de bloqueo
+    assert.equal(d.prepare("SELECT 1 FROM sqlite_master WHERE name = 'chat_salas'").get(), undefined);
   });
-  await prueba("finalizar libera la sala; sin respuestas no queda historial", () => {
+  await prueba("a lo más una solicitud abierta por sala; tras cerrarla, el siguiente mensaje abre otra", () => {
     const d = dbControl();
-    const c = entrarSala(d, "c-lidera", ana, t0).conversacion;
-    cerrarConversacion(d, c.id, "finalizada", mas(1));
-    assert.equal(conversacionChat(d, c.id), undefined);
-    assert.equal(entrarSala(d, "c-lidera", beto, mas(2)).nueva, true);
-    assert.equal(liberarSala(d, "c-lidera", mas(3)), true);
-    assert.equal(estadoSalas(d, null, true, mas(3)).some((s) => s.ocupada), false);
+    const a = enviarMensaje(d, "c-legal", ana, "uno", t0).solicitud;
+    assert.throws(() => d.prepare("INSERT INTO chat_solicitudes (id, sala, ticket) VALUES ('x', 'c-legal', 99)").run(), /UNIQUE/);
+    d.prepare("UPDATE chat_solicitudes SET estado = 'terminada' WHERE id = ?").run(a.id);
+    const b = enviarMensaje(d, "c-legal", beto, "nuevo tema", mas(5));
+    assert.equal(b.nueva, true);
+    assert.deepEqual([b.solicitud.ticket, b.solicitud.id === a.id], [2, false]);
+    assert.deepEqual(participantes(d, b.solicitud.id).map((x) => x.email), ["beto@datasheq.com"]);
   });
-  await prueba("al cerrar sesión se liberan las salas de la cuenta (y solo las suyas)", () => {
+  await prueba("abrir una sala muestra todo el historial; con `desde` solo los mensajes más nuevos", () => {
     const d = dbControl();
-    const c = entrarSala(d, "c-legal", ana, t0).conversacion;
-    agregarMensaje(d, c.id, "usuario", "Necesitamos un informe", undefined, mas(1));
-    entrarSala(d, "c-previene", beto, mas(1));
-    assert.equal(liberarSalasDe(d, "ANA@datasheq.com", mas(2)), 1);
-    assert.equal(conversacionChat(d, c.id)?.estado, "finalizada"); // tuvo respuestas: queda en el historial
-    // C-Legal queda libre de inmediato (sin esperar la inactividad) y la sala de Beto no se toca
-    const ocupadas = estadoSalas(d, null, true, mas(2)).filter((s) => s.ocupada);
-    assert.deepEqual(ocupadas.map((s) => [s.clave, s.usuario_email]), [["c-previene", "beto@datasheq.com"]]);
-    const carla = { id: "g3", rol: "team", email: "carla@datasheq.com", nombre: "Carla Soto" };
-    assert.equal(entrarSala(d, "c-legal", carla, mas(3)).nueva, true);
-    assert.equal(liberarSalasDe(d, "nadie@datasheq.com", mas(4)), 0);
+    const a = enviarMensaje(d, "c-legal", ana, "uno", t0);
+    enviarMensaje(d, "c-legal", beto, "dos", mas(1));
+    d.prepare("UPDATE chat_solicitudes SET estado = 'cerrada' WHERE id = ?").run(a.solicitud.id);
+    enviarMensaje(d, "c-legal", ana, "tres", mas(2));
+    enviarMensaje(d, "c-previene", beto, "otra sala", mas(3));
+    const v = vistaSala(d, "c-legal");
+    assert.deepEqual(v.solicitudes.map((x) => [x.ticket, x.estado]), [[1, "cerrada"], [3 - 1, "abierta"]]);
+    assert.deepEqual(v.mensajes.map((m) => [m.texto, m.autor_nombre]), [["uno", "Ana Pérez"], ["dos", "Beto Rojas"], ["tres", "Ana Pérez"]]);
+    assert.equal(v.ultimo_id, v.mensajes[2].id);
+    // Consulta periódica: solo lo posterior al último visto
+    assert.deepEqual(vistaSala(d, "c-legal", v.mensajes[1].id).mensajes.map((m) => m.texto), ["tres"]);
+    assert.deepEqual(vistaSala(d, "c-legal", v.ultimo_id).mensajes, []);
+    enviarMensaje(d, "c-legal", beto, "cuatro", mas(4));
+    assert.deepEqual(vistaSala(d, "c-legal", v.ultimo_id).mensajes.map((m) => m.texto), ["cuatro"]);
+    assert.deepEqual(vistaSala(d, "c-lidera").mensajes, []); // sala sin historial
   });
-  await prueba("una sala a la vez: entrar a otra libera la anterior", () => {
+  await prueba("mensajes inválidos y salas desconocidas o sin repositorio", () => {
     const d = dbControl();
-    const c = entrarSala(d, "c-legal", ana, t0).conversacion;
-    agregarMensaje(d, c.id, "usuario", "algo", undefined, mas(1));
-    entrarSala(d, "c-previene", ana, mas(2));
-    assert.equal(conversacionChat(d, c.id)?.estado, "finalizada");
-    assert.equal(entrarSala(d, "c-legal", beto, mas(3)).nueva, true);
+    for (const t of ["", "   \n "]) assert.throws(() => enviarMensaje(d, "c-legal", ana, t, t0), (e: ErrorSala) => e.status === 400);
+    assert.throws(() => enviarMensaje(d, "c-legal", ana, "x".repeat(TEXTO_MAX + 1), t0), (e: ErrorSala) => e.status === 400);
+    assert.equal(enviarMensaje(d, "c-legal", ana, "x".repeat(TEXTO_MAX), t0).nueva, true);
+    assert.throws(() => enviarMensaje(d, "c-nada", ana, "hola", t0), (e: ErrorSala) => e.status === 404);
+    assert.throws(() => enviarMensaje(d, "c-lidera", ana, "hola", t0, {}), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
+    assert.equal((d.prepare("SELECT COUNT(*) n FROM chat_solicitudes WHERE sala = 'c-lidera'").get() as { n: number }).n, 0);
   });
-  await prueba("tickets correlativos", () => {
+  await prueba("tickets correlativos entre salas", () => {
     const d = dbControl();
-    const a = entrarSala(d, "c-legal", ana, t0).conversacion;
-    const b = entrarSala(d, "c-previene", beto, t0).conversacion;
-    assert.equal(asignarTicket(d, a.id), 1);
-    assert.equal(asignarTicket(d, b.id), 2);
-    assert.equal(asignarTicket(d, a.id), 1); // no cambia si ya tiene
+    const a = enviarMensaje(d, "c-legal", ana, "a", t0).solicitud;
+    const b = enviarMensaje(d, "c-previene", beto, "b", t0).solicitud;
+    assert.deepEqual([a.ticket, b.ticket], [1, 2]);
     assert.equal(codigoTicket(7), "GER-0007");
   });
-  await prueba("cupo por minuto por cuenta: 30 turnos y 3 «generar», se renueva al minuto", () => {
+
+  await prueba("cupo por minuto por cuenta: 30 mensajes, se renueva al minuto", () => {
     reiniciarCupos();
     const t = Date.parse("2026-10-08T15:00:00Z");
     for (let i = 0; i < CUPO_POR_MINUTO.mensaje; i++) assert.equal(consumirCupo("ana@datasheq.com", "mensaje", t + i * 1000), true);
     assert.equal(consumirCupo("ANA@datasheq.com", "mensaje", t + 30_000), false); // mismo correo, sin distinguir mayúsculas
     assert.equal(consumirCupo("beto@datasheq.com", "mensaje", t + 30_000), true); // cada cuenta tiene su cupo
-    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 30_000), true); // cupos separados por tipo
-    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 31_000), true);
-    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 32_000), true);
-    assert.equal(consumirCupo("ana@datasheq.com", "generar", t + 33_000), false);
     assert.equal(consumirCupo("ana@datasheq.com", "mensaje", t + 61_000), true); // pasó el minuto
     reiniciarCupos();
-  });
-  await prueba("turnos del asistente sin el saludo; el saludo deja la sala en la primera pregunta del árbol", () => {
-    const d = dbControl();
-    const a = entrarSala(d, "c-legal", ana, t0).conversacion;
-    assert.equal(turnosDelAsistente(d, a.id), 0);
-    assert.equal(mensajesChat(d, a.id)[0].meta?.nodo, "inicio");
-    agregarMensaje(d, a.id, "usuario", "x", undefined, mas(1));
-    agregarMensaje(d, a.id, "robot", "y", undefined, mas(1));
-    assert.equal(turnosDelAsistente(d, a.id), 1);
   });
   await prueba("estado visible del requerimiento: pendiente, abierto, en curso, cerrado y descartado", () => {
     const e = (issue_numero: number | null, issue_estado: string | null, issue_motivo: string | null = null, issue_asignado: string | null = null) =>
@@ -936,12 +945,12 @@ async function main() {
       reiniciarSincronizacion();
       const d = dbControl();
       const ids = [1, 2, 3, 99].map((n, i) => {
-        const id = entrarSala(d, MODULOS[i].clave, { ...ana, email: `p${i}@datasheq.com` }, t0).conversacion.id;
-        d.prepare("UPDATE chat_conversaciones SET issue_numero = ?, issue_repo = 'dueno/repo' WHERE id = ?").run(n, id);
+        const id = enviarMensaje(d, MODULOS[i].clave, { ...ana, email: `p${i}@datasheq.com` }, "x", t0).solicitud.id;
+        d.prepare("UPDATE chat_solicitudes SET issue_numero = ?, issue_repo = 'dueno/repo' WHERE id = ?").run(n, id);
         return id;
       });
       const fila = (id: string) =>
-        d.prepare("SELECT issue_estado, issue_motivo, issue_asignado, issue_actualizado_en FROM chat_conversaciones WHERE id = ?").get(id) as {
+        d.prepare("SELECT issue_estado, issue_motivo, issue_asignado, issue_actualizado_en FROM chat_solicitudes WHERE id = ?").get(id) as {
           issue_estado: string | null; issue_motivo: string | null; issue_asignado: string | null; issue_actualizado_en: string | null;
         };
       const h0 = Date.parse("2026-10-08T15:00:00Z");
@@ -981,73 +990,6 @@ async function main() {
       reiniciarSincronizacion();
     }
   });
-  await prueba("árboles de decisión (#17): las 7 salas, válidos y con su documento al día", () => {
-    assert.deepEqual(ARBOLES.map((a) => a.modulo), MODULOS.map((m) => m.clave));
-    for (const a of ARBOLES) {
-      assert.deepEqual(validarArbol(a), [], a.modulo);
-      assert.ok(largos(a).max <= MAX_PREGUNTAS, a.modulo);
-      assert.ok(a.nodos.some((n) => n.opciones?.some((o) => o.sala_sugerida)), `${a.modulo}: sin sugerencia de sala`);
-    }
-    assert.equal(
-      fs.readFileSync(RUTA_DOC, "utf8").replace(/\r\n/g, "\n"), // git en Windows puede convertir a CRLF
-      documentoArboles(),
-      `${RUTA_DOC} está desactualizado: ejecuta npm run arboles:doc`,
-    );
-  });
-  await prueba("árboles de decisión: el validador detecta ciclos, nodos sueltos, destinos y sugerencias inválidas", () => {
-    const base = (): Arbol => ({
-      modulo: "c-legal",
-      raiz: "a",
-      nodos: [
-        { id: "a", pregunta: "¿Pregunta A?", tipo: "si_no", campo: "alcance", obligatorio: true, opciones: [{ valor: "si", etiqueta: "Sí", siguiente: "b" }, { valor: "no", etiqueta: "No", siguiente: FIN }] },
-        { id: "b", pregunta: "¿Pregunta B?", tipo: "texto", campo: "contexto", obligatorio: true, siguiente: FIN },
-      ],
-    });
-    assert.deepEqual(validarArbol(base()), []);
-    const ciclo = base();
-    ciclo.nodos[1].siguiente = "a";
-    assert.match(validarArbol(ciclo).join(), /ciclo: a → b → a/);
-    const suelto = base();
-    suelto.nodos.push({ id: "c", pregunta: "¿Pregunta C?", tipo: "texto", campo: "contexto", obligatorio: false, siguiente: FIN });
-    assert.match(validarArbol(suelto).join(), /c: no se alcanza/);
-    const destino = base();
-    destino.nodos[1].siguiente = "zz";
-    assert.match(validarArbol(destino).join(), /destino inexistente zz/);
-    const propia = base();
-    propia.nodos[0].opciones![0].sala_sugerida = "c-legal";
-    assert.match(validarArbol(propia).join(), /sugiere su propia sala/);
-    const lineal = base();
-    lineal.nodos[0].opciones![1].siguiente = "b";
-    assert.match(validarArbol(lineal).join(), /ninguna rama condicional/);
-    const otra = base();
-    otra.nodos[0].otra = true;
-    assert.match(validarArbol(otra).join(), /necesita un destino por defecto/);
-  });
-  await prueba("esquema de los árboles: campos mal escritos, tipos, formatos y valores inválidos", () => {
-    const base = (): Arbol => JSON.parse(JSON.stringify(arbolDe("c-legal")));
-    assert.deepEqual(erroresDeEsquema(base()), []);
-    const casos: [string, (a: Arbol) => void, RegExp][] = [
-      ["campo mal escrito", (a) => Object.assign(a.nodos[1], { obligatoria: true }), /nodos\[1\] \(legal\.ambito\): .*obligatoria/],
-      ["tipo inexistente", (a) => Object.assign(a.nodos[1], { tipo: "lista" }), /nodos\[1\]\.tipo \(legal\.ambito\)/],
-      ["pregunta vacía", (a) => (a.nodos[2].pregunta = "  "), /nodos\[2\]\.pregunta \(legal\.norma\): muy corta/],
-      ["pregunta sin cierre", (a) => (a.nodos[2].pregunta = "Qué norma aplica"), /debe terminar en «\?», «\.» o «\)»/],
-      ["id con mayúsculas", (a) => (a.nodos[2].id = "Legal.Norma"), /formato «modulo\.nombre»/],
-      ["sí/no con 3 opciones", (a) => a.nodos[5].opciones!.push({ valor: "talvez", etiqueta: "Tal vez" }), /exactamente 2 opciones/],
-      ["valor con espacios", (a) => (a.nodos[1].opciones![0].valor = "con espacios"), /minúsculas, números o _/],
-      ["sala inexistente", (a) => (a.nodos[1].opciones![0].sala_sugerida = "c-otra" as ClaveModulo), /sala_sugerida/],
-      ["prioridad inexistente", (a) => ((a.nodos[1].opciones![0] as { prioridad?: string }).prioridad = "urgente"), /prioridad/],
-      ["repregunta sin mínimo", (a) => (a.nodos[0].minimo = undefined), /la repregunta solo aplica con un mínimo/],
-      ["módulo desconocido", (a) => (a.modulo = "c-nada" as ClaveModulo), /^modulo:/],
-    ];
-    for (const [nombre, romper, esperado] of casos) {
-      const a = base();
-      romper(a);
-      const errores = validarArbol(a);
-      assert.ok(errores.length, `${nombre}: no detectado`);
-      assert.match(errores.join(" | "), esperado, nombre);
-    }
-  });
-
   // ── Envío a GitHub con reintentos, contra un GitHub simulado
   type Manejador = (req: http.IncomingMessage, url: URL, cuerpo: string) => { status: number; json?: unknown; headers?: Record<string, string> };
   let manejar: Manejador = () => ({ status: 500 });
@@ -1069,15 +1011,19 @@ async function main() {
   const datosIssue = (ticket = 7): DatosIssue => ({
     ticket,
     modulo: moduloPorClave("c-legal") as Modulo,
-    requerimiento: {
-      titulo: "Informe DS 594", resumen: "r", clasificacion: "mejora", prioridad: "alta", justificacion_prioridad: "j",
-      contexto: "c", necesidad: "n", alcance: [], criterios_aceptacion: ["ok"], interesados: [], plazo: null,
-    },
-    solicitante: { nombre: "Ana", email: "ana@datasheq.com" },
-    conversacionId: "conv",
+    titulo: "Informe DS 594",
+    resumen: "r",
+    solicitantes: [{ nombre: "Ana", email: "ana@datasheq.com" }],
+    solicitudId: "conv",
     fecha: "2026-10-08",
     transcripcion: [],
   });
+  /** Solicitud ya terminada (lo que dejará «Terminar» en un ticket posterior): lista para enviarse como Issue. */
+  const terminada = (d: ReturnType<typeof dbControl>, sala: string, persona: typeof ana) => {
+    const { solicitud: s } = enviarMensaje(d, sala, persona, "Necesito un informe", t0);
+    d.prepare("UPDATE chat_solicitudes SET estado = 'terminada', terminado = 1, titulo = 'Informe DS 594', resumen = 'r', terminada_en = ? WHERE id = ?").run(t0.toISOString(), s.id);
+    return s.id;
+  };
   const posts = () => pedidos.filter((p) => p === "POST /repos/dueno/repo/issues").length;
 
   await prueba("GitHub: reintenta errores transitorios (502, red, 429 con Retry-After) y no los definitivos (422)", async () => {
@@ -1115,13 +1061,8 @@ async function main() {
   });
   await prueba("envío con reintentos automáticos: 1, 2, 5… minutos, solo transitorios, sin duplicar y uno a la vez", async () => {
     const d = dbControl();
-    const generar = (persona: typeof ana, sala: string) => {
-      const c = entrarSala(d, sala, persona, t0).conversacion;
-      d.prepare("UPDATE chat_conversaciones SET estado = 'generada', requerimiento_json = ? WHERE id = ?").run(JSON.stringify(datosIssue().requerimiento), c.id);
-      asignarTicket(d, c.id);
-      return c.id;
-    };
-    const fila = (id: string) => conversacionChat(d, id)!;
+    const generar = (persona: typeof ana, sala: string) => terminada(d, sala, persona);
+    const fila = (id: string) => solicitud(d, id)!;
     let reloj = t0.getTime();
     const op = { ...sinEspera, ahora: () => new Date(reloj) };
 
@@ -1218,19 +1159,14 @@ async function main() {
   await prueba("envío al repositorio de cada módulo: guarda issue_repo; sin repositorio, error definitivo", async () => {
     const d = dbControl();
     const env = { GITHUB_REPOS: "c-acredita=dueno/acredita,c-legal=-" };
-    const generar = (email: string, sala: string) => {
-      const c = entrarSala(d, sala, { ...ana, email }, t0).conversacion; // con el entorno de las pruebas: todas activas
-      d.prepare("UPDATE chat_conversaciones SET estado = 'generada', requerimiento_json = ? WHERE id = ?").run(JSON.stringify(datosIssue().requerimiento), c.id);
-      asignarTicket(d, c.id);
-      return c.id;
-    };
+    const generar = (email: string, sala: string) => terminada(d, sala, { ...ana, email }); // con el entorno de las pruebas: todas activas
     pedidos.length = 0;
     manejar = (req, url) => (url.pathname.endsWith("/labels") ? { status: 201 } : issueCreado);
     const acredita = generar("a@datasheq.com", "c-acredita");
     assert.deepEqual(await enviarIssue(d, acredita, cfgFalso, { ...sinEspera, env }), { ok: true });
     assert.ok(pedidos.includes("POST /repos/dueno/acredita/issues"), pedidos.join());
     assert.ok(!pedidos.some((p) => p.startsWith("POST /repos/dueno/repo/")));
-    assert.deepEqual([conversacionChat(d, acredita)!.issue_repo, conversacionChat(d, acredita)!.issue_numero], ["dueno/acredita", 41]);
+    assert.deepEqual([solicitud(d, acredita)!.issue_repo, solicitud(d, acredita)!.issue_numero], ["dueno/acredita", 41]);
 
     const legal = generar("b@datasheq.com", "c-legal"); // c-legal desactivada en este entorno
     assert.deepEqual(await enviarIssue(d, legal, cfgFalso, { ...sinEspera, env }), { ok: false, error: SIN_REPO, reintento_en: null });
@@ -1239,8 +1175,8 @@ async function main() {
     const d = dbControl();
     reiniciarSincronizacion();
     const ids = ["dueno/uno", "dueno/dos"].map((repo, i) => {
-      const id = entrarSala(d, MODULOS[i].clave, { ...ana, email: `s${i}@datasheq.com` }, t0).conversacion.id;
-      d.prepare("UPDATE chat_conversaciones SET issue_numero = 5, issue_repo = ? WHERE id = ?").run(repo, id);
+      const id = enviarMensaje(d, MODULOS[i].clave, { ...ana, email: `s${i}@datasheq.com` }, "x", t0).solicitud.id;
+      d.prepare("UPDATE chat_solicitudes SET issue_numero = 5, issue_repo = ? WHERE id = ?").run(repo, id);
       return id;
     });
     pedidos.length = 0;
@@ -1252,149 +1188,24 @@ async function main() {
       const s = await sincronizar(d, cfgFalso, { ahora: t0.getTime() });
       assert.equal(s.error, null);
       assert.deepEqual(pedidos.sort(), ["GET /repos/dueno/dos/issues", "GET /repos/dueno/uno/issues"]);
-      assert.deepEqual([conversacionChat(d, ids[0])!.issue_estado, conversacionChat(d, ids[1])!.issue_estado], ["closed", "open"]);
-      assert.equal(conversacionChat(d, ids[1])!.issue_asignado, "dev9");
+      assert.deepEqual([solicitud(d, ids[0])!.issue_estado, solicitud(d, ids[1])!.issue_estado], ["closed", "open"]);
+      assert.equal(solicitud(d, ids[1])!.issue_asignado, "dev9");
     } finally {
       reiniciarSincronizacion();
     }
   });
-  await prueba("salas sin repositorio: ocultas en el portal, no se puede entrar y no se sugieren", () => {
+  await prueba("salas sin repositorio: ocultas en el portal y no se puede escribir en ellas", () => {
     const d = dbControl();
     const env = { GITHUB_REPOS: "c-acredita=dueno/acredita" }; // + C-Legal por defecto
-    assert.deepEqual(estadoSalas(d, ana, false, t0, env).map((s) => s.clave), ["c-legal", "c-acredita"]);
-    const admin = estadoSalas(d, null, true, t0, env);
+    assert.deepEqual(estadoSalas(d, false, env).map((s) => s.clave), ["c-legal", "c-acredita"]);
+    const admin = estadoSalas(d, true, env);
     assert.equal(admin.length, MODULOS.length); // el panel las ve todas, con su repositorio
     assert.deepEqual([admin.find((s) => s.clave === "c-acredita")?.repo, admin.find((s) => s.clave === "c-lidera")?.repo], ["dueno/acredita", null]);
-    assert.throws(() => entrarSala(d, "c-lidera", ana, t0, env), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
-    assert.equal(entrarSala(d, "c-acredita", ana, t0, env).nueva, true);
-
-    // C-Legal sugiere C-Investiga ante un incidente, solo si esa sala está activa
-    const previo = process.env.GITHUB_REPOS;
-    process.env.GITHUB_REPOS = "c-investiga=-";
-    try {
-      const a = arbolDe("c-legal") as Arbol;
-      const lineas: Linea[] = [{ autor: "robot", texto: "Hola", meta: { nodo: "legal.ambito" } }];
-      const r = avanzar(a, lineas, { accion: "mensaje", valores: ["incidente"] });
-      assert.equal(r.sala_sugerida, null);
-      assert.doesNotMatch(r.mensaje, /C-Investiga/);
-    } finally {
-      process.env.GITHUB_REPOS = previo;
-    }
+    assert.throws(() => enviarMensaje(d, "c-lidera", ana, "hola", t0, env), (e: ErrorSala) => e.status === 404 && e.message === SALA_NO_DISPONIBLE);
+    assert.equal(enviarMensaje(d, "c-acredita", ana, "hola", t0, env).nueva, true);
+    assert.deepEqual(estadoSalas(d, false, env).map((x) => [x.clave, x.abierta]), [["c-legal", false], ["c-acredita", true]]);
   });
   falso.close();
-
-  // ── Motor del flujo (#17): conversación simulada sobre el árbol de una sala
-  const charla = (modulo: string) => {
-    const a = arbolDe(modulo) as Arbol;
-    const m = moduloPorClave(modulo) as Modulo;
-    const lineas: Linea[] = [{ autor: "robot", texto: "Hola", meta: { nodo: a.raiz } }];
-    const turno = (entrada: Entrada) => {
-      const r = avanzar(a, lineas, entrada);
-      if (r.usuario) lineas.push({ autor: "usuario", texto: r.usuario.texto, meta: r.usuario.meta });
-      else if (entrada.accion !== "mensaje") lineas.push({ autor: "sistema", texto: entrada.accion });
-      lineas.push({ autor: "robot", texto: r.mensaje, meta: r.meta });
-      return r;
-    };
-    return { a, m, lineas, turno, nodo: () => lineas.at(-1)?.meta?.nodo };
-  };
-
-  await prueba("flujo: recorrido de C-Legal con repreguntas, ramas, sugerencia de sala, fecha y saltos", () => {
-    const c = charla("c-legal");
-    let r = c.turno({ accion: "mensaje", texto: "Informe DS 594" }); // 14 < 25 caracteres
-    assert.deepEqual([c.nodo(), r.meta.repregunta], ["inicio", true]);
-    assert.match(r.mensaje, /más de detalle/);
-    r = c.turno({ accion: "mensaje", texto: "Para la faena norte" }); // sigue breve, pero ya no insiste
-    assert.equal(c.nodo(), "legal.ambito");
-    assert.ok(r.completitud > 0 && r.completitud < 100);
-    assert.ok(r.faltantes.includes("Qué necesitas en materia de cumplimiento legal"));
-    assert.deepEqual(preguntaActual(c.a, c.lineas)?.opciones.map((o) => o.valor), ["identificar", "evaluar", "informe", "incidente"]);
-
-    r = c.turno({ accion: "mensaje", texto: "quiero evaluar" }); // texto libre en una pregunta solo de opciones
-    assert.deepEqual([c.nodo(), r.mensaje], ["legal.ambito", "Elige una de las opciones, por favor."]);
-    assert.throws(() => avanzar(c.a, c.lineas, { accion: "mensaje", valores: ["no-existe"] }), /no corresponde/);
-    r = c.turno({ accion: "siguiente" }); // obligatoria: no se salta
-    assert.match(r.mensaje, /no la puedo saltar/);
-    assert.equal(c.nodo(), "legal.ambito");
-
-    r = c.turno({ accion: "mensaje", valores: ["incidente"] });
-    assert.deepEqual([c.nodo(), r.sala_sugerida], ["legal.norma", "c-investiga"]);
-    assert.match(r.mensaje, /sala C-Investiga/);
-    assert.equal(c.lineas.at(-2)?.texto, "Ocurrió un incidente o accidente"); // lo que dijo la persona: la etiqueta
-    c.turno({ accion: "mensaje", texto: "DS 594" });
-    c.turno({ accion: "mensaje", texto: "Faena norte" });
-    r = c.turno({ accion: "mensaje", valores: ["si"] });
-    assert.equal(c.nodo(), "legal.fiscalizacion_fecha");
-    r = c.turno({ accion: "mensaje", texto: "mañana" });
-    assert.deepEqual([c.nodo(), r.mensaje], ["legal.fiscalizacion_fecha", "Indica la fecha con el selector de fecha, por favor."]);
-    c.turno({ accion: "mensaje", texto: "2026-12-15" });
-    assert.equal(c.lineas.at(-2)?.texto, "15 de diciembre de 2026");
-    c.turno({ accion: "mensaje", valores: ["nueva"] });
-    c.turno({ accion: "mensaje", valores: ["operacion"] }); // urgencia: media
-    assert.equal(c.nodo(), "comun.plazo");
-    c.turno({ accion: "siguiente" }); // opcional
-    assert.equal(c.nodo(), "comun.interesados");
-    c.turno({ accion: "siguiente" });
-    r = c.turno({ accion: "mensaje", texto: "Ok" });
-    assert.deepEqual([c.nodo(), r.meta.repregunta], ["comun.resultado", true]);
-    c.turno({ accion: "mensaje", texto: "Un informe por artículo con el estado de cumplimiento y evidencias" });
-    r = c.turno({ accion: "siguiente" });
-    assert.deepEqual([c.nodo(), r.listo_para_generar, r.completitud, r.faltantes], [FIN, true, 100, []]);
-    assert.equal(preguntaActual(c.a, c.lineas), null);
-    r = c.turno({ accion: "mensaje", texto: "También aplica a la faena sur" }); // al final: se suma como comentario
-    assert.equal(c.nodo(), FIN);
-    r = c.turno({ accion: "mas_detalles" });
-    assert.equal(r.meta.ampliar, "comun.resultado");
-    c.turno({ accion: "mensaje", texto: "Exportable a PDF" });
-
-    const q = requerimientoDesdeFlujo(c.a, c.m, c.lineas);
-    assert.equal(q.titulo, "Informe DS 594");
-    assert.equal(q.necesidad, "Informe DS 594. Para la faena norte");
-    assert.equal(q.clasificacion, "nueva_funcionalidad");
-    assert.equal(q.prioridad, "alta"); // urgencia media, pero la fiscalización programada fija mínimo alta
-    assert.match(q.justificacion_prioridad, /Urgencia indicada: «Afecta el trabajo diario»\. Además, «Hay una fiscalización o auditoría programada: Sí» fija una prioridad mínima alta/);
-    assert.equal(q.plazo, "15 de diciembre de 2026");
-    assert.match(q.contexto, /Qué ley, decreto o norma está involucrada: DS 594/);
-    assert.match(q.contexto, /Comentario adicional: También aplica a la faena sur/);
-    assert.ok(q.alcance.includes("Qué necesitas en materia de cumplimiento legal: Ocurrió un incidente o accidente"));
-    assert.equal(q.criterios_aceptacion[0], "Ok. Un informe por artículo con el estado de cumplimiento y evidencias. Exportable a PDF");
-  });
-  await prueba("flujo: selección múltiple con «Otra», sugerencia de sala y entradas inválidas", () => {
-    const c = charla("c-controla");
-    c.turno({ accion: "mensaje", texto: "Necesitamos controlar las versiones de los procedimientos críticos" });
-    let r = c.turno({ accion: "mensaje", valores: ["procedimientos", "preventivos"], texto: "Manuales de equipos" });
-    assert.deepEqual([c.nodo(), r.sala_sugerida], ["controla.problema", "c-previene"]);
-    assert.equal(c.lineas.at(-2)?.texto, "Procedimientos, Matrices de riesgo, PTS o planes de emergencia, Manuales de equipos");
-    r = c.turno({ accion: "mensaje", valores: ["versiones", "aprobacion"] }); // una sola en «opciones»
-    assert.equal(c.nodo(), "controla.problema");
-    assert.match(r.mensaje, /Elige una de las opciones/);
-    c.turno({ accion: "mensaje", valores: ["vigencias"] });
-    c.turno({ accion: "mensaje", texto: "Cada 18 meses" }); // «Otra» en una pregunta de opciones
-    assert.equal(c.nodo(), "controla.notificar");
-    // Botón de la pregunta anterior en una pregunta de texto: se rechaza
-    assert.throws(() => avanzar(c.a, c.lineas, { accion: "mensaje", valores: ["anual"], texto: "y además" }), /no corresponde/);
-    assert.equal(c.nodo(), "controla.notificar");
-  });
-  await prueba("flujo: los 7 árboles se recorren de punta a punta (primeras y últimas opciones)", () => {
-    for (const elegir of [(n: number) => 0, (n: number) => n - 1]) {
-      for (const a of ARBOLES) {
-        const c = charla(a.modulo);
-        let r: ResultadoTurno | null = null;
-        let preguntas = 0;
-        while (c.nodo() !== FIN) {
-          const p = preguntaActual(c.a, c.lineas) as PreguntaVista;
-          preguntas++;
-          assert.ok(preguntas <= MAX_PREGUNTAS, `${a.modulo}: el recorrido no termina`);
-          if (p.tipo === "texto") r = c.turno({ accion: "mensaje", texto: "Respuesta suficientemente detallada para la pregunta" });
-          else if (p.tipo === "fecha") r = c.turno({ accion: "mensaje", texto: "2026-12-01" });
-          else r = c.turno({ accion: "mensaje", valores: [p.opciones[elegir(p.opciones.length)].valor] });
-        }
-        assert.equal(r?.listo_para_generar, true, a.modulo);
-        const q = requerimientoDesdeFlujo(c.a, c.m, c.lineas);
-        assert.ok(q.titulo && q.necesidad && q.criterios_aceptacion.length >= 2, a.modulo);
-        assert.ok(["critica", "alta", "media", "baja"].includes(q.prioridad), a.modulo);
-      }
-    }
-  });
 
   console.log(`\n${ok} pruebas OK${process.exitCode ? " — HAY FALLOS" : ""}`);
 }

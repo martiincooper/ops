@@ -133,33 +133,24 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   back in the portal with a notice).
 - **7 rooms**, one per module: C-Legal (legal compliance), C-Controla (document control), C-Previene (preventive
   documents), C-Lidera (safety leadership programs), C-Acredita (worker and contractor accreditation), C-Capacita
-  (training and knowledge) and C-Investiga (incident reporting and investigation). Some answers mean the topic
-  belongs to another room: the assistant says so and offers a button to go there (the interview can continue).
+  (training and knowledge) and C-Investiga (incident reporting and investigation). The list stays hard-coded until
+  the admin-managed rooms ticket.
 - **One GitHub repository per module** (`lib/chat/repos.ts`): each room's requirements go to its module's
   repository. By default only C-Legal has one (`datasheq-creator/clegal-railway`); `GITHUB_REPOS` assigns the rest
   (`c-acredita=datasheq-creator/cacredita-railway,c-lidera=…`; `c-legal=-` removes it). **Rooms without a
   repository are hidden from the portal**, cannot be entered (404) and are never suggested; the panel shows them as
   "Oculta". Each Issue stores the repository it was created in.
-- **Interview guided by a decision tree, no AI** (`lib/chat/arboles.ts`, engine in `lib/chat/flujo.ts`; see
-  [`docs/arboles-de-decision.md`](docs/arboles-de-decision.md)): personalized greeting, one question at a time, and
-  the answers pick the next branch. Option questions are answered with **buttons** (multi-select ones are ticked and
-  confirmed; some also accept a written answer), date questions with a date picker and text questions with the
-  input; a too-short written answer gets one follow-up. A "% gathered" bar lists the required questions still
-  missing. Buttons: **Pasar a la siguiente pregunta** (optional questions only), **Agregar más detalles** (appended to
-  the previous answer), **Finalizar y generar requerimiento** and **Finalizar conversación**. The requirement is built
-  with fixed rules: title from the first answer, type from the request-type question, priority from the urgency
-  question, raised to a minimum by some answers (e.g. a scheduled inspection → at least high). Trees are edited in
-  code; regenerate the document with `npm run arboles:doc`. They are validated against a **schema** (Zod: fields,
-  types, formats, lengths and allowed values; a misspelled field is an error) and for **structure** (no cycles,
-  everything reachable, every branch ends) in the tests, when generating the document and at server start: in
-  production the server does not start with an invalid tree.
-- **One person per room**: others see "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde".
-  The room is released when the person finishes (with or without a requirement), signs out, or after
-  `CHAT_INACTIVIDAD_MIN` minutes without activity (default 15; typing counts). Re-entering resumes the
-  conversation; entering another room releases the previous one.
-- **Automatic Issue**: title `[GER-0001][C-Legal] …`, labels for the module (`C-Legal`), priority
-  (`prioridad: alta`), type (`tipo: mejora`), `gerencia` and `ready-for-human` (created if missing), and a body with the ticket, the
-  requester, summary, context, scope, acceptance criteria and the transcript.
+- **Every room is a shared group chat** (text only for now; no assistant, photos or "Terminar"): opening it shows
+  the full history of all its requests, each message with author and time, your own on the right. Sending stores the
+  message and returns at once; if the room has no open request the message opens one (numbered `GER-000n`), and the
+  sender becomes a participant. Any number of executives can be in a room at the same time: **no room lock, no "en
+  uso", no heartbeat and no inactivity expiry**; a request stays open with no timeout. Clients poll every 2.5 seconds
+  for messages newer than the last seen id (`GET /api/chat/salas/<room>?desde=<id>`). Data in `control.db`:
+  `chat_solicitudes` (at most one open per room), `chat_mensajes`, `chat_participantes` and `chat_modulos` (empty;
+  the admin-managed rooms ticket will use it).
+- **Automatic Issue**: title `[GER-0001][C-Legal] …`, labels for the module (`C-Legal`), `gerencia` and `ready-for-human` (created if
+  missing), and a body with the ticket, participants, summary and conversation. Nothing triggers it yet (the
+  assistant and "Terminar" come in later tickets): delivery and its retries are ready for finished requests.
 - **Automatic retries**: on a transient GitHub failure (network, timeout, 5xx or rate limit) the request is retried up
   to 3 times right away (honoring `Retry-After`); if it still fails, the server retries it on its own after 1, 2, 5,
   15, 30 and 60 minutes, and the panel shows when the next attempt is due. Before each retry it looks for an existing
@@ -174,13 +165,12 @@ Screenshots: [sign-in](docs/capturas/v09-21-portal-ingreso.png) ·
   States: Pendiente de envío, Abierto, En curso (has an assignee), Cerrado and Descartado (closed as not planned).
   **Mis requerimientos** in the portal shows each person only their own (the Issue link only to admins, since others
   may not have access to the repository). If GitHub does not respond, the last known state is shown with its date.
-- **Usage limits** (they protect the server): 30 turns and 3 "generate" actions per account per minute ("Vas muy
-  rápido…", nothing typed is lost), and `CHAT_TURNOS_MAX` assistant replies per conversation (default 40): the last
-  one asks the person to generate the requirement and the chat only allows finishing.
+- **Usage limit** (protects the server): 30 messages per account per minute ("Vas muy rápido…", nothing typed is
+  lost).
 - **Admin panel** (`/admin` → Portal gerencial, any admin; the rest of `/admin` is unchanged): the
-  7 rooms with their repository (who, since when, when it frees up, a button to release it), conversation history with ticket, priority,
-  conversation state, GitHub state (column and filter), transcript and Issue link (or **Reintentar**).
-- Data lives in `control.db` (`chat_conversaciones`, `chat_mensajes`, `chat_salas`; automatic migrations).
+  7 rooms with their repository and whether a request is open, request history with ticket, participants, state,
+  GitHub state (column and filter), transcript and Issue link (or **Reintentar**).
+- Data lives in `control.db` (`chat_solicitudes`, `chat_mensajes`, `chat_participantes`, `chat_modulos`; automatic migrations; v7 wipes the old chat data and restarts tickets at GER-0001).
 
 ## Run
 
@@ -217,7 +207,7 @@ objectives and purchases keep their single project). The `comprobantes/` folders
 
 ```bash
 npm run typecheck
-npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (rooms, inactivity, sign-out, tickets, usage limits, Issue tracking and send retries against a mock GitHub, tree schema and structure, interview engine) (72)
+npm run test:logica   # timezone, Say-Do, schema + migrations, shipping, stages, pipeline, editable objectives, account deletion, exec, cost breakdown, payment status, USD purchases, executive portal (v7 migration, group-chat rooms, history, tickets, usage limit, Issue tracking and send retries against a mock GitHub) (70)
 # end-to-end against a server with an EMPTY data dir, started with TIPO_CAMBIO_USD=950 (69, executive portal included)
 BASE=http://127.0.0.1:3100 ADMIN_EMAIL=admin@aether-tech.dev npm run test:e2e
 ```
@@ -237,8 +227,6 @@ every pull request and push to `main`; pushes to `main` also publish the `amd64`
 | `TZ_NEGOCIO` | `America/Santiago` | Defines which date is "today" (one jornada per day) |
 | `COOKIE_SECURE` | `true` in production | `false` only for plain-http testing |
 | `TIPO_CAMBIO_USD` | — (day's observed dollar rate) | Pins the dollar rate for USD purchases (tests, offline servers) |
-| `CHAT_INACTIVIDAD_MIN` | `15` | Minutes without activity before a room is released |
-| `CHAT_TURNOS_MAX` | `40` | Assistant replies per conversation |
 | `GITHUB_TOKEN` | — (Issues stay pending) | DataSHEQ account token with "Issues: write" on the module repositories |
 | `GITHUB_CUENTA` | `datasheq-creator` | DataSHEQ's GitHub account: sends with another account's token are rejected |
 | `GITHUB_REPOS` | `c-legal=datasheq-creator/clegal-railway` | Repository per module (`key=owner/repo`, `,`-separated); rooms without one are hidden |

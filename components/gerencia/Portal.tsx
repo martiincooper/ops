@@ -1,19 +1,19 @@
 "use client";
 
-import { ArrowRight, Lock, LockOpen, MessagesSquare } from "lucide-react";
+import { ArrowRight, Lock, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { MODULOS } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
-import { api, cx } from "@/lib/cliente";
+import { api } from "@/lib/cliente";
 import { IconoModulo } from "./comun";
 import MisRequerimientos from "./MisRequerimientos";
 
 const REFRESCO_MS = 15_000;
 
 /**
- * Las salas activas (las de módulos con repositorio de GitHub asignado) con su estado (libre, en uso, tuya),
- * actualizado cada 15 segundos. Las demás no se muestran.
+ * Las salas activas (las de módulos con repositorio de GitHub asignado) y si tienen una solicitud abierta,
+ * actualizado cada 15 segundos. Las demás no se muestran. Cualquiera puede entrar a cualquier sala.
  */
 export default function Portal({ nombre, aviso }: { nombre: string; aviso?: string }) {
   const [salas, setSalas] = useState<EstadoSala[] | null>(null);
@@ -47,8 +47,8 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
         <div>
           <h1 className="text-xl font-semibold text-tinta sm:text-2xl">Hola, {primerNombre}. Es un gusto saludarte.</h1>
           <p className="mt-1 text-justify text-sm text-tinta-2 hyphens-auto sm:text-base">
-            Elige la sala del módulo sobre el que quieres levantar un requerimiento. Nuestro asistente te hará algunas
-            preguntas y, al finalizar, enviará el requerimiento al equipo de desarrollo.
+            Elige la sala del módulo sobre el que quieres levantar un requerimiento. Cada sala es un chat compartido:
+            todos los gerentes que entren ven la conversación completa y pueden escribir al mismo tiempo.
           </p>
         </div>
       </section>
@@ -70,39 +70,22 @@ export default function Portal({ nombre, aviso }: { nombre: string; aviso?: stri
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {visibles.map((m) => {
           const s = salas?.find((x) => x.clave === m.clave);
-          const ocupadaPorOtro = !!s?.ocupada && !s.propia;
           return (
             <li key={m.clave} className="tarjeta flex flex-col p-5">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <IconoModulo clave={m.clave} color={m.color} />
-                {!s ? (
-                  <span className="chip bg-suave text-tinta-3">…</span>
-                ) : s.propia ? (
+                {s?.abierta && (
                   <span className="chip bg-indigo-suave text-indigo-tinta">
-                    <MessagesSquare size={13} aria-hidden /> Tu conversación
-                  </span>
-                ) : s.ocupada ? (
-                  <span className="chip bg-alerta-fondo text-alerta-tinta">
-                    <Lock size={13} aria-hidden /> En uso
-                  </span>
-                ) : (
-                  <span className="chip bg-ok-fondo text-ok-tinta">
-                    <LockOpen size={13} aria-hidden /> Disponible
+                    <MessagesSquare size={13} aria-hidden /> Conversación abierta
                   </span>
                 )}
               </div>
               <h2 className="text-lg font-semibold text-tinta">{m.nombre}</h2>
               <p className="text-sm font-medium text-tinta-2">{m.area}</p>
               <p className="mt-2 flex-1 text-sm text-tinta-3">{m.descripcion}</p>
-              {ocupadaPorOtro ? (
-                <p className="mt-4 rounded-2xl bg-suave px-3 py-2 text-xs text-tinta-3">
-                  El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde.
-                </p>
-              ) : (
-                <Link href={`/gerencia/${m.clave}`} className={cx("boton mt-4 self-start", s?.propia && "bg-indigo-hondo")}>
-                  {s?.propia ? "Continuar conversación" : "Entrar a la sala"} <ArrowRight size={16} aria-hidden />
-                </Link>
-              )}
+              <Link href={`/gerencia/${m.clave}`} className="boton mt-4 self-start">
+                {s?.abierta ? "Unirse a la conversación" : "Entrar a la sala"} <ArrowRight size={16} aria-hidden />
+              </Link>
             </li>
           );
         })}

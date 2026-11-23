@@ -13,5 +13,5 @@ export default async function Sala({ params }: { params: Promise<{ modulo: strin
   const m = moduloPorClave((await params).modulo);
   // Las salas sin repositorio de GitHub asignado no están disponibles
   if (!m || !salaActiva(m.clave)) notFound();
-  return <SalaChat key={m.clave} modulo={m} nombre={u.nombre} esAdmin={u.rol === "admin"} />;
+  return <SalaChat key={m.clave} modulo={m} nombre={u.nombre} email={u.email} esAdmin={u.rol === "admin"} />;
 }

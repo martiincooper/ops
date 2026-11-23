@@ -1,18 +1,11 @@
-// Portal gerencial (chatbot): las 7 salas, su propósito y el dominio permitido.
+// Portal gerencial: las 7 salas (lista fija hasta el ticket de salas administradas) y el dominio permitido.
 // Sin "server-only": lo usan también los componentes cliente (tarjetas de sala, login del portal).
 
 export const EMPRESA_GERENCIA = "datasheq";
 export const MENSAJE_ACCESO_DENEGADO = "El portal gerencial es solo para gerencia de Datasheq";
-export const MENSAJE_SALA_OCUPADA = "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde";
 
-export type ClaveModulo =
-  | "c-legal"
-  | "c-controla"
-  | "c-previene"
-  | "c-lidera"
-  | "c-acredita"
-  | "c-capacita"
-  | "c-investiga";
+/** Clave de una sala: texto simple (la lista de salas vendrá de la base de datos). */
+export type ClaveModulo = string;
 
 export interface Modulo {
   clave: ClaveModulo;
@@ -22,8 +15,6 @@ export interface Modulo {
   descripcion: string;
   /** Color de la etiqueta en GitHub (hex sin #). */
   color: string;
-  /** Temas que la entrevista debe cubrir (guía para la IA y guion sin IA). */
-  temas: string[];
 }
 
 export const MODULOS: Modulo[] = [
@@ -34,12 +25,6 @@ export const MODULOS: Modulo[] = [
     descripcion:
       "Identifica la normativa aplicable a la operación, evalúa su cumplimiento artículo por artículo y genera informes en PDF.",
     color: "5b4fd6",
-    temas: [
-      "Qué normativa, ley o decreto está involucrado y en qué operación o faena aplica",
-      "Qué se necesita: identificar normativa, evaluar cumplimiento, generar o ajustar un informe",
-      "Quiénes usarán el resultado y con qué frecuencia",
-      "Plazo o fiscalización que motiva la solicitud",
-    ],
   },
   {
     clave: "c-controla",
@@ -47,12 +32,6 @@ export const MODULOS: Modulo[] = [
     area: "Control Documental",
     descripcion: "Controla versiones, aprobaciones y vigencias de procedimientos, registros y documentos críticos.",
     color: "1f7a8c",
-    temas: [
-      "Qué documentos o registros están involucrados",
-      "Qué problema hay hoy con versiones, aprobaciones o vigencias",
-      "Quiénes aprueban y quiénes deben ser notificados",
-      "Resultado esperado y plazo",
-    ],
   },
   {
     clave: "c-previene",
@@ -61,12 +40,6 @@ export const MODULOS: Modulo[] = [
     descripcion:
       "Centraliza la documentación preventiva: matrices de riesgo, procedimientos de trabajo seguro (PTS) y planes de emergencia.",
     color: "c2410c",
-    temas: [
-      "Qué documentación preventiva está involucrada (matriz de riesgo, PTS, plan de emergencia)",
-      "Faena, área o proceso al que aplica",
-      "Qué se necesita centralizar, cambiar o agregar",
-      "Quiénes deben acceder y resultado esperado",
-    ],
   },
   {
     clave: "c-lidera",
@@ -75,12 +48,6 @@ export const MODULOS: Modulo[] = [
     descripcion:
       "Planifica y da seguimiento a programas de liderazgo en seguridad: caminatas, observaciones y compromisos de la línea de mando.",
     color: "15803d",
-    temas: [
-      "Qué actividad de liderazgo está involucrada (caminatas, observaciones, compromisos)",
-      "Quiénes de la línea de mando participan",
-      "Qué se necesita planificar, medir o reportar",
-      "Frecuencia, metas y plazo",
-    ],
   },
   {
     clave: "c-acredita",
@@ -89,12 +56,6 @@ export const MODULOS: Modulo[] = [
     descripcion:
       "Gestiona la acreditación de trabajadores y contratistas: documentos, exámenes, cursos y vencimientos en un solo lugar.",
     color: "0e7490",
-    temas: [
-      "A quiénes aplica (trabajadores propios, contratistas, una faena)",
-      "Qué requisitos de acreditación están involucrados (documentos, exámenes, cursos)",
-      "Qué problema hay hoy con vencimientos o control",
-      "Resultado esperado y plazo",
-    ],
   },
   {
     clave: "c-capacita",
@@ -103,12 +64,6 @@ export const MODULOS: Modulo[] = [
     descripcion:
       "Organiza capacitaciones, evaluaciones y el conocimiento de la organización, con registro de asistencia y certificados.",
     color: "a21caf",
-    temas: [
-      "Qué capacitación, evaluación o conocimiento está involucrado",
-      "A quiénes está dirigido y cuántas personas",
-      "Qué se necesita: asistencia, evaluaciones, certificados, biblioteca de conocimiento",
-      "Plazo y forma de medir el resultado",
-    ],
   },
   {
     clave: "c-investiga",
@@ -117,12 +72,6 @@ export const MODULOS: Modulo[] = [
     descripcion:
       "Reporta incidentes desde terreno, investiga sus causas y realiza seguimiento a las acciones correctivas.",
     color: "b91c1c",
-    temas: [
-      "Qué tipo de incidente o proceso de reporte está involucrado",
-      "Dónde ocurre y quiénes reportan o investigan",
-      "Qué se necesita: reporte en terreno, investigación de causas, seguimiento de acciones",
-      "Urgencia y resultado esperado",
-    ],
   },
 ];
 
@@ -139,18 +88,6 @@ export function puedeUsarPortal(u: { rol: string; empresa: string | null }): boo
 export function puedeAdministrarPortal(u: { rol: string }): boolean {
   return u.rol === "admin";
 }
-
-export type Prioridad = "critica" | "alta" | "media" | "baja";
-export const NOMBRE_PRIORIDAD: Record<Prioridad, string> = { critica: "Crítica", alta: "Alta", media: "Media", baja: "Baja" };
-
-export type Clasificacion = "nueva_funcionalidad" | "mejora" | "error" | "consulta" | "otro";
-export const NOMBRE_CLASIFICACION: Record<Clasificacion, string> = {
-  nueva_funcionalidad: "Nueva funcionalidad",
-  mejora: "Mejora",
-  error: "Error",
-  consulta: "Consulta",
-  otro: "Otro",
-};
 
 /** «GER-0007» */
 export const codigoTicket = (n: number) => `GER-${String(n).padStart(4, "0")}`;

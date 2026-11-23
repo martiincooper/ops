@@ -871,16 +871,11 @@ async function main() {
     assert.equal((await admin.pedir(q("/api/admin/tareas", A), { metodo: "POST", json: { usuario_id: "no-existe", descripcion: "x" } })).status, 404);
   });
 
-  // ── Portal gerencial (/gerencia): entrevista por árbol de decisión, sin GITHUB_TOKEN (Issues pendientes)
+  // ── Portal gerencial (/gerencia): salas como chats grupales (solo texto), sin GITHUB_TOKEN
   console.log("Portal gerencial");
   const DENEGADO = "El portal gerencial es solo para gerencia de Datasheq";
-  const OCUPADA = "El módulo se encuentra en uso por otro usuario. Por favor intenta más tarde";
-  let gAdmin, gGerente, gEquipo, gTeam, gExecA, convLegal;
-  const turnoChat = (c, id, accion, texto) =>
-    c.pedir(`/api/chat/conversaciones/${id}/${accion === "generar" || accion === "latido" || accion === "finalizar" ? accion : "mensaje"}`, {
-      metodo: "POST",
-      ...(["generar", "latido", "finalizar"].includes(accion) ? {} : { json: accion === "mensaje" ? { accion, texto } : { accion } }),
-    });
+  let gAdmin, gGerente, gEquipo, gTeam, gExecA;
+  const escribir = (c, sala, texto) => c.pedir(`/api/chat/salas/${sala}/mensajes`, { metodo: "POST", json: { texto } });
 
   await prueba("sin sesión, /gerencia lleva al ingreso del portal", async () => {
     const r = await anon.pedir("/gerencia");
@@ -901,7 +896,7 @@ async function main() {
       const p = await c.pedir("/gerencia");
       assert.equal(p.status, 200);
       assert.ok(Buffer.from(p.datos).toString("utf8").includes(DENEGADO));
-      for (const [ruta, metodo] of [["/api/chat/salas", "GET"], ["/api/chat/salas/c-legal", "POST"], ["/api/chat/mis-requerimientos", "GET"]]) {
+      for (const [ruta, metodo] of [["/api/chat/salas", "GET"], ["/api/chat/salas/c-legal", "GET"], ["/api/chat/salas/c-legal/mensajes", "POST"], ["/api/chat/mis-requerimientos", "GET"]]) {
         const r = await c.pedir(ruta, { metodo });
         assert.equal(r.status, 403, ruta);
         assert.equal(r.datos.error, DENEGADO, ruta);
@@ -919,8 +914,8 @@ async function main() {
   await prueba("solo las salas con repositorio (C-Legal, C-Previene, C-Lidera); las demás ocultas y sin acceso", async () => {
     const s = await gGerente.pedir("/api/chat/salas");
     assert.deepEqual(s.datos.salas.map((x) => x.clave), ["c-legal", "c-previene", "c-lidera"]);
-    assert.ok(s.datos.salas.every((x) => !x.ocupada && x.repo === undefined)); // el repositorio solo lo ve el panel
-    const oculta = await gGerente.pedir("/api/chat/salas/c-controla", { metodo: "POST" });
+    assert.ok(s.datos.salas.every((x) => !x.abierta && x.repo === undefined)); // el repositorio solo lo ve el panel
+    const oculta = await gGerente.pedir("/api/chat/salas/c-controla");
     assert.deepEqual([oculta.status, oculta.datos.error], [404, "Esta sala no está disponible"]);
     assert.equal((await gGerente.pedir("/gerencia/c-controla")).status, 404);
     const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
@@ -930,120 +925,88 @@ async function main() {
       ["datasheq-creator/clegal-railway", null, "datasheq-creator"],
     );
   });
-  await prueba("salas libres; al entrar, saludo personalizado y sala bloqueada para otra persona", async () => {
-    const r = await gGerente.pedir("/api/chat/salas/c-legal", { metodo: "POST" });
+  await prueba("sala vacía: sin historial; el primer mensaje abre la solicitud GER-0001 y otra persona la ve con autor y hora", async () => {
+    const vacia = await gGerente.pedir("/api/chat/salas/c-legal");
+    assert.equal(vacia.status, 200, JSON.stringify(vacia.datos));
+    assert.deepEqual([vacia.datos.solicitudes, vacia.datos.mensajes, vacia.datos.ultimo_id], [[], [], 0]);
+    const r = await escribir(gGerente, "c-legal", "Necesitamos evaluar el DS 594 en la faena norte");
     assert.equal(r.status, 200, JSON.stringify(r.datos));
-    convLegal = r.datos.id;
-    assert.match(r.datos.mensajes[0].texto, /^Hola, Gonzalo\. Te damos la bienvenida al portal gerencial de DataSheq\. Es un gusto saludarte\./);
-    assert.match(r.datos.mensajes[0].texto, /\(Cumplimiento Legal\), el módulo que identifica la normativa .* ¿En qué puedo colaborar contigo hoy\?$/);
-    const otra = await gEquipo.pedir("/api/chat/salas/c-legal", { metodo: "POST" });
-    assert.equal(otra.status, 409);
-    assert.equal(otra.datos.error, OCUPADA);
-    assert.equal((await turnoChat(gEquipo, convLegal, "mensaje", "hola")).status, 404); // conversación ajena
-    const vista = (await gEquipo.pedir("/api/chat/salas")).datos.salas.find((x) => x.clave === "c-legal");
-    assert.deepEqual([vista.ocupada, vista.propia, vista.usuario_email], [true, false, undefined]); // no ve quién la usa
+    assert.deepEqual([r.datos.nueva, r.datos.solicitud.ticket, r.datos.solicitud.estado], [true, 1, "abierta"]);
+    // otra persona entra a la misma sala al mismo tiempo: sin bloqueo ni «en uso»
+    const v = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos;
+    assert.equal(v.mensajes.length, 1);
+    assert.deepEqual(
+      [v.mensajes[0].texto, v.mensajes[0].autor_nombre, v.mensajes[0].autor_email, v.mensajes[0].rol],
+      ["Necesitamos evaluar el DS 594 en la faena norte", "Gonzalo Gerente", "portal.gerente@datasheq.com", "gerente"],
+    );
+    assert.ok(Date.now() - Date.parse(v.mensajes[0].creado_en) < 60_000);
+    assert.equal((await gEquipo.pedir("/api/chat/salas")).datos.salas.find((x) => x.clave === "c-legal").abierta, true);
+    assert.equal((await gEquipo.pedir("/gerencia/c-legal")).status, 200); // la página de la sala
   });
-  await prueba("entrevista con árbol de decisión (#17): repregunta, botones de respuesta, ramas, fecha y saltos", async () => {
-    const responder = (cuerpo) => gGerente.pedir(`/api/chat/conversaciones/${convLegal}/mensaje`, { metodo: "POST", json: { accion: "mensaje", ...cuerpo } });
-    let r = await turnoChat(gGerente, convLegal, "mensaje", "Informe DS 594");
-    assert.equal(r.status, 200, JSON.stringify(r.datos));
-    assert.match(r.datos.mensajes.at(-1).texto, /más de detalle/);
-    assert.equal(r.datos.pregunta.id, "inicio");
-    r = await turnoChat(gGerente, convLegal, "mensaje", "Necesitamos evaluar el cumplimiento del DS 594 en la faena norte antes de la fiscalización de diciembre");
-    assert.ok(r.datos.completitud > 0);
-    assert.equal(r.datos.pregunta.id, "legal.ambito");
-    assert.deepEqual(r.datos.pregunta.opciones.map((o) => o.valor), ["identificar", "evaluar", "informe", "incidente"]);
-    r = await turnoChat(gGerente, convLegal, "siguiente"); // obligatoria: no se salta
-    assert.equal(r.datos.mensajes.at(-2).texto, "Pasar a la siguiente pregunta");
-    assert.match(r.datos.mensajes.at(-1).texto, /no la puedo saltar/);
-    r = await responder({ valores: ["evaluar"] });
-    assert.equal(r.datos.mensajes.at(-2).texto, "Evaluar el cumplimiento de una norma");
-    assert.equal(r.datos.pregunta.id, "legal.norma");
-    const ajena = await responder({ valores: ["si"] }); // botón que no corresponde a una pregunta de texto
-    assert.equal(ajena.status, 400);
-    assert.match(ajena.datos.error, /no corresponde/);
-    await responder({ texto: "DS 594" });
-    await responder({ texto: "Faena norte" });
-    await responder({ valores: ["si"] }); // fiscalización programada: prioridad mínima alta
-    r = await responder({ texto: "2026-12-15" });
-    assert.equal(r.datos.mensajes.at(-2).texto, "15 de diciembre de 2026");
-    await responder({ valores: ["nueva"] });
-    r = await responder({ valores: ["operacion"] });
-    assert.equal(r.datos.pregunta.id, "comun.plazo");
-    await turnoChat(gGerente, convLegal, "siguiente"); // opcional
-    await turnoChat(gGerente, convLegal, "siguiente");
-    await responder({ texto: "Un informe por artículo con el estado de cumplimiento y las evidencias" });
-    r = await turnoChat(gGerente, convLegal, "siguiente");
-    assert.deepEqual([r.datos.pregunta, r.datos.completitud, r.datos.mensajes.at(-1).meta.listo], [null, 100, true]);
-    r = await turnoChat(gGerente, convLegal, "mas_detalles");
-    assert.match(r.datos.mensajes.at(-1).texto, /Por supuesto/);
-    assert.equal((await turnoChat(gGerente, convLegal, "latido")).status, 200);
+  await prueba("dos gerentes en la misma sala se ven entre sí al consultar desde el último id", async () => {
+    const visto = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos.ultimo_id;
+    const r = await escribir(gEquipo, "c-legal", "Yo también lo necesito para C-Previene");
+    assert.deepEqual([r.status, r.datos.nueva, r.datos.solicitud.ticket], [200, false, 1]);
+    const nuevos = (await gGerente.pedir(`/api/chat/salas/c-legal?desde=${visto - 1}`)).datos.mensajes;
+    assert.deepEqual(nuevos.map((m) => [m.autor_nombre, m.texto]), [["Gonzalo Gerente", "Necesitamos evaluar el DS 594 en la faena norte"], ["Elena Equipo", "Yo también lo necesito para C-Previene"]]);
+    assert.deepEqual((await gGerente.pedir(`/api/chat/salas/c-legal?desde=${nuevos[1].id}`)).datos.mensajes, []);
+    await escribir(gGerente, "c-legal", "Perfecto, lo vemos juntos");
+    const hist = (await gEquipo.pedir("/api/chat/salas/c-legal")).datos;
+    assert.deepEqual(hist.mensajes.map((m) => m.autor_nombre), ["Gonzalo Gerente", "Elena Equipo", "Gonzalo Gerente"]);
+    assert.equal(new Set(hist.mensajes.map((m) => m.solicitud_id)).size, 1); // las dos personas, una sola solicitud
   });
-  await prueba("finalizar y generar: ticket GER-0001, sala libre, Issue pendiente sin GITHUB_TOKEN", async () => {
-    const r = await turnoChat(gGerente, convLegal, "generar");
-    assert.equal(r.status, 200, JSON.stringify(r.datos));
-    assert.equal(r.datos.resultado.ticket, "GER-0001");
-    assert.equal(r.datos.resultado.prioridad, "alta"); // fiscalización programada (mínimo alta) sobre urgencia media
-    assert.equal(r.datos.resultado.titulo, "Informe DS 594");
-    assert.equal(r.datos.resultado.issue.ok, false);
-    assert.match(r.datos.issue_error, /GITHUB_TOKEN/);
-    assert.equal((await turnoChat(gGerente, convLegal, "generar")).status, 410);
-    assert.equal((await gEquipo.pedir("/api/chat/salas/c-legal", { metodo: "POST" })).status, 200); // libre
+  await prueba("mensajes vacíos o demasiado largos, sala sin repositorio y límite de 30 mensajes por minuto", async () => {
+    for (const texto of ["", "   ", "x".repeat(4001)]) assert.equal((await escribir(gGerente, "c-legal", texto)).status, 400, `«${texto.slice(0, 5)}»`);
+    const oculta = await escribir(gGerente, "c-controla", "hola");
+    assert.deepEqual([oculta.status, oculta.datos.error], [404, "Esta sala no está disponible"]);
+    // cuenta sin mensajes previos en el minuto: 30 pasan, el 31 no
+    let r;
+    for (let i = 0; i < 30; i++) {
+      r = await escribir(gAdmin, "c-lidera", `mensaje ${i + 1}`);
+      assert.equal(r.status, 200, JSON.stringify(r.datos));
+    }
+    r = await escribir(gAdmin, "c-lidera", "mensaje 31");
+    assert.equal(r.status, 429);
+    assert.equal(r.datos.error, "Vas muy rápido. Espera unos segundos y vuelve a intentar.");
+    assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera")).datos.mensajes.length, 30); // el rechazado no se guardó
   });
-  await prueba("cerrar sesión libera la sala de inmediato (#3)", async () => {
-    const legal = (await gEquipo.pedir("/api/chat/salas/c-legal", { metodo: "POST" })).datos;
-    await turnoChat(gEquipo, legal.id, "mensaje", "Queremos un tablero de normativa por faena con alertas de vencimiento");
+  await prueba("sin bloqueo de sala: cerrar sesión no cambia nada y las rutas del flujo anterior ya no existen", async () => {
     const salida = new Cliente("salida");
     salida.cookie = gEquipo.cookie;
     assert.equal((await salida.pedir("/api/auth/logout", { metodo: "POST" })).status, 200);
-    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal", { metodo: "POST" })).status, 200);
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal")).datos.mensajes.length, 3); // la conversación sigue abierta
     gEquipo = await (async () => {
       const c = new Cliente("equipo");
       assert.equal((await c.login("portal.equipo@datasheq.com", "518306")).status, 200);
       return c;
     })();
-  });
-  await prueba("límite de 30 turnos por minuto por cuenta (#4)", async () => {
-    // cuenta sin turnos previos: los 31 pedidos caen en la misma ventana de un minuto
-    const id = (await gAdmin.pedir("/api/chat/salas/c-lidera", { metodo: "POST" })).datos.id;
-    let r;
-    for (let i = 0; i < 30; i++) {
-      r = await turnoChat(gAdmin, id, "mas_detalles");
-      assert.equal(r.status, 200, JSON.stringify(r.datos));
+    assert.equal((await gGerente.pedir("/api/chat/salas/c-legal", { metodo: "POST" })).status, 405);
+    for (const ruta of ["/api/chat/conversaciones/x/mensaje", "/api/chat/conversaciones/x/latido", "/api/chat/conversaciones/x/generar"]) {
+      assert.equal((await gGerente.pedir(ruta, { metodo: "POST", json: {} })).status, 404, ruta);
     }
-    r = await turnoChat(gAdmin, id, "mas_detalles");
-    assert.equal(r.status, 429);
-    assert.equal(r.datos.error, "Vas muy rápido. Espera unos segundos y vuelve a intentar.");
-    assert.equal((await gAdmin.pedir("/api/chat/salas/c-lidera", { metodo: "POST" })).datos.turnos, 30); // el rechazado no se guardó
-    assert.equal((await turnoChat(gAdmin, id, "finalizar")).status, 200);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-legal", { metodo: "DELETE" })).status, 404); // sin «liberar sala»
   });
-  await prueba("panel del portal: solo administradores (cualquier dominio); liberar sala y reintentar Issue", async () => {
+  await prueba("panel del portal: solo administradores (cualquier dominio); historial con participantes", async () => {
     const r = await gAdmin.pedir("/api/admin/chat");
     assert.equal(r.status, 200);
-    const gen = r.datos.historial.find((f) => f.ticket === "GER-0001");
-    assert.deepEqual([gen.estado, gen.issue_url, gen.usuario_email], ["generada", null, "portal.gerente@datasheq.com"]);
-    assert.ok((await gAdmin.pedir(`/api/admin/chat/${gen.id}`)).datos.mensajes.length >= 8);
-    assert.equal((await gAdmin.pedir(`/api/admin/chat/${gen.id}/issue`, { metodo: "POST" })).status, 502); // sin GITHUB_TOKEN
-    assert.equal((await gEquipo.pedir("/api/chat/salas/c-previene", { metodo: "POST" })).status, 200);
-    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-previene", { metodo: "DELETE" })).status, 200);
-    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-previene", { metodo: "DELETE" })).status, 404);
-    for (const [ruta, metodo] of [[`/api/admin/chat/${gen.id}`, "GET"], [`/api/admin/chat/${gen.id}/issue`, "POST"], ["/api/admin/chat/salas/c-legal", "DELETE"]]) {
+    const sol = r.datos.historial.find((f) => f.ticket === "GER-0001");
+    assert.deepEqual([sol.estado, sol.sala, sol.issue_url, sol.mensajes, sol.estado_issue], ["abierta", "c-legal", null, 3, null]);
+    assert.deepEqual(sol.participantes.split(", ").sort(), ["Elena Equipo", "Gonzalo Gerente"]);
+    assert.equal(r.datos.salas.find((x) => x.clave === "c-legal").abierta, true);
+    assert.equal((await gAdmin.pedir(`/api/admin/chat/${sol.id}`)).datos.mensajes.length, 3);
+    // una solicitud abierta no se envía a GitHub
+    assert.equal((await gAdmin.pedir(`/api/admin/chat/${sol.id}/issue`, { metodo: "POST" })).status, 409);
+    for (const [ruta, metodo] of [[`/api/admin/chat/${sol.id}`, "GET"], [`/api/admin/chat/${sol.id}/issue`, "POST"]]) {
       for (const c of [gEquipo, gTeam, gExecA]) assert.equal((await c.pedir(ruta, { metodo })).status, 403, ruta);
     }
   });
-  await prueba("seguimiento (#6): «Mis requerimientos» muestra solo los propios; estado en el panel", async () => {
-    const mios = await gGerente.pedir("/api/chat/mis-requerimientos");
+  await prueba("«Mis requerimientos»: las solicitudes en que la persona escribió", async () => {
+    const mios = await gEquipo.pedir("/api/chat/mis-requerimientos");
     assert.equal(mios.status, 200);
-    assert.deepEqual(
-      mios.datos.requerimientos.map((r) => [r.ticket, r.modulo, r.estado, r.issue_url]),
-      [["GER-0001", "c-legal", "pendiente", null]], // sin GITHUB_TOKEN: pendiente de envío
-    );
-    assert.deepEqual(mios.datos.seguimiento, { sincronizado_en: null, error: null });
-    assert.deepEqual((await gEquipo.pedir("/api/chat/mis-requerimientos")).datos.requerimientos, []); // no ve los ajenos
+    assert.deepEqual(mios.datos.requerimientos.map((r) => [r.ticket, r.sala, r.estado_solicitud, r.estado]), [["GER-0001", "c-legal", "abierta", null]]);
+    assert.deepEqual((await gGerente.pedir("/api/chat/mis-requerimientos")).datos.requerimientos.length, 1);
     assert.equal((await gExecA.pedir("/api/chat/mis-requerimientos")).status, 403); // otra empresa
-    const panel = await gAdmin.pedir("/api/admin/chat?actualizar=1");
-    assert.equal(panel.datos.historial.find((f) => f.ticket === "GER-0001").estado_issue, "pendiente");
-    assert.equal(panel.datos.historial.find((f) => !f.ticket).estado_issue, null); // conversación sin requerimiento
+    assert.equal((await gAdmin.pedir("/api/admin/chat?actualizar=1")).status, 200);
   });
   await prueba("gerente de Datasheq usa el portal sin permisos de administración; /login?portal=admin según rol", async () => {
     assert.equal((await gEquipo.pedir("/gerencia")).status, 200);

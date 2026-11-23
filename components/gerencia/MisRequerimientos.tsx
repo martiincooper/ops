@@ -2,7 +2,7 @@
 
 import { ClipboardList, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NOMBRE_PRIORIDAD, type Prioridad, moduloPorClave } from "@/lib/chat/modulos";
+import { moduloPorClave } from "@/lib/chat/modulos";
 import type { EstadoSincronizacion, EstadoVisible } from "@/lib/chat/seguimiento";
 import { api } from "@/lib/cliente";
 import { ChipEstadoIssue } from "./comun";
@@ -10,11 +10,12 @@ import { ChipEstadoIssue } from "./comun";
 interface Requerimiento {
   id: string;
   ticket: string;
-  modulo: string;
+  sala: string;
   titulo: string | null;
-  prioridad: Prioridad | null;
   fecha: string | null;
-  estado: EstadoVisible;
+  estado_solicitud: "abierta" | "terminada" | "cerrada";
+  /** Estado del Issue (solo solicitudes terminadas). */
+  estado: EstadoVisible | null;
   estado_al: string | null;
   issue_numero: number | null;
   issue_url: string | null; // solo para administradores
@@ -54,20 +55,19 @@ export default function MisRequerimientos() {
           <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
             <div className="min-w-0 flex-1">
               <p className="text-sm text-tinta-3">
-                <span className="font-semibold tabular-nums text-tinta">{r.ticket}</span> · {moduloPorClave(r.modulo)?.nombre ?? r.modulo}
+                <span className="font-semibold tabular-nums text-tinta">{r.ticket}</span> · {moduloPorClave(r.sala)?.nombre ?? r.sala}
                 {r.fecha && <> · {fmt.format(new Date(r.fecha))}</>}
-                {r.prioridad && <> · Prioridad {NOMBRE_PRIORIDAD[r.prioridad].toLowerCase()}</>}
               </p>
-              <p className="mt-0.5 text-tinta">{r.titulo ?? "Sin título"}</p>
+              <p className="mt-0.5 text-tinta">{r.titulo ?? (r.estado_solicitud === "abierta" ? "Conversación abierta" : "Sin título")}</p>
             </div>
             <div className="flex flex-col items-end gap-1">
-              <ChipEstadoIssue estado={r.estado} />
+              {r.estado ? <ChipEstadoIssue estado={r.estado} /> : <span className="chip bg-suave text-tinta-2">{r.estado_solicitud === "abierta" ? "Abierta" : "Cerrada"}</span>}
               {r.issue_url ? (
                 <a href={r.issue_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-tinta hover:underline">
                   Issue #{r.issue_numero} <ExternalLink size={12} aria-hidden />
                 </a>
               ) : (
-                r.estado_al && r.estado !== "pendiente" && <span className="text-xs text-tinta-3">al {fmtHora.format(new Date(r.estado_al))}</span>
+                r.estado_al && r.estado && r.estado !== "pendiente" && <span className="text-xs text-tinta-3">al {fmtHora.format(new Date(r.estado_al))}</span>
               )}
             </div>
           </li>

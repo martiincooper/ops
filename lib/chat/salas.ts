@@ -1,17 +1,13 @@
-// Salas del portal gerencial: una persona por módulo, liberación al finalizar o por inactividad.
-// Todo vive en control.db (las cuentas de gerencia y los administradores de @datasheq.com comparten el portal).
+// Salas del portal gerencial: cada sala es un chat grupal. Una sala tiene muchas solicitudes (a lo más una abierta);
+// los mensajes pertenecen a una solicitud. Cualquier cantidad de gerentes puede estar en una sala a la vez: no hay
+// bloqueo ni expiración por inactividad. Todo vive en control.db.
 // Sin "server-only" para poder probarlo con scripts/test-logica.ts.
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { arbolDe } from "./arboles";
-import { MENSAJE_SALA_OCUPADA, MODULOS, type ClaveModulo, type Modulo, moduloPorClave } from "./modulos";
+import { moduloPorClave, MODULOS } from "./modulos";
 import { type Entorno, reposDeModulos } from "./repos";
 
 type DB = Database.Database;
-
-const minutos = Number(process.env.CHAT_INACTIVIDAD_MIN);
-/** Minutos sin actividad tras los cuales la sala se libera sola. */
-export const INACTIVIDAD_MIN = Number.isFinite(minutos) && minutos >= 1 ? minutos : 15;
 
 export class ErrorSala extends Error {
   constructor(
@@ -29,196 +25,167 @@ export interface Persona {
   nombre: string;
 }
 
-export type EstadoConversacion = "activa" | "generada" | "finalizada" | "expirada";
-export type Autor = "robot" | "usuario" | "sistema";
+/** abierta: recibe mensajes; terminada: el asistente la cerró y se envía a GitHub; cerrada: cerrada sin enviar. */
+export type EstadoSolicitud = "abierta" | "terminada" | "cerrada";
+export type Rol = "gerente" | "asistente" | "sistema";
+export type EstadoAsistente = "idle" | "pensando" | "esperando_reintento";
 
-export interface Conversacion {
+export interface Solicitud {
   id: string;
-  modulo: ClaveModulo;
-  usuario_id: string;
-  usuario_rol: string;
-  usuario_email: string;
-  usuario_nombre: string;
-  estado: EstadoConversacion;
-  completitud: number;
+  sala: string;
+  estado: EstadoSolicitud;
+  ticket: number;
   iniciada_en: string;
-  ultima_actividad: string;
   terminada_en: string | null;
-  ticket: number | null;
   titulo: string | null;
-  prioridad: string | null;
-  clasificacion: string | null;
-  requerimiento_json: string | null;
+  asistente_sesion: string | null;
+  asistente_estado: EstadoAsistente;
+  asistente_proximo_intento: string | null;
+  terminado: 0 | 1;
+  resumen: string | null;
   issue_numero: number | null;
   issue_url: string | null;
+  issue_repo: string | null;
   issue_error: string | null;
-  tokens_entrada: number;
-  tokens_salida: number;
   issue_estado: "open" | "closed" | null;
   issue_motivo: string | null;
   issue_asignado: string | null;
   issue_actualizado_en: string | null;
   issue_intentos: number;
   issue_proximo_intento: string | null;
-  /** Repositorio donde se creó el Issue (dueño/repositorio). */
-  issue_repo: string | null;
 }
 
 export interface Mensaje {
   id: number;
-  autor: Autor;
+  solicitud_id: string;
+  autor_email: string;
+  autor_nombre: string;
+  rol: Rol;
   texto: string;
-  meta: Record<string, unknown> | null;
   creado_en: string;
 }
 
+export interface Participante {
+  email: string;
+  nombre: string;
+}
+
+export const SALA_NO_DISPONIBLE = "Esta sala no está disponible";
+export const TEXTO_MAX = 4000;
+
 const iso = (d: Date) => d.toISOString();
-const limite = (ahora: Date) => iso(new Date(ahora.getTime() - INACTIVIDAD_MIN * 60_000));
-/** Instante en que la sala se libera si no hay más actividad. */
-export const expiraEn = (ultimaActividad: string) =>
-  iso(new Date(new Date(ultimaActividad).getTime() + INACTIVIDAD_MIN * 60_000));
 
-export function saludo(m: Modulo, nombre: string): string {
-  const primerNombre = nombre.trim().split(/\s+/)[0] || nombre;
-  return (
-    `Hola, ${primerNombre}. Te damos la bienvenida al portal gerencial de DataSheq. Es un gusto saludarte. ` +
-    `Estás en la sala ${m.nombre} (${m.area}), el módulo que ${m.descripcion.charAt(0).toLowerCase()}${m.descripcion.slice(1)} ` +
-    "¿En qué puedo colaborar contigo hoy?"
-  );
+export function solicitud(db: DB, id: string): Solicitud | undefined {
+  return db.prepare("SELECT * FROM chat_solicitudes WHERE id = ?").get(id) as Solicitud | undefined;
 }
 
-export function conversacion(db: DB, id: string): Conversacion | undefined {
-  return db.prepare("SELECT * FROM chat_conversaciones WHERE id = ?").get(id) as Conversacion | undefined;
+/** Solicitud abierta de la sala, si hay. */
+export function solicitudAbierta(db: DB, sala: string): Solicitud | undefined {
+  return db.prepare("SELECT * FROM chat_solicitudes WHERE sala = ? AND estado = 'abierta'").get(sala) as Solicitud | undefined;
 }
 
-export function mensajes(db: DB, conversacionId: string): Mensaje[] {
-  const filas = db
-    .prepare("SELECT id, autor, texto, meta_json, creado_en FROM chat_mensajes WHERE conversacion_id = ? ORDER BY id")
-    .all(conversacionId) as (Omit<Mensaje, "meta"> & { meta_json: string | null })[];
-  return filas.map(({ meta_json, ...m }) => ({ ...m, meta: meta_json ? JSON.parse(meta_json) : null }));
+export function participantes(db: DB, solicitudId: string): Participante[] {
+  return db
+    .prepare("SELECT email, nombre FROM chat_participantes WHERE solicitud_id = ? ORDER BY desde, email")
+    .all(solicitudId) as Participante[];
 }
 
-export function agregarMensaje(db: DB, conversacionId: string, autor: Autor, texto: string, meta?: Record<string, unknown>, ahora = new Date()) {
-  db.prepare("INSERT INTO chat_mensajes (conversacion_id, autor, texto, meta_json, creado_en) VALUES (?, ?, ?, ?, ?)").run(
-    conversacionId,
-    autor,
-    texto,
-    meta ? JSON.stringify(meta) : null,
-    iso(ahora),
-  );
+/** Mensajes de una solicitud, en orden. */
+export function mensajes(db: DB, solicitudId: string): Mensaje[] {
+  return db.prepare("SELECT * FROM chat_mensajes WHERE solicitud_id = ? ORDER BY id").all(solicitudId) as Mensaje[];
 }
 
-/** Marca actividad: la sala sigue ocupada otros INACTIVIDAD_MIN minutos. */
-export function tocar(db: DB, conversacionId: string, ahora = new Date()) {
-  db.prepare("UPDATE chat_conversaciones SET ultima_actividad = ? WHERE id = ? AND estado = 'activa'").run(iso(ahora), conversacionId);
+/** Asigna el siguiente número de ticket (GER-0001 tras la migración v7). */
+function siguienteTicket(db: DB): number {
+  return (db.prepare("SELECT COALESCE(MAX(ticket), 0) + 1 AS n FROM chat_solicitudes").get() as { n: number }).n;
 }
 
-/** Termina la conversación y libera su sala. Sin mensajes de la persona, no queda en el historial. */
-export function cerrarConversacion(db: DB, id: string, estado: Exclude<EstadoConversacion, "activa">, ahora = new Date()) {
-  db.transaction(() => {
-    db.prepare("DELETE FROM chat_salas WHERE conversacion_id = ?").run(id);
-    const { n } = db
-      .prepare("SELECT COUNT(*) AS n FROM chat_mensajes WHERE conversacion_id = ? AND autor = 'usuario'")
-      .get(id) as { n: number };
-    if (n === 0 && estado !== "generada") {
-      db.prepare("DELETE FROM chat_conversaciones WHERE id = ?").run(id);
-      return;
-    }
-    db.prepare("UPDATE chat_conversaciones SET estado = ?, terminada_en = ? WHERE id = ? AND estado = 'activa'").run(estado, iso(ahora), id);
-  })();
-}
-
-/** Libera las salas sin actividad en los últimos INACTIVIDAD_MIN minutos. Devuelve cuántas liberó. */
-export function expirarInactivas(db: DB, ahora = new Date()): number {
-  const vencidas = db
-    .prepare(
-      `SELECT c.id FROM chat_conversaciones c
-        WHERE c.estado = 'activa' AND c.ultima_actividad < ?`,
-    )
-    .all(limite(ahora)) as { id: string }[];
-  for (const { id } of vencidas) cerrarConversacion(db, id, "expirada", ahora);
-  return vencidas.length;
+/** La sala existe y está disponible (su módulo tiene repositorio de GitHub); si no, 404. */
+export function exigirSala(clave: string, env: Entorno = process.env): string {
+  const m = moduloPorClave(clave);
+  if (!m) throw new ErrorSala(404, "Módulo desconocido");
+  if (!reposDeModulos(env)[m.clave]) throw new ErrorSala(404, SALA_NO_DISPONIBLE);
+  return m.clave;
 }
 
 /**
- * Entra a una sala. Si está libre, la bloquea para la persona y abre una conversación con el saludo; si ya es
- * suya, retoma la conversación; si la ocupa otra persona, lanza 409. Al entrar a una sala se liberan las otras
- * salas que la persona tuviera ocupadas (una sala a la vez).
+ * Guarda un mensaje de una persona en la sala y vuelve de inmediato. Si la sala no tiene una solicitud abierta, el
+ * mensaje abre una; quien escribe queda como participante de la solicitud.
  */
-export const SALA_NO_DISPONIBLE = "Esta sala no está disponible";
-
-export function entrarSala(
+export function enviarMensaje(
   db: DB,
-  clave: string,
+  sala: string,
   p: Persona,
+  texto: string,
   ahora = new Date(),
   env: Entorno = process.env,
-): { conversacion: Conversacion; nueva: boolean } {
-  const m = moduloPorClave(clave);
-  if (!m) throw new ErrorSala(404, "Módulo desconocido");
-  // Solo las salas con repositorio de GitHub asignado admiten entrevistas
-  if (!reposDeModulos(env)[m.clave]) throw new ErrorSala(404, SALA_NO_DISPONIBLE);
+): { mensaje: Mensaje; solicitud: Solicitud; nueva: boolean } {
+  const clave = exigirSala(sala, env);
+  const t = texto.trim();
+  if (!t) throw new ErrorSala(400, "Escribe un mensaje");
+  if (t.length > TEXTO_MAX) throw new ErrorSala(400, `Máximo ${TEXTO_MAX} caracteres`);
   return db.transaction(() => {
-    expirarInactivas(db, ahora);
-    const ocupada = db.prepare("SELECT conversacion_id, usuario_email FROM chat_salas WHERE modulo = ?").get(m.clave) as
-      | { conversacion_id: string; usuario_email: string }
-      | undefined;
-    if (ocupada) {
-      if (ocupada.usuario_email.toLowerCase() !== p.email.toLowerCase()) throw new ErrorSala(409, MENSAJE_SALA_OCUPADA);
-      tocar(db, ocupada.conversacion_id, ahora);
-      return { conversacion: conversacion(db, ocupada.conversacion_id) as Conversacion, nueva: false };
+    let s = solicitudAbierta(db, clave);
+    const nueva = !s;
+    if (!s) {
+      const id = randomUUID();
+      db.prepare("INSERT INTO chat_solicitudes (id, sala, ticket, iniciada_en) VALUES (?, ?, ?, ?)").run(id, clave, siguienteTicket(db), iso(ahora));
+      s = solicitud(db, id) as Solicitud;
     }
-
-    liberarSalasDe(db, p.email, ahora);
-
-    const id = randomUUID();
-    db.prepare(
-      `INSERT INTO chat_conversaciones (id, modulo, usuario_id, usuario_rol, usuario_email, usuario_nombre, iniciada_en, ultima_actividad)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, m.clave, p.id, p.rol, p.email.toLowerCase(), p.nombre, iso(ahora), iso(ahora));
-    db.prepare("INSERT INTO chat_salas (modulo, conversacion_id, usuario_email, desde) VALUES (?, ?, ?, ?)").run(
-      m.clave,
-      id,
-      p.email.toLowerCase(),
-      iso(ahora),
-    );
-    // El saludo hace la primera pregunta del árbol de la sala (#17)
-    agregarMensaje(db, id, "robot", saludo(m, p.nombre), { nodo: arbolDe(m.clave)?.raiz ?? "inicio", completitud: 0 }, ahora);
-    return { conversacion: conversacion(db, id) as Conversacion, nueva: true };
+    const email = p.email.toLowerCase();
+    db.prepare("INSERT OR IGNORE INTO chat_participantes (solicitud_id, email, nombre, desde) VALUES (?, ?, ?, ?)").run(s.id, email, p.nombre, iso(ahora));
+    const { lastInsertRowid } = db
+      .prepare("INSERT INTO chat_mensajes (solicitud_id, autor_email, autor_nombre, rol, texto, creado_en) VALUES (?, ?, ?, 'gerente', ?, ?)")
+      .run(s.id, email, p.nombre, t, iso(ahora));
+    const mensaje = db.prepare("SELECT * FROM chat_mensajes WHERE id = ?").get(lastInsertRowid) as Mensaje;
+    return { mensaje, solicitud: s, nueva };
   })();
 }
 
-/** Conversación activa de la persona (y con su sala aún bloqueada), o error 403/410. */
-export function exigirActiva(db: DB, id: string, p: Persona, ahora = new Date()): Conversacion {
-  expirarInactivas(db, ahora);
-  const c = conversacion(db, id);
-  if (!c || c.usuario_email.toLowerCase() !== p.email.toLowerCase()) throw new ErrorSala(404, "Conversación no encontrada");
-  if (c.estado === "expirada") {
-    throw new ErrorSala(410, "La sesión se cerró por inactividad y la sala quedó liberada. Puedes volver a entrar para comenzar de nuevo.");
-  }
-  if (c.estado !== "activa") throw new ErrorSala(410, "Esta conversación ya terminó.");
-  return c;
+export interface SolicitudVista {
+  id: string;
+  ticket: number;
+  estado: EstadoSolicitud;
+  iniciada_en: string;
+  terminada_en: string | null;
+  issue_url: string | null;
 }
 
-/** Asigna el siguiente número de ticket (si aún no tiene) y lo devuelve. */
-export function asignarTicket(db: DB, id: string): number {
-  db.prepare(
-    "UPDATE chat_conversaciones SET ticket = (SELECT COALESCE(MAX(ticket), 0) + 1 FROM chat_conversaciones) WHERE id = ? AND ticket IS NULL",
-  ).run(id);
-  return (db.prepare("SELECT ticket FROM chat_conversaciones WHERE id = ?").get(id) as { ticket: number }).ticket;
+export interface VistaSala {
+  /** Todas las solicitudes de la sala, de la más antigua a la más nueva. */
+  solicitudes: SolicitudVista[];
+  /** Mensajes de la sala en orden (con `desde`, solo los de id mayor). */
+  mensajes: Mensaje[];
+  /** Id del último mensaje de la sala (0 si no hay): desde ahí consulta el cliente. */
+  ultimo_id: number;
+}
+
+/**
+ * Historial completo de la sala (todas sus solicitudes con sus mensajes) o, con `desde`, solo los mensajes con id
+ * mayor (para consultar cada 2 a 3 segundos).
+ */
+export function vistaSala(db: DB, sala: string, desde = 0): VistaSala {
+  const solicitudes = db
+    .prepare("SELECT id, ticket, estado, iniciada_en, terminada_en, issue_url FROM chat_solicitudes WHERE sala = ? ORDER BY ticket")
+    .all(sala) as SolicitudVista[];
+  const msgs = db
+    .prepare(
+      `SELECT m.* FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id
+        WHERE s.sala = ? AND m.id > ? ORDER BY m.id`,
+    )
+    .all(sala, desde) as Mensaje[];
+  const { ultimo } = db
+    .prepare("SELECT COALESCE(MAX(m.id), 0) AS ultimo FROM chat_mensajes m JOIN chat_solicitudes s ON s.id = m.solicitud_id WHERE s.sala = ?")
+    .get(sala) as { ultimo: number };
+  return { solicitudes, mensajes: msgs, ultimo_id: ultimo };
 }
 
 export interface EstadoSala {
-  clave: ClaveModulo;
-  ocupada: boolean;
-  propia: boolean;
-  desde: string | null;
-  ultima_actividad: string | null;
-  expira_en: string | null;
-  /** Solo para administradores (el resto solo ve «en uso»). */
-  usuario_nombre?: string;
-  usuario_email?: string;
-  conversacion_id?: string;
+  clave: string;
+  /** Hay una solicitud abierta en la sala. */
+  abierta: boolean;
+  /** Mensajes de la solicitud abierta. */
+  mensajes: number;
   /** Solo para administradores: repositorio de GitHub del módulo (null: sala oculta en el portal). */
   repo?: string | null;
 }
@@ -227,52 +194,16 @@ export interface EstadoSala {
  * Estado de las salas. Sin detalle (portal) solo devuelve las activas, es decir, las de módulos con repositorio
  * asignado; con detalle (panel de administración) devuelve todas, con su repositorio.
  */
-export function estadoSalas(
-  db: DB,
-  p: Persona | null,
-  conDetalle = false,
-  ahora = new Date(),
-  env: Entorno = process.env,
-): EstadoSala[] {
-  expirarInactivas(db, ahora);
+export function estadoSalas(db: DB, conDetalle = false, env: Entorno = process.env): EstadoSala[] {
   const repos = reposDeModulos(env);
   const filas = db
     .prepare(
-      `SELECT s.modulo, s.desde, s.usuario_email, c.id AS conversacion_id, c.usuario_nombre, c.ultima_actividad
-         FROM chat_salas s JOIN chat_conversaciones c ON c.id = s.conversacion_id`,
+      `SELECT s.sala, (SELECT COUNT(*) FROM chat_mensajes m WHERE m.solicitud_id = s.id) AS n
+         FROM chat_solicitudes s WHERE s.estado = 'abierta'`,
     )
-    .all() as { modulo: string; desde: string; usuario_email: string; conversacion_id: string; usuario_nombre: string; ultima_actividad: string }[];
+    .all() as { sala: string; n: number }[];
   return MODULOS.filter((m) => conDetalle || repos[m.clave]).map((m) => {
-    const f = filas.find((x) => x.modulo === m.clave);
-    const propia = !!f && !!p && f.usuario_email.toLowerCase() === p.email.toLowerCase();
-    return {
-      clave: m.clave,
-      ocupada: !!f,
-      propia,
-      desde: f?.desde ?? null,
-      ultima_actividad: f && (conDetalle || propia) ? f.ultima_actividad : null,
-      expira_en: f && (conDetalle || propia) ? expiraEn(f.ultima_actividad) : null,
-      ...(conDetalle && f
-        ? { usuario_nombre: f.usuario_nombre, usuario_email: f.usuario_email, conversacion_id: f.conversacion_id }
-        : {}),
-      ...(conDetalle ? { repo: repos[m.clave] } : {}),
-    };
+    const f = filas.find((x) => x.sala === m.clave);
+    return { clave: m.clave, abierta: !!f, mensajes: f?.n ?? 0, ...(conDetalle ? { repo: repos[m.clave] } : {}) };
   });
-}
-
-/** Libera todas las salas que ocupa una cuenta (al cerrar sesión o al entrar a otra sala). Devuelve cuántas. */
-export function liberarSalasDe(db: DB, email: string, ahora = new Date()): number {
-  const propias = db.prepare("SELECT conversacion_id FROM chat_salas WHERE usuario_email = ? COLLATE NOCASE").all(email) as {
-    conversacion_id: string;
-  }[];
-  for (const s of propias) cerrarConversacion(db, s.conversacion_id, "finalizada", ahora);
-  return propias.length;
-}
-
-/** Liberación forzada por un administrador. */
-export function liberarSala(db: DB, clave: string, ahora = new Date()): boolean {
-  const f = db.prepare("SELECT conversacion_id FROM chat_salas WHERE modulo = ?").get(clave) as { conversacion_id: string } | undefined;
-  if (!f) return false;
-  cerrarConversacion(db, f.conversacion_id, "finalizada", ahora);
-  return true;
 }

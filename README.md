@@ -171,33 +171,26 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   de administrador (si la cuenta no lo es, vuelve al portal con un aviso).
 - **7 salas**, una por módulo: C-Legal (Cumplimiento Legal), C-Controla (Control Documental), C-Previene (Gestor
   Documental), C-Lidera (Programas de Liderazgo), C-Acredita (Gestión del personal), C-Capacita (Gestor del
-  conocimiento) y C-Investiga (Reportabilidad e Incidentes). Algunas respuestas indican que el tema corresponde a
-  otra sala: el asistente lo dice y ofrece el botón para ir allá (la entrevista puede seguir donde está).
+  conocimiento) y C-Investiga (Reportabilidad e Incidentes). La lista sigue fija en el código hasta el ticket de salas
+  administradas.
 - **Un repositorio de GitHub por módulo** (`lib/chat/repos.ts`): los requerimientos de cada sala se envían al
   repositorio de su módulo. Por defecto solo C-Legal tiene uno (`datasheq-creator/clegal-railway`); los demás se
   asignan con `GITHUB_REPOS` (`c-acredita=datasheq-creator/cacredita-railway,c-lidera=…`; `c-legal=-` lo quita).
   **Las salas sin repositorio no se muestran en el portal**, no se puede entrar a ellas (404) y el asistente no las
   sugiere; el panel las muestra como «Oculta». Cada Issue guarda el repositorio donde se creó.
-- **Entrevista guiada por un árbol de decisión, sin IA** (`lib/chat/arboles.ts`, motor en `lib/chat/flujo.ts`; ver
-  [`docs/arboles-de-decision.md`](docs/arboles-de-decision.md)): saludo personalizado, una pregunta a la vez y las
-  respuestas eligen la rama siguiente. Las preguntas de opciones se responden con **botones** (en las de varias
-  opciones se marcan y se confirman; algunas aceptan además una respuesta escrita), las de fecha con un selector y
-  las de texto con el campo; si una respuesta escrita es muy breve, se repregunta una vez. Barra de «% reunido» con
-  las preguntas obligatorias que faltan. Botones: **Pasar a la siguiente pregunta** (solo en las opcionales),
-  **Agregar más detalles** (se suma a la respuesta anterior), **Finalizar y generar requerimiento** y **Finalizar
-  conversación** (sin generar). El requerimiento se arma con reglas fijas: título desde la primera respuesta,
-  clasificación según el tipo de solicitud y prioridad según la urgencia, que algunas respuestas suben a un mínimo
-  (por ejemplo, una fiscalización programada → al menos alta). Los árboles se editan en código y el documento se
-  regenera con `npm run arboles:doc`. Se validan con un **esquema** (Zod: campos, tipos, formatos, largos y valores
-  permitidos; un campo mal escrito es un error) y su **estructura** (sin ciclos, todo alcanzable, toda rama termina)
-  en las pruebas, al generar el documento y al arrancar el servidor: en producción no arranca con un árbol inválido.
-- **Una persona por sala**: al entrar, la sala queda reservada para esa persona; quien intente entrar ve «El módulo
-  se encuentra en uso por otro usuario. Por favor intenta más tarde». Se libera al finalizar (con o sin
-  requerimiento) o tras `CHAT_INACTIVIDAD_MIN` minutos sin actividad (por defecto 15; escribir cuenta como
-  actividad). Volver a entrar retoma la conversación; entrar a otra sala libera la anterior.
-- **Issue automático**: título `[GER-0001][C-Legal] …`, etiquetas del módulo (`C-Legal`), prioridad
-  (`prioridad: alta`), tipo (`tipo: mejora`), `gerencia` y `ready-for-human` (se crean solas si no existen), y en el cuerpo el ticket,
-  los datos de quien lo pidió, resumen, contexto, alcance, criterios de aceptación y la transcripción.
+- **Cada sala es un chat grupal compartido** (solo texto por ahora; sin asistente, fotos ni «Terminar»): al abrirla
+  se ve el historial completo de todas sus solicitudes, cada mensaje con autor y hora, los propios a la derecha. Al
+  enviar, el mensaje se guarda y la respuesta vuelve al tiro; si la sala no tiene una solicitud abierta, el mensaje
+  abre una (con su número `GER-000n`), y quien escribe queda como participante. Cualquier cantidad de gerentes puede
+  estar a la vez: **no hay bloqueo de sala, ni «en uso», ni latido, ni vencimiento por inactividad**; una solicitud
+  sigue abierta sin límite de tiempo. Los clientes consultan cada 2,5 segundos los mensajes con id mayor al último
+  visto (`GET /api/chat/salas/<sala>?desde=<id>`), así los mensajes ajenos aparecen sin recargar. Modelo en
+  `control.db`: `chat_solicitudes` (a lo más una abierta por sala), `chat_mensajes`, `chat_participantes` y
+  `chat_modulos` (vacía; la usará el ticket de salas administradas).
+- **Issue automático**: título `[GER-0001][C-Legal] …`, etiquetas del módulo (`C-Legal`), `gerencia` y
+  `ready-for-human` (se crean solas si no existen), y en el cuerpo el ticket, los participantes, el resumen y la
+  conversación. Por ahora nada lo dispara (el asistente y «Terminar» llegan en tickets posteriores): el envío y sus
+  reintentos quedan listos para solicitudes terminadas.
 - **Reintentos automáticos del envío**: si GitHub falla por un problema pasajero (red, tiempo de espera, error 5xx o
   límite de uso), la petición se reintenta hasta 3 veces en el momento (respetando `Retry-After`) y, si sigue
   fallando, el servidor la reintenta solo a los 1, 2, 5, 15, 30 y 60 minutos; el panel muestra cuándo será el próximo.
@@ -208,9 +201,9 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   (`GITHUB_CUENTA`, por defecto `datasheq-creator`). Antes de enviar se comprueba de quién es el token
   (`GET /user`); si es de otra cuenta, el envío se rechaza (error definitivo, sin reintentos).
 - **Panel del administrador** (`/admin` → **Portal gerencial**, cualquier administrador; el resto de
-  `/admin` no cambia): estado de las 7 salas con su repositorio (quién la usa, desde cuándo,
-  cuándo se libera, botón para liberarla), historial de conversaciones con ticket, prioridad, estado, transcripción y
-  enlace directo al Issue (o **Reintentar** si quedó pendiente).
+  `/admin` no cambia): estado de las 7 salas con su repositorio y si tienen una solicitud abierta, historial de
+  solicitudes con ticket, participantes, estado, transcripción y enlace directo al Issue (o **Reintentar** si quedó
+  pendiente).
 - **Seguimiento de requerimientos**: el estado de cada Issue se trae de GitHub (Issues con la etiqueta `gerencia`)
   como máximo cada 10 minutos, al abrir el panel o el portal; el botón **Actualizar** del panel fuerza la consulta
   (como máximo una vez por minuto). Estados: **Pendiente de envío**, **Abierto**, **En curso** (tiene persona
@@ -218,10 +211,8 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   **Estado en GitHub**; en el portal, **Mis requerimientos** muestra a cada persona solo los suyos (el enlace al Issue
   solo a administradores, porque el resto puede no tener acceso al repositorio). Si GitHub no responde, se muestra el
   último estado conocido con su fecha.
-- **Límites de uso** (protegen el servidor): cada cuenta puede enviar hasta 30 turnos por minuto y
-  generar hasta 3 requerimientos por minuto; si se pasa, ve «Vas muy rápido. Espera unos segundos y vuelve a
-  intentar» sin perder lo escrito. Cada conversación admite hasta `CHAT_TURNOS_MAX` respuestas del asistente (por
-  defecto 40): con la última, el asistente invita a generar el requerimiento y el chat solo permite finalizar.
+- **Límite de uso** (protege el servidor): cada cuenta puede enviar hasta 30 mensajes por minuto; si se pasa, ve
+  «Vas muy rápido. Espera unos segundos y vuelve a intentar» sin perder lo escrito.
 
 ## Contenido de esta versión
 
@@ -515,8 +506,6 @@ producción.
 | `TZ_NEGOCIO` | `America/Santiago` | Define qué fecha es "hoy" (una jornada por día) |
 | `COOKIE_SECURE` | `true` en producción | `false` solo para probar por http sin TLS |
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
-| `CHAT_INACTIVIDAD_MIN` | `15` | Minutos sin actividad tras los que una sala se libera |
-| `CHAT_TURNOS_MAX` | `40` | Respuestas del asistente por conversación |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token de la cuenta de DataSHEQ con permiso «Issues: write» sobre los repositorios de los módulos |
 | `GITHUB_CUENTA` | `datasheq-creator` | Cuenta de GitHub de DataSHEQ: se rechazan los envíos con un token de otra cuenta |
 | `GITHUB_REPOS` | `c-legal=datasheq-creator/clegal-railway` | Repositorio de cada módulo (`clave=dueño/repo`, separados por `,`); las salas sin repositorio se ocultan |
@@ -532,7 +521,7 @@ No cambies la `clave` de una empresa con datos: es el nombre de su carpeta.
 ```bash
 npm ci
 npm run typecheck
-npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (salas, inactividad, cierre de sesión, tickets, límites de uso, seguimiento de Issues y reintentos del envío con un GitHub simulado, esquema y estructura de los árboles, motor del flujo) (72 pruebas)
+npm run test:logica       # zona horaria, Say-Do, esquema y migraciones, envío, etapas, pipeline, objetivos editables, eliminar cuentas, gerencia, desglose de costos, estado de pago, compras en dólares, portal gerencial (migración v7, salas como chat grupal, historial, tickets, límite de uso, seguimiento de Issues y reintentos del envío con un GitHub simulado) (70 pruebas)
 
 # extremo a extremo contra un servidor con datos VACÍOS: dos empresas, aislamiento, supervisión,
 # comenzar/terminar jornada, días no disponibles, varios proyectos, objetivos editables, etapas, pipeline, editar y eliminar proyectos, desactivar y eliminar cuentas, tableros, desglose de costos, estado de pago, historial de compras del equipo, compras en dólares, portal gerencial (69 pruebas)
@@ -554,7 +543,7 @@ components/         componentes cliente (PinPad, FormGasto, SelectorProyectos, M
 components/equipo/  jornada del integrante (comenzar, terminar, tablero)
 components/admin/   tablero de jefatura (selector, standup, disponibilidad, compras, equipo, proyectos, administradores, portal gerencial)
 components/gerencia/ portal gerencial: salas, chat con el asistente, acceso denegado
-lib/chat/           portal gerencial: módulos, bloqueo de salas, árboles de decisión y su motor, envío a GitHub con reintentos
+lib/chat/           portal gerencial: módulos, salas como chat grupal, envío a GitHub con reintentos
 lib/empresas.ts     empresas y dominios
 lib/db.ts           una conexión por base (control + una por empresa) + PRAGMA por conexión + migraciones
 lib/migraciones.ts  esquemas de control y de empresa (versionados con PRAGMA user_version)
