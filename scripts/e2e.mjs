@@ -1476,6 +1476,71 @@ async function main() {
     assert.ok(!(await gAdmin.pedir("/api/admin/chat/propuestos")).datos.propuestos.some((x) => x.clave === "c-panel"));
   });
 
+  await prueba("módulos propuestos (#50): el admin activa una sala con dos especificaciones → Issues en el GitHub falso y la sala queda como un módulo normal", async () => {
+    const GH = process.env.GITHUB_FALSO;
+    const esperar = async (fn, que) => {
+      for (let i = 0; i < 100; i++) {
+        const r = await fn();
+        if (r) return r;
+        await new Promise((f) => setTimeout(f, 100));
+      }
+      assert.fail(`no ocurrió: ${que}`);
+    };
+    assert.equal((await gGerente.pedir("/api/chat/salas", { metodo: "POST", json: { nombre: "C-Activar", descripcion: "Se activará" } })).status, 201);
+    const vista = async () => (await gGerente.pedir("/api/chat/salas/c-activar")).datos;
+    const llenar = async (primero) => {
+      let v;
+      for (const t of [primero, "Lo usan tres personas cada semana", "Eso es todo"]) {
+        assert.equal((await escribir(gGerente, "c-activar", t)).status, 200);
+        v = await esperar(async () => {
+          const x = await vista();
+          return x.asistente === "idle" && x.mensajes.at(-1).rol === "asistente" ? x : null;
+        }, "respuesta del asistente");
+        if (v.resumen) break;
+      }
+      assert.ok(v.resumen);
+      assert.equal((await gGerente.pedir("/api/chat/salas/c-activar/terminar", { metodo: "POST" })).status, 200);
+      await esperar(async () => (await vista()).solicitudes.at(-1).envio === "guardado", "marcador «Guardado»");
+    };
+    await llenar("Primera función");
+    await llenar("Segunda función");
+    const ruta = "/api/admin/chat/propuestos/c-activar/activar";
+    // conversación abierta con mensajes: 409
+    assert.equal((await escribir(gGerente, "c-activar", "una más")).status, 200);
+    assert.equal((await gAdmin.pedir(ruta, { metodo: "POST", json: { repo: "prueba/c-activar" } })).status, 409);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/salas/c-activar/cerrar", { metodo: "POST" })).status, 200);
+    // repo de otra sala: 409; verificación fallida: error en línea y la sala sigue propuesta
+    assert.equal((await gAdmin.pedir(ruta, { metodo: "POST", json: { repo: "https://github.com/prueba/c-lidera" } })).status, 409);
+    const mal = await gAdmin.pedir(ruta, { metodo: "POST", json: { repo: "prueba/c-activar-sin-issues" } });
+    assert.equal(mal.status, 200);
+    assert.match(mal.datos.error_repo, /Issues desactivados/);
+    assert.equal((await gAdmin.pedir("/api/admin/chat/propuestos/c-activar")).status, 200); // sigue propuesta
+    for (const c of [gGerente, gEquipo]) assert.equal((await c.pedir(ruta, { metodo: "POST", json: { repo: "prueba/c-activar" } })).status, 403);
+    assert.equal((await new Cliente("anon").pedir(ruta, { metodo: "POST", json: { repo: "prueba/c-activar" } })).status, 401);
+    // activar
+    const ok = await gAdmin.pedir(ruta, { metodo: "POST", json: { repo: "https://github.com/prueba/c-activar.git" } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.datos));
+    assert.deepEqual(ok.datos.envios.map((e) => e.ok), [true, true]);
+    const issues = (await (await fetch(`${GH}/control/issues`)).json()).filter((i) => i.repo === "prueba/c-activar");
+    assert.equal(issues.length, 2);
+    assert.ok(issues[0].title.startsWith(`[${ok.datos.envios[0].ticket}][C-Activar]`));
+    assert.ok(issues[1].title.startsWith(`[${ok.datos.envios[1].ticket}][C-Activar]`));
+    for (const i of issues) assert.deepEqual(i.labels, ["C-Activar", "gerencia", "spec", "ready-for-human", "modulo-nuevo"]);
+    // sin duplicados al repetir, y ya no es propuesta
+    assert.equal((await gAdmin.pedir(ruta, { metodo: "POST", json: { repo: "prueba/c-activar" } })).status, 409);
+    assert.equal((await (await fetch(`${GH}/control/issues`)).json()).filter((i) => i.repo === "prueba/c-activar").length, 2);
+    assert.ok(!(await gAdmin.pedir("/api/admin/chat/propuestos")).datos.propuestos.some((x) => x.clave === "c-activar"));
+    // el portal la muestra como una sala normal, con sus marcadores «enviado»
+    const sala = (await gEquipo.pedir("/api/chat/salas")).datos.salas.find((x) => x.clave === "c-activar");
+    assert.deepEqual([sala.estado_modulo, sala.disponible, sala.abierta], ["activo", true, false]);
+    const solicitudes = (await vista()).solicitudes;
+    assert.deepEqual(solicitudes.filter((x) => x.estado === "terminada").map((x) => x.envio), ["enviado", "enviado"]);
+    // un mensaje nuevo llama al asiento sin kind y con el repositorio
+    assert.equal((await escribir(gGerente, "c-activar", "Ahora sí, un requerimiento normal")).status, 200);
+    const turno = await esperar(async () => ((await (await fetch(`${process.env.ASIENTO}/control`)).json()).turnos.filter((t) => t.repo === "prueba/c-activar").at(-1)), "turno con el repo");
+    assert.equal(turno.kind, undefined);
+  });
+
   console.log(`\n${ok} pruebas OK, ${fallos} fallidas`);
   process.exitCode = fallos ? 1 : 0;
 }
