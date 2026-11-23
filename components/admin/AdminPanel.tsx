@@ -7,6 +7,7 @@ import {
   KeyRound,
   LayoutList,
   MessagesSquare,
+  Lightbulb,
   Receipt,
   ShieldCheck,
   TrendingUp,
@@ -21,13 +22,14 @@ import { cx } from "@/lib/cliente";
 import Administradores from "./Administradores";
 import Capacidad from "./Capacidad";
 import ChatGerencia from "./ChatGerencia";
+import ModulosPropuestos from "./ModulosPropuestos";
 import Compras from "./Compras";
 import Equipo from "./Equipo";
 import Proyectos from "./Proyectos";
 import Standup from "./Standup";
 import type { Alcance, EmpresaPublica, Yo } from "./comun";
 
-export type Vista = "standup" | "capacidad" | "compras" | "equipo" | "proyectos" | "admins" | "chat";
+export type Vista = "standup" | "capacidad" | "compras" | "equipo" | "proyectos" | "admins" | "chat" | "propuestos";
 
 const VISTAS: { clave: Vista; titulo: string; corto: string; icono: typeof Users; conAlcance?: boolean }[] = [
   { clave: "standup", titulo: "Standup", corto: "Standup", icono: LayoutList, conAlcance: true },
@@ -37,6 +39,7 @@ const VISTAS: { clave: Vista; titulo: string; corto: string; icono: typeof Users
   { clave: "proyectos", titulo: "Proyectos", corto: "Proyectos", icono: FolderKanban },
   { clave: "admins", titulo: "Administradores", corto: "Admins", icono: ShieldCheck },
   { clave: "chat", titulo: "Portal gerencial", corto: "Chatbot", icono: MessagesSquare },
+  { clave: "propuestos", titulo: "Módulos propuestos", corto: "Propuestos", icono: Lightbulb },
 ];
 
 export default function AdminPanel({
@@ -164,7 +167,9 @@ export default function AdminPanel({
               <p className="mt-0.5 text-sm text-tinta-3">
                 {vista === "admins"
                   ? "Todas las empresas"
-                  : vista === "chat"
+                  : vista === "propuestos"
+                    ? "Lo que gerencia quiere construir · especificaciones, CONTEXT.md y ADRs"
+                    : vista === "chat"
                     ? "Chatbot de requerimientos de gerencia · salas, historial e Issues de GitHub"
                     : `${emp.nombre} · ${emp.dominios.map((d) => "@" + d).join(", ")}`}
               </p>
@@ -187,6 +192,7 @@ export default function AdminPanel({
           {vista === "proyectos" && <Proyectos key={empresa} empresa={emp} hoy={hoy} />}
           {vista === "admins" && <Administradores yo={yo} />}
           {vista === "chat" && actual.clave === "chat" && <ChatGerencia />}
+          {vista === "propuestos" && <ModulosPropuestos irASalas={() => setVista("chat")} />}
         </main>
       </div>
     </div>

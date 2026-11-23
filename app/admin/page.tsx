@@ -6,7 +6,7 @@ import { hoyLocal } from "@/lib/tiempo";
 
 export const dynamic = "force-dynamic";
 
-const VISTAS: Vista[] = ["standup", "capacidad", "compras", "equipo", "proyectos", "admins", "chat"];
+const VISTAS: Vista[] = ["standup", "capacidad", "compras", "equipo", "proyectos", "admins", "chat", "propuestos"];
 
 export default async function Admin({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const u = await requirePagina(["admin"]);
@@ -18,7 +18,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
     empresa = empresaDe(u).clave;
   }
   const pedida = VISTAS.includes(q.vista as Vista) ? (q.vista as Vista) : "standup";
-  const vista = pedida === "chat" && !puedeAdministrarPortal(u) ? "standup" : pedida;
+  const vista = (pedida === "chat" || pedida === "propuestos") && !puedeAdministrarPortal(u) ? "standup" : pedida;
   return (
     <AdminPanel
       yo={{ id: u.id, nombre: u.nombre, email: u.email }}

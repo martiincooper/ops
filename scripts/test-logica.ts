@@ -36,6 +36,8 @@ import {
   saludAsiento,
   turnosPendientes,
 } from "../lib/chat/asistente";
+import { markdownAHtml } from "../lib/markdown";
+import { detallePropuesto, documentosPropuesto, listarPropuestos, zipPropuesto } from "../lib/chat/propuestos";
 import { guardarSala, normalizarRepo } from "../lib/chat/repos";
 import { ErrorModulo, archivarModulo, crearModulo, editarModulo, listarModulos, moduloPorClave, proponerModulo, repoDe, slugSala, todosLosModulos } from "../lib/chat/catalogo";
 import { CUPO_POR_MINUTO, consumirCupo, reiniciarCupos } from "../lib/chat/uso";
@@ -1839,6 +1841,59 @@ async function main() {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+  await prueba("módulos propuestos (#49): la lista trae solo salas propuestas no archivadas, con guardadas, abierta y última actividad", () => {
+    const d = dbControl();
+    d.prepare("INSERT INTO chat_modulos (clave, nombre, descripcion, estado_modulo, creado_por, creado_en) VALUES ('p-vieja', 'P-Vieja', 'Vieja', 'propuesto', 'a@datasheq.com', '2026-01-01T00:00:00.000Z')").run();
+    d.prepare("INSERT INTO chat_modulos (clave, nombre, descripcion, estado_modulo, creado_por, creado_en) VALUES ('p-nueva', 'P-Nueva', 'Nueva', 'propuesto', NULL, '2026-01-02T00:00:00.000Z')").run();
+    d.prepare("INSERT INTO chat_modulos (clave, nombre, estado_modulo, archivado) VALUES ('p-arch', 'P-Arch', 'propuesto', 1)").run();
+    d.prepare("INSERT INTO chat_modulos (clave, nombre, estado_modulo) VALUES ('m-activa', 'M-Activa', 'activo')").run();
+    const sol = (id: string, sala: string, ticket: number, estado: string, spec: string | null, ini: string, fin: string | null) =>
+      d.prepare("INSERT INTO chat_solicitudes (id, sala, ticket, estado, spec, titulo, iniciada_en, terminada_en) VALUES (?, ?, ?, ?, ?, 'T', ?, ?)").run(id, sala, ticket, estado, spec, ini, fin);
+    sol("pv1", "p-vieja", 9001, "terminada", "# Spec 1", "2026-03-01T00:00:00.000Z", "2026-03-02T00:00:00.000Z");
+    sol("pv2", "p-vieja", 9002, "terminada", "# Spec 2", "2026-03-03T00:00:00.000Z", "2026-03-04T00:00:00.000Z");
+    sol("pv3", "p-vieja", 9003, "cerrada", null, "2026-03-05T00:00:00.000Z", "2026-03-06T00:00:00.000Z");
+    sol("pv4", "p-vieja", 9004, "abierta", null, "2026-03-07T00:00:00.000Z", null);
+    d.prepare("INSERT INTO chat_mensajes (solicitud_id, autor_email, autor_nombre, rol, texto, creado_en) VALUES ('pv4', 'a@datasheq.com', 'Ana', 'gerente', 'hola', '2026-03-08T00:00:00.000Z')").run();
+    sol("pa1", "m-activa", 9005, "terminada", "# x", "2026-05-01T00:00:00.000Z", "2026-05-02T00:00:00.000Z");
+    const l = listarPropuestos(d).filter((x) => x.clave.startsWith("p-") || x.clave === "m-activa");
+    assert.deepEqual(
+      l.map((x) => [x.clave, x.guardadas, x.abierta, x.ultima_actividad]),
+      [
+        ["p-vieja", 2, true, "2026-03-08T00:00:00.000Z"],
+        ["p-nueva", 0, false, "2026-01-02T00:00:00.000Z"],
+      ],
+    );
+    assert.deepEqual([l[0].nombre, l[0].descripcion, l[0].creado_por, l[1].creado_por], ["P-Vieja", "Vieja", "a@datasheq.com", null]);
+    // detalle: especificaciones guardadas y el resto aparte; una sala activa o inexistente no tiene detalle
+    d.prepare("UPDATE chat_modulos SET contexto = '# Glosario', adrs = ? WHERE clave = 'p-vieja'").run(JSON.stringify([{ archivo: "docs/adr/../0001-x.md", titulo: "X", contenido: "# X" }]));
+    const det = detallePropuesto(d, "p-vieja")!;
+    assert.deepEqual(det.specs.map((x) => [x.ticket, x.spec]), [["GER-9001", "# Spec 1"], ["GER-9002", "# Spec 2"]]);
+    assert.deepEqual(det.otras.map((x) => [x.ticket, x.estado, x.mensajes.length]), [["GER-9003", "cerrada", 0], ["GER-9004", "abierta", 1]]);
+    assert.equal(detallePropuesto(d, "m-activa"), undefined);
+    assert.equal(detallePropuesto(d, "nada"), undefined);
+    // documentos con la disposición del repositorio; el zip los trae con ese contenido
+    const docs = documentosPropuesto(det);
+    assert.deepEqual(docs.map((x) => x.ruta), ["CONTEXT.md", "docs/adr/0001-x.md", "specs/GER-9001.md", "specs/GER-9002.md"]);
+    const zip = zipPropuesto(det);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zip-"));
+    fs.writeFileSync(path.join(dir, "a.zip"), zip);
+    const salida = execFileSync("python3", ["-I", "-c", "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print('|'.join(n+'='+z.read(n).decode() for n in z.namelist()))", path.join(dir, "a.zip")]).toString().trim();
+    assert.equal(salida, "CONTEXT.md=# Glosario|docs/adr/0001-x.md=# X|specs/GER-9001.md=# Spec 1|specs/GER-9002.md=# Spec 2");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await prueba("markdown (#49): el HTML en bruto y los enlaces que no son http(s) quedan inertes", () => {
+    const h = markdownAHtml("# Título\n\n<script>alert(1)</script> y [malo](javascript:alert(1)) y [ok](https://ejemplo.cl/a?b=1&c=2) y [x](JAVASCRIPT:1)\n\n- uno\n- **dos** `<b>`\n\n```\n<img src=x onerror=alert(1)>\n```");
+    assert.ok(!h.includes("<script"), h);
+    assert.ok(!/href="(?!https?:)/i.test(h), h);
+    assert.ok(!h.includes("<img"), h);
+    assert.ok(h.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert.ok(h.includes('<a href="https://ejemplo.cl/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">ok</a>'));
+    assert.ok(h.includes("<h1>Título</h1>") && h.includes("<ul><li>uno</li><li><strong>dos</strong> <code>&lt;b&gt;</code></li></ul>"));
+    // una comilla en la URL no puede salirse del atributo
+    assert.match(markdownAHtml('[a](https://x.cl/"onmouseover="alert(1))'), /^<p><a href="[^"]*" target="_blank" rel="noopener noreferrer">a<\/a>\)<\/p>$/);
+  });
+
   await prueba("sala propuesta (#48): el turno lleva kind, contextRepos y module; «Terminar» guarda spec, CONTEXT.md y ADRs sin llamar a GitHub", async () => {
     const d = dbControl();
     const verif = "2026-10-01T00:00:00Z";
