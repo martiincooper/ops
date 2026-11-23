@@ -5,9 +5,9 @@
 //   GITHUB_REPOS="c-acredita=datasheq-creator/cacredita-railway,c-legal=datasheq-creator/clegal-railway"
 // Un valor vacío o «-» deja la sala sin repositorio («c-controla=-»).
 // Sin "server-only": lo usan el servidor, las pruebas y la configuración de arranque.
-import { type ClaveModulo, MODULOS, moduloPorClave } from "./modulos";
+import { MODULOS, moduloPorClave } from "./modulos";
 
-export const REPOS_POR_DEFECTO: Partial<Record<ClaveModulo, string>> = {
+export const REPOS_POR_DEFECTO: Partial<Record<string, string>> = {
   "c-legal": "datasheq-creator/clegal-railway",
 };
 
@@ -17,8 +17,8 @@ export type Entorno = Record<string, string | undefined>;
 const FORMATO_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 
 /** Repositorio asignado a cada módulo (null: sin repositorio). Las entradas inválidas se ignoran con un aviso. */
-export function reposDeModulos(env: Entorno = process.env): Record<ClaveModulo, string | null> {
-  const r = Object.fromEntries(MODULOS.map((m) => [m.clave, REPOS_POR_DEFECTO[m.clave] ?? null])) as Record<ClaveModulo, string | null>;
+export function reposDeModulos(env: Entorno = process.env): Record<string, string | null> {
+  const r = Object.fromEntries(MODULOS.map((m) => [m.clave, REPOS_POR_DEFECTO[m.clave] ?? null])) as Record<string, string | null>;
   for (const parte of (env.GITHUB_REPOS ?? "").split(/[,;\n]/).map((s) => s.trim()).filter(Boolean)) {
     const [clave, valor = ""] = parte.split("=").map((s) => s.trim());
     const m = moduloPorClave(clave.toLowerCase());
@@ -43,7 +43,7 @@ export function salaActiva(clave: string, env: Entorno = process.env): boolean {
   return repoDe(clave, env) !== null;
 }
 
-export function modulosActivos(env: Entorno = process.env): ClaveModulo[] {
+export function modulosActivos(env: Entorno = process.env): string[] {
   const r = reposDeModulos(env);
   return MODULOS.filter((m) => r[m.clave]).map((m) => m.clave);
 }

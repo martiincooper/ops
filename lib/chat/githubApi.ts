@@ -1,8 +1,7 @@
 // Cliente de la API de GitHub para los Issues del portal gerencial: crea el Issue con sus etiquetas, reintenta los
 // errores transitorios (red, tiempo de espera, 5xx, 429) y evita duplicados al reintentar. La configuración llega por
 // parámetro; sin "server-only" para poder probarlo contra un GitHub simulado (scripts/test-logica.ts).
-import type { Requerimiento } from "./flujo";
-import { NOMBRE_CLASIFICACION, NOMBRE_PRIORIDAD, codigoTicket, type Modulo } from "./modulos";
+import { codigoTicket, type Modulo } from "./modulos";
 import { type ConfigCuenta, type ConfigGithub, ETIQUETA_ISSUES, paraRepo } from "./seguimiento";
 
 /** Cuenta de GitHub de DataSHEQ por defecto: los envíos solo salen con un token de esta cuenta. */
@@ -102,8 +101,6 @@ async function peticionApi(
   throw new ErrorGithub(ultimo || "No se pudo conectar con GitHub", true);
 }
 
-const PRIORIDAD_COLOR: Record<string, string> = { critica: "b60205", alta: "d93f0b", media: "fbca04", baja: "0e8a16" };
-
 const etiquetasListas = new Set<string>(); // etiquetas que ya existen (cache del proceso, por repositorio)
 
 const cuentasVerificadas = new Map<string, string>(); // token → login (cache del proceso)
@@ -146,24 +143,23 @@ async function asegurarEtiqueta(cfg: ConfigGithub, nombre: string, color: string
 
 /** Evita que un «@usuario» escrito en la conversación notifique a alguien en GitHub. */
 const sinMenciones = (s: string) => s.replace(/(^|[^\w.])@(?=\w)/g, "$1@​");
-const lista = (xs: string[], vacio = "_No se indicó._") => (xs.length ? xs.map((x) => `- ${sinMenciones(x)}`).join("\n") : vacio);
 
 export interface DatosIssue {
   ticket: number;
   modulo: Modulo;
-  requerimiento: Requerimiento;
-  solicitante: { nombre: string; email: string };
-  conversacionId: string;
+  titulo: string;
+  resumen: string;
+  /** Quienes escribieron en la solicitud. */
+  solicitantes: { nombre: string; email: string }[];
+  solicitudId: string;
   fecha: string;
   transcripcion: { autor: string; texto: string }[];
 }
 
 /** Título del Issue: empieza con el ticket, que es lo que se busca para no duplicarlo. */
-export const tituloIssue = (d: DatosIssue) =>
-  `[${codigoTicket(d.ticket)}][${d.modulo.nombre}] ${d.requerimiento.titulo}`.slice(0, 250);
+export const tituloIssue = (d: DatosIssue) => `[${codigoTicket(d.ticket)}][${d.modulo.nombre}] ${d.titulo}`.slice(0, 250);
 
 export function cuerpoIssue(d: DatosIssue): string {
-  const r = d.requerimiento;
   const t = codigoTicket(d.ticket);
   const transcripcion = d.transcripcion
     .map((l) => `**${l.autor}:** ${sinMenciones(l.texto).replace(/\n/g, "  \n")}`)
@@ -174,42 +170,21 @@ export function cuerpoIssue(d: DatosIssue): string {
 |---|---|
 | Ticket | **${t}** |
 | Módulo | ${d.modulo.nombre} (${d.modulo.area}) |
-| Prioridad | ${NOMBRE_PRIORIDAD[r.prioridad]} |
-| Clasificación | ${NOMBRE_CLASIFICACION[r.clasificacion]} |
-| Solicitado por | ${d.solicitante.nombre} (${d.solicitante.email}) |
+| Solicitado por | ${d.solicitantes.map((x) => `${x.nombre} (${x.email})`).join(", ") || "—"} |
 | Fecha | ${d.fecha} |
-| Plazo indicado | ${r.plazo ? sinMenciones(r.plazo) : "—"} |
 
 ### Resumen
-${sinMenciones(r.resumen)}
-
-### Contexto
-${sinMenciones(r.contexto) || "_No se indicó._"}
-
-### Necesidad
-${sinMenciones(r.necesidad) || "_No se indicó._"}
-
-### Alcance
-${lista(r.alcance)}
-
-### Criterios de aceptación
-${r.criterios_aceptacion.length ? r.criterios_aceptacion.map((c) => `- [ ] ${sinMenciones(c)}`).join("\n") : "_No se indicaron._"}
-
-### Interesados
-${lista(r.interesados)}
-
-### Prioridad
-${sinMenciones(r.justificacion_prioridad)}
+${sinMenciones(d.resumen)}
 
 <details>
-<summary>Transcripción de la entrevista</summary>
+<summary>Conversación</summary>
 
 ${transcripcion}
 
 </details>
 
 ---
-_Creado automáticamente por el portal gerencial de DataSheq · conversación \`${d.conversacionId}\`._`;
+_Creado automáticamente por el portal gerencial de DataSheq · solicitud \`${d.solicitudId}\`._`;
 }
 
 /**
@@ -242,11 +217,8 @@ export async function crearIssueEn(
     const ya = await buscarIssuePorTicket(cfg, d.ticket, op);
     if (ya) return { ...ya, existente: true };
   }
-  const r = d.requerimiento;
   const etiquetas: [string, string, string][] = [
     [d.modulo.nombre, d.modulo.color, `${d.modulo.area}: ${d.modulo.descripcion}`],
-    [`prioridad: ${NOMBRE_PRIORIDAD[r.prioridad].toLowerCase()}`, PRIORIDAD_COLOR[r.prioridad], "Prioridad asignada en el portal gerencial"],
-    [`tipo: ${NOMBRE_CLASIFICACION[r.clasificacion].toLowerCase()}`, "c5def5", "Clasificación del requerimiento"],
     [ETIQUETA_ISSUES, "6f42c1", "Requerimiento levantado por gerencia en el portal"],
     [ETIQUETA_REVISION, "0e8a16", "Listo para que una persona lo revise"],
   ];

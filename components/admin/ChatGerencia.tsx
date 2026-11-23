@@ -1,35 +1,24 @@
 "use client";
 
-import { AlertTriangle, Bot, ChevronDown, Clock, ExternalLink, Lock, LockOpen, RefreshCw, ScrollText } from "lucide-react";
+import { AlertTriangle, Bot, ChevronDown, Clock, ExternalLink, MessagesSquare, RefreshCw, ScrollText } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { ChipEstadoIssue, IconoModulo } from "@/components/gerencia/comun";
-import {
-  type Clasificacion,
-  MODULOS,
-  NOMBRE_CLASIFICACION,
-  NOMBRE_PRIORIDAD,
-  type Prioridad,
-  moduloPorClave,
-} from "@/lib/chat/modulos";
+import { MODULOS, moduloPorClave } from "@/lib/chat/modulos";
 import type { EstadoSala } from "@/lib/chat/salas";
 import { type EstadoSincronizacion, type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
-import { CUPO_POR_MINUTO } from "@/lib/chat/uso";
 import { api, cx } from "@/lib/cliente";
 import { Aviso, Cargando, Vacio, fechaHora, useAccion, useDatos } from "./comun";
 
 interface Fila {
   id: string;
-  modulo: string;
-  usuario_nombre: string;
-  usuario_email: string;
-  estado: "activa" | "generada" | "finalizada" | "expirada";
-  completitud: number;
+  sala: string;
+  participantes: string | null;
+  mensajes: number;
+  estado: "abierta" | "terminada" | "cerrada";
   iniciada_en: string;
   terminada_en: string | null;
   ticket: string | null;
   titulo: string | null;
-  prioridad: Prioridad | null;
-  clasificacion: Clasificacion | null;
   issue_numero: number | null;
   issue_url: string | null;
   issue_repo: string | null;
@@ -39,7 +28,6 @@ interface Fila {
   issue_intentos: number;
   issue_proximo_intento: string | null;
   estado_issue: EstadoVisible | null;
-  respuestas: number;
 }
 
 interface Datos {
@@ -50,29 +38,20 @@ interface Datos {
     github: boolean;
     cuenta: string;
     repositorios: Record<string, string | null>;
-    inactividad_min: number; turnos_max: number;
     reintentos_max: number;
   };
 }
 
 interface Detalle {
-  requerimiento: { resumen: string; alcance: string[]; criterios_aceptacion: string[] } | null;
-  mensajes: { id: number; autor: string; texto: string; creado_en: string }[];
+  resumen: string | null;
+  mensajes: { id: number; rol: string; autor_nombre: string; texto: string; creado_en: string }[];
 }
 
-// Estado de la conversación con el asistente; distinto del estado del Issue en GitHub (columna aparte, #14)
-const CONVERSACION: Record<Fila["estado"], { texto: string; clase: string }> = {
-  activa: { texto: "Entrevista abierta", clase: "bg-indigo-suave text-indigo-tinta" },
-  generada: { texto: "Requerimiento generado", clase: "bg-ok-fondo text-ok-tinta" },
-  finalizada: { texto: "Finalizada", clase: "bg-suave text-tinta-2" },
-  expirada: { texto: "Expirada", clase: "bg-alerta-fondo text-alerta-tinta" },
-};
-
-const PRIORIDAD_CLASE: Record<Prioridad, string> = {
-  critica: "bg-error-fondo text-error-tinta",
-  alta: "bg-alerta-fondo text-alerta-tinta",
-  media: "bg-indigo-suave text-indigo-tinta",
-  baja: "bg-suave text-tinta-2",
+// Estado de la solicitud; distinto del estado del Issue en GitHub (columna aparte, #14)
+const SOLICITUD: Record<Fila["estado"], { texto: string; clase: string }> = {
+  abierta: { texto: "Abierta", clase: "bg-indigo-suave text-indigo-tinta" },
+  terminada: { texto: "Terminada", clase: "bg-ok-fondo text-ok-tinta" },
+  cerrada: { texto: "Cerrada", clase: "bg-suave text-tinta-2" },
 };
 
 function Transcripcion({ id }: { id: string }) {
@@ -80,17 +59,17 @@ function Transcripcion({ id }: { id: string }) {
   if (!datos) return <Cargando cargando={cargando} error={error} />;
   return (
     <div className="space-y-3 py-2">
-      {datos.requerimiento && (
+      {datos.resumen && (
         <div className="rounded-2xl bg-pastel-menta px-4 py-3 text-sm text-tinta-2">
           <p className="font-semibold text-tinta">Resumen</p>
-          <p className="whitespace-pre-wrap">{datos.requerimiento.resumen}</p>
+          <p className="whitespace-pre-wrap">{datos.resumen}</p>
         </div>
       )}
       <ol className="space-y-2">
         {datos.mensajes.map((m) => (
           <li key={m.id} className="text-sm">
-            <span className={cx("font-semibold", m.autor === "robot" ? "text-indigo-tinta" : m.autor === "sistema" ? "text-tinta-3" : "text-tinta")}>
-              {m.autor === "robot" ? "Asistente" : m.autor === "sistema" ? "Acción" : "Gerencia"}
+            <span className={cx("font-semibold", m.rol === "asistente" ? "text-indigo-tinta" : m.rol === "sistema" ? "text-tinta-3" : "text-tinta")}>
+              {m.rol === "asistente" ? "Asistente" : m.rol === "sistema" ? "Sistema" : m.autor_nombre}
             </span>{" "}
             <span className="text-xs text-tinta-3">{fechaHora(m.creado_en)}</span>
             <p className="whitespace-pre-wrap text-tinta-2">{m.texto}</p>
@@ -101,7 +80,7 @@ function Transcripcion({ id }: { id: string }) {
   );
 }
 
-/** Panel del portal gerencial: salas en uso, historial de conversaciones e Issues de GitHub. */
+/** Panel del portal gerencial: salas, historial de solicitudes e Issues de GitHub. */
 export default function ChatGerencia() {
   const { datos, error, cargando, recargar } = useDatos<Datos>("/api/admin/chat");
   const { ocupado, aviso, ejecutar } = useAccion();
@@ -125,10 +104,10 @@ export default function ChatGerencia() {
 
   if (!datos) return <Cargando cargando={cargando} error={error} />;
   const historial = datos.historial.filter(
-    (f) => (filtro === "todos" || f.modulo === filtro) && (filtroEstado === "todos" || f.estado_issue === filtroEstado),
+    (f) => (filtro === "todos" || f.sala === filtro) && (filtroEstado === "todos" || f.estado_issue === filtroEstado),
   );
-  const generados = datos.historial.filter((f) => f.estado === "generada");
-  const pendientes = generados.filter((f) => !f.issue_url);
+  const terminadas = datos.historial.filter((f) => f.estado === "terminada");
+  const pendientes = terminadas.filter((f) => !f.issue_url);
 
   return (
     <div className="space-y-6">
@@ -148,22 +127,18 @@ export default function ChatGerencia() {
       <div>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="tarjeta p-4">
-            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.ocupada).length}/{datos.salas.filter((s) => s.repo).length}</p>
-            <p className="text-sm text-tinta-3">salas en uso ahora</p>
+            <p className="text-3xl font-bold text-tinta">{datos.salas.filter((s) => s.abierta).length}/{datos.salas.filter((s) => s.repo).length}</p>
+            <p className="text-sm text-tinta-3">salas con una solicitud abierta</p>
           </div>
           <div className="tarjeta p-4">
-            <p className="text-3xl font-bold text-tinta">{generados.length}</p>
-            <p className="text-sm text-tinta-3">requerimientos generados</p>
+            <p className="text-3xl font-bold text-tinta">{terminadas.length}</p>
+            <p className="text-sm text-tinta-3">solicitudes terminadas</p>
           </div>
           <div className="tarjeta p-4">
             <p className={cx("text-3xl font-bold", pendientes.length ? "text-alerta-tinta" : "text-tinta")}>{pendientes.length}</p>
             <p className="text-sm text-tinta-3">Issues pendientes de envío</p>
           </div>
         </div>
-        <p className="mt-2 text-xs text-tinta-3">
-          Entrevistas guiadas por el árbol de preguntas de cada sala. Tope de {datos.config.turnos_max} respuestas por
-          conversación y {CUPO_POR_MINUTO.mensaje} turnos por minuto por cuenta.
-        </p>
       </div>
 
       <section>
@@ -186,14 +161,12 @@ export default function ChatGerencia() {
                   </div>
                   {!s.repo ? (
                     <span className="chip bg-suave text-tinta-3">Oculta</span>
-                  ) : s.ocupada ? (
-                    <span className="chip bg-alerta-fondo text-alerta-tinta">
-                      <Lock size={12} aria-hidden /> En uso
+                  ) : s.abierta ? (
+                    <span className="chip bg-indigo-suave text-indigo-tinta">
+                      <MessagesSquare size={12} aria-hidden /> Abierta
                     </span>
                   ) : (
-                    <span className="chip bg-ok-fondo text-ok-tinta">
-                      <LockOpen size={12} aria-hidden /> Libre
-                    </span>
+                    <span className="chip bg-suave text-tinta-2">Sin solicitud</span>
                   )}
                 </div>
                 <p className="truncate text-xs text-tinta-3">
@@ -205,40 +178,20 @@ export default function ChatGerencia() {
                     "Sin repositorio: no se muestra en el portal (asígnalo en GITHUB_REPOS)"
                   )}
                 </p>
-                {s.ocupada && (
-                  <>
-                    <p className="text-sm text-tinta-2">
-                      {s.usuario_nombre} <span className="text-tinta-3">· {s.usuario_email}</span>
-                    </p>
-                    <p className="text-xs text-tinta-3">
-                      Desde {fechaHora(s.desde)} · se libera {fechaHora(s.expira_en)} si no hay actividad
-                    </p>
-                    <button
-                      type="button"
-                      disabled={ocupado === s.clave}
-                      onClick={() =>
-                        ejecutar(s.clave, async () => {
-                          await api(`/api/admin/chat/salas/${s.clave}`, { method: "DELETE" });
-                          await recargar();
-                          return `Sala ${m.nombre} liberada`;
-                        })
-                      }
-                      className="boton-suave self-start"
-                    >
-                      <LockOpen size={14} aria-hidden /> Liberar sala
-                    </button>
-                  </>
+                {s.abierta && (
+                  <p className="text-xs text-tinta-3">
+                    {s.mensajes} mensaje{s.mensajes === 1 ? "" : "s"} en la solicitud abierta
+                  </p>
                 )}
               </li>
             );
           })}
         </ul>
-        <p className="mt-2 text-xs text-tinta-3">Las salas se liberan solas tras {datos.config.inactividad_min} min sin actividad.</p>
       </section>
 
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="titulo-seccion">Historial de conversaciones</h2>
+          <h2 className="titulo-seccion">Historial de solicitudes</h2>
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-tinta-3">
               Módulo
@@ -274,7 +227,7 @@ export default function ChatGerencia() {
         {historial.length === 0 ? (
           <Vacio>
             <Bot size={20} className="mx-auto mb-2" aria-hidden />
-            Aún no hay conversaciones{filtro !== "todos" || filtroEstado !== "todos" ? " con estos filtros" : ""}.
+            Aún no hay solicitudes{filtro !== "todos" || filtroEstado !== "todos" ? " con estos filtros" : ""}.
           </Vacio>
         ) : (
           <div className="tarjeta overflow-x-auto">
@@ -283,9 +236,9 @@ export default function ChatGerencia() {
                 <tr>
                   <th>Ticket</th>
                   <th>Módulo</th>
-                  <th>Solicitante</th>
+                  <th>Participantes</th>
                   <th>Requerimiento</th>
-                  <th>Conversación</th>
+                  <th>Solicitud</th>
                   <th>Inicio</th>
                   <th>Issue en GitHub</th>
                   <th>Estado en GitHub</th>
@@ -297,28 +250,21 @@ export default function ChatGerencia() {
                   <Fragment key={f.id}>
                     <tr>
                       <td className="whitespace-nowrap font-semibold tabular-nums text-tinta">{f.ticket ?? "—"}</td>
-                      <td className="whitespace-nowrap">{moduloPorClave(f.modulo)?.nombre ?? f.modulo}</td>
+                      <td className="whitespace-nowrap">{moduloPorClave(f.sala)?.nombre ?? f.sala}</td>
                       <td>
-                        <p className="text-tinta">{f.usuario_nombre}</p>
-                        <p className="text-xs text-tinta-3">{f.usuario_email}</p>
+                        <p className="text-tinta">{f.participantes ?? "—"}</p>
                       </td>
                       <td className="max-w-[18rem]">
                         {f.titulo ? (
-                          <>
-                            <p className="text-tinta">{f.titulo}</p>
-                            <p className="mt-1 flex flex-wrap gap-1">
-                              {f.prioridad && <span className={cx("chip", PRIORIDAD_CLASE[f.prioridad])}>{NOMBRE_PRIORIDAD[f.prioridad]}</span>}
-                              {f.clasificacion && <span className="chip bg-suave text-tinta-2">{NOMBRE_CLASIFICACION[f.clasificacion] ?? f.clasificacion}</span>}
-                            </p>
-                          </>
+                          <p className="text-tinta">{f.titulo}</p>
                         ) : (
                           <span className="text-tinta-3">
-                            {f.respuestas} respuesta{f.respuestas === 1 ? "" : "s"} · {f.completitud}% reunido
+                            {f.mensajes} mensaje{f.mensajes === 1 ? "" : "s"}
                           </span>
                         )}
                       </td>
                       <td>
-                        <span className={cx("chip whitespace-nowrap", CONVERSACION[f.estado].clase)}>{CONVERSACION[f.estado].texto}</span>
+                        <span className={cx("chip whitespace-nowrap", SOLICITUD[f.estado].clase)}>{SOLICITUD[f.estado].texto}</span>
                       </td>
                       <td className="whitespace-nowrap text-tinta-3">{fechaHora(f.iniciada_en)}</td>
                       <td>
@@ -327,7 +273,7 @@ export default function ChatGerencia() {
                             {f.issue_repo ? `${f.issue_repo}#` : "#"}
                             {f.issue_numero} <ExternalLink size={13} aria-hidden />
                           </a>
-                        ) : f.estado === "generada" ? (
+                        ) : f.estado === "terminada" ? (
                           <div className="space-y-1">
                             {f.issue_error && <p className="max-w-[14rem] text-xs text-error-tinta">{f.issue_error}</p>}
                             {f.issue_proximo_intento ? (

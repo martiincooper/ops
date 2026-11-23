@@ -1,15 +1,14 @@
 // Piezas compartidas del portal gerencial (portal, sala y panel del administrador).
-import { CircleCheck, CircleDot, CircleSlash, Clock, FileCheck, Footprints, GraduationCap, IdCard, Scale, ShieldAlert, Siren, Wrench } from "lucide-react";
+import { MessagesSquare, CircleCheck, CircleDot, CircleSlash, Clock, FileCheck, Footprints, GraduationCap, IdCard, Scale, ShieldAlert, Siren, Wrench } from "lucide-react";
 import Link from "next/link";
 import BotonSalir from "@/components/BotonSalir";
 import Marca from "@/components/Marca";
 import { Avatar } from "@/components/ui";
-import type { ClaveModulo } from "@/lib/chat/modulos";
 import { type EstadoVisible, NOMBRE_ESTADO } from "@/lib/chat/seguimiento";
 import { cx } from "@/lib/cliente";
 import BotonAccesoAdmin from "./BotonAccesoAdmin";
 
-export const ICONO_MODULO: Record<ClaveModulo, typeof Scale> = {
+export const ICONO_MODULO: Record<string, typeof Scale> = {
   "c-legal": Scale,
   "c-controla": FileCheck,
   "c-previene": ShieldAlert,
@@ -19,8 +18,8 @@ export const ICONO_MODULO: Record<ClaveModulo, typeof Scale> = {
   "c-investiga": Siren,
 };
 
-export function IconoModulo({ clave, color, tamano = 22, className }: { clave: ClaveModulo; color: string; tamano?: number; className?: string }) {
-  const Icono = ICONO_MODULO[clave];
+export function IconoModulo({ clave, color, tamano = 22, className }: { clave: string; color: string; tamano?: number; className?: string }) {
+  const Icono = ICONO_MODULO[clave] ?? MessagesSquare;
   return (
     <span
       aria-hidden
@@ -55,14 +54,11 @@ export function CabeceraPortal({
   nombre,
   subtitulo,
   esAdmin,
-  enSala = false,
   volver,
 }: {
   nombre: string;
   subtitulo: string;
   esAdmin: boolean;
-  /** Hay una conversación activa en esta página (para confirmar antes de cerrar sesión). */
-  enSala?: boolean;
   volver?: React.ReactNode;
 }) {
   return (
@@ -77,7 +73,7 @@ export function CabeceraPortal({
           <p className="truncate text-base font-semibold text-tinta">Portal gerencial DataSheq</p>
           <p className="truncate text-xs text-tinta-3">{subtitulo}</p>
         </div>
-        <BotonAccesoAdmin esAdmin={esAdmin} enSala={enSala} />
+        <BotonAccesoAdmin esAdmin={esAdmin} />
         <BotonSalir conTexto={false} className="bg-superficie" />
         <span className="hidden sm:block">
           <Avatar nombre={nombre} tamano={40} />

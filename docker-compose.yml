@@ -23,8 +23,6 @@ services:
       # Opcionales (vacío = valor por defecto)
       EMPRESAS: ${EMPRESAS:-}
       # Portal gerencial: límites de las salas e Issues en GitHub
-      CHAT_INACTIVIDAD_MIN: ${CHAT_INACTIVIDAD_MIN:-}
-      CHAT_TURNOS_MAX: ${CHAT_TURNOS_MAX:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_CUENTA: ${GITHUB_CUENTA:-}
       GITHUB_REPOS: ${GITHUB_REPOS:-}

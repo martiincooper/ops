@@ -4,11 +4,10 @@
 // Un mismo requerimiento nunca se envía dos veces a la vez (botón y reintento automático), y al reintentar se busca
 // primero si el Issue ya existe. Sin "server-only": lo prueba scripts/test-logica.ts con un GitHub simulado.
 import type Database from "better-sqlite3";
-import type { Requerimiento } from "./flujo";
 import { type DatosIssue, ErrorGithub, type OpcionesPeticion, crearIssueEn } from "./githubApi";
 import { type Modulo, moduloPorClave } from "./modulos";
 import { type Entorno, repoDe } from "./repos";
-import { conversacion, mensajes } from "./salas";
+import { mensajes, participantes, solicitud } from "./salas";
 import type { ConfigCuenta } from "./seguimiento";
 
 type DB = Database.Database;
@@ -29,26 +28,25 @@ export interface ResultadoEnvio {
 }
 
 function datosDelIssue(db: DB, id: string): DatosIssue {
-  const c = conversacion(db, id);
-  if (!c || c.estado !== "generada" || !c.ticket || !c.requerimiento_json) {
-    throw new Error("La conversación no tiene un requerimiento generado");
-  }
+  const s = solicitud(db, id);
+  if (!s || s.estado !== "terminada" || !s.titulo || !s.resumen) throw new Error("La solicitud no está terminada");
   return {
-    ticket: c.ticket,
-    modulo: moduloPorClave(c.modulo) as Modulo,
-    requerimiento: JSON.parse(c.requerimiento_json) as Requerimiento,
-    solicitante: { nombre: c.usuario_nombre, email: c.usuario_email },
-    conversacionId: c.id,
-    fecha: c.terminada_en ?? c.iniciada_en,
+    ticket: s.ticket,
+    modulo: moduloPorClave(s.sala) as Modulo,
+    titulo: s.titulo,
+    resumen: s.resumen,
+    solicitantes: participantes(db, id),
+    solicitudId: s.id,
+    fecha: s.terminada_en ?? s.iniciada_en,
     transcripcion: mensajes(db, id)
-      .filter((m) => m.autor !== "sistema")
-      .map((m) => ({ autor: m.autor === "robot" ? "Asistente" : c.usuario_nombre, texto: m.texto })),
+      .filter((m) => m.rol !== "sistema")
+      .map((m) => ({ autor: m.rol === "asistente" ? "Asistente" : m.autor_nombre, texto: m.texto })),
   };
 }
 
 /**
- * Crea el Issue de un requerimiento ya generado y guarda el resultado. Si falla por un error transitorio, programa
- * el siguiente reintento automático (mientras queden). Lanza Error si la conversación no tiene requerimiento.
+ * Crea el Issue de una solicitud ya terminada y guarda el resultado. Si falla por un error transitorio, programa
+ * el siguiente reintento automático (mientras queden). Lanza Error si la solicitud no está terminada.
  */
 export async function enviarIssue(
   db: DB,
@@ -58,20 +56,20 @@ export async function enviarIssue(
 ): Promise<ResultadoEnvio> {
   const ahora = op.ahora ?? (() => new Date());
   const datos = datosDelIssue(db, id);
-  const c = conversacion(db, id)!;
+  const c = solicitud(db, id)!;
   if (c.issue_numero) return { ok: true };
   if (enCurso.has(id)) return { ok: false, error: "El requerimiento ya se está enviando a GitHub" };
   enCurso.add(id);
   try {
     if (!cuenta) throw new ErrorGithub(SIN_TOKEN, false);
     // Cada módulo envía a su propio repositorio
-    const repo = repoDe(c.modulo, op.env);
+    const repo = repoDe(c.sala, op.env);
     if (!repo) throw new ErrorGithub(SIN_REPO, false);
     // Si hubo un intento anterior, pudo llegar a GitHub aunque se perdiera la respuesta: buscar antes de crear
     const issue = await crearIssueEn(cuenta, repo, datos, { ...op, comprobarDuplicado: c.issue_intentos > 0 || !!c.issue_error });
     // Recién creado: abierto y sin asignar hasta la próxima consulta a GitHub (#6)
     db.prepare(
-      `UPDATE chat_conversaciones
+      `UPDATE chat_solicitudes
           SET issue_numero = ?, issue_url = ?, issue_repo = ?, issue_error = NULL, issue_estado = 'open', issue_actualizado_en = ?,
               issue_proximo_intento = NULL
         WHERE id = ?`,
@@ -84,7 +82,7 @@ export async function enviarIssue(
     const intentos = c.issue_intentos;
     const proximo =
       transitorio && intentos < MAX_REINTENTOS ? new Date(ahora().getTime() + ESPERAS_MIN[intentos] * 60_000).toISOString() : null;
-    db.prepare("UPDATE chat_conversaciones SET issue_error = ?, issue_intentos = ?, issue_proximo_intento = ? WHERE id = ?").run(
+    db.prepare("UPDATE chat_solicitudes SET issue_error = ?, issue_intentos = ?, issue_proximo_intento = ? WHERE id = ?").run(
       error,
       transitorio ? intentos + 1 : intentos,
       proximo,
@@ -102,8 +100,8 @@ export function pendientesDeReintento(db: DB, ahora = new Date()): string[] {
   return (
     db
       .prepare(
-        `SELECT id FROM chat_conversaciones
-          WHERE estado = 'generada' AND issue_numero IS NULL AND issue_proximo_intento IS NOT NULL AND issue_proximo_intento <= ?
+        `SELECT id FROM chat_solicitudes
+          WHERE estado = 'terminada' AND issue_numero IS NULL AND issue_proximo_intento IS NOT NULL AND issue_proximo_intento <= ?
           ORDER BY issue_proximo_intento`,
       )
       .all(ahora.toISOString()) as { id: string }[]

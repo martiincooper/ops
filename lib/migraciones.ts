@@ -101,6 +101,80 @@ export const MIGRACIONES_CONTROL: string[] = [
   ALTER TABLE chat_conversaciones ADD COLUMN issue_repo TEXT;
   UPDATE chat_conversaciones SET issue_repo = 'martiincooper/ops' WHERE issue_numero IS NOT NULL;
   `,
+  // v7 — salas como chats grupales (portal gerencial fase 1). Borra todos los datos del chat (conversaciones, mensajes
+  //      y bloqueos de sala; los Issues ya creados en GitHub no se tocan), elimina el bloqueo por sala y crea el modelo
+  //      nuevo: una sala (su clave) tiene muchas solicitudes, a lo más una abierta; los mensajes pertenecen a una
+  //      solicitud y guardan autor, rol y hora; la solicitud registra sus participantes. Sin salas sembradas. El
+  //      contador de tickets parte de nuevo: la siguiente solicitud es GER-0001.
+  `
+  DROP TABLE chat_salas;
+  DROP TABLE chat_mensajes;
+  DROP TABLE chat_conversaciones;
+
+  CREATE TABLE chat_solicitudes (
+    id TEXT PRIMARY KEY,
+    sala TEXT NOT NULL,                              -- clave de la sala (texto)
+    estado TEXT NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'terminada', 'cerrada')),
+    ticket INTEGER NOT NULL UNIQUE,                  -- número correlativo (GER-0001)
+    iniciada_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    terminada_en TEXT,
+    titulo TEXT,                                     -- lo completa el asistente al terminar
+    asistente_sesion TEXT,
+    asistente_estado TEXT NOT NULL DEFAULT 'idle' CHECK (asistente_estado IN ('idle', 'pensando', 'esperando_reintento')),
+    asistente_proximo_intento TEXT,
+    terminado INTEGER NOT NULL DEFAULT 0 CHECK (terminado IN (0, 1)),   -- el asistente informó que entendió todo
+    resumen TEXT,
+    issue_numero INTEGER,
+    issue_url TEXT,
+    issue_repo TEXT,
+    issue_error TEXT,
+    issue_estado TEXT CHECK (issue_estado IN ('open', 'closed')),
+    issue_motivo TEXT,
+    issue_asignado TEXT,
+    issue_actualizado_en TEXT,
+    issue_intentos INTEGER NOT NULL DEFAULT 0,
+    issue_proximo_intento TEXT
+  );
+  -- A lo más una solicitud abierta por sala
+  CREATE UNIQUE INDEX ux_chat_solicitud_abierta ON chat_solicitudes (sala) WHERE estado = 'abierta';
+  CREATE INDEX idx_chat_solicitud_sala ON chat_solicitudes (sala, id);
+
+  CREATE TABLE chat_mensajes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    solicitud_id TEXT NOT NULL REFERENCES chat_solicitudes(id) ON DELETE CASCADE,
+    autor_email TEXT NOT NULL,
+    autor_nombre TEXT NOT NULL,
+    rol TEXT NOT NULL CHECK (rol IN ('gerente', 'asistente', 'sistema')),
+    texto TEXT NOT NULL,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  CREATE INDEX idx_chat_mensajes_solicitud ON chat_mensajes (solicitud_id, id);
+
+  CREATE TABLE chat_participantes (
+    solicitud_id TEXT NOT NULL REFERENCES chat_solicitudes(id) ON DELETE CASCADE,
+    email TEXT NOT NULL COLLATE NOCASE,
+    nombre TEXT NOT NULL,
+    desde TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    PRIMARY KEY (solicitud_id, email)
+  );
+  CREATE INDEX idx_chat_participantes_email ON chat_participantes (email);
+
+  -- Salas administradas desde el panel (las llena el ticket de salas; vacía por ahora)
+  CREATE TABLE chat_modulos (
+    clave TEXT PRIMARY KEY,
+    nombre TEXT NOT NULL,
+    area TEXT NOT NULL DEFAULT '',
+    descripcion TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '5b4fd6',            -- hex sin #
+    orden INTEGER NOT NULL DEFAULT 0,
+    repo TEXT,                                       -- dueño/repositorio
+    repo_verificado_en TEXT,
+    autonomia TEXT NOT NULL DEFAULT 'revisar' CHECK (autonomia IN ('revisar', 'automatico')),
+    archivado INTEGER NOT NULL DEFAULT 0 CHECK (archivado IN (0, 1)),
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    actualizado_en TEXT NOT NULL DEFAULT ${ISO_AHORA}
+  );
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

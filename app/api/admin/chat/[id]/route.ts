@@ -2,19 +2,16 @@ import { NextResponse } from "next/server";
 import { requireAdminPortal } from "@/lib/chat/servicio";
 import { getDbControl } from "@/lib/db";
 import { HttpError, manejar } from "@/lib/http";
-import { conversacion, mensajes } from "@/lib/chat/salas";
+import { mensajes, solicitud } from "@/lib/chat/salas";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** Transcripción y requerimiento de una conversación (auditoría). */
+/** Transcripción de una solicitud (auditoría). */
 export const GET = manejar<Ctx>(async (req, { params }) => {
   await requireAdminPortal(req);
   const { id } = await params;
   const db = getDbControl();
-  const c = conversacion(db, id);
-  if (!c) throw new HttpError(404, "Conversación no encontrada");
-  return NextResponse.json({
-    requerimiento: c.requerimiento_json ? JSON.parse(c.requerimiento_json) : null,
-    mensajes: mensajes(db, id),
-  });
+  const s = solicitud(db, id);
+  if (!s) throw new HttpError(404, "Solicitud no encontrada");
+  return NextResponse.json({ resumen: s.resumen, mensajes: mensajes(db, id) });
 });

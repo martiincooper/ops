@@ -1,5 +1,5 @@
 // Seguimiento de los requerimientos (#6): trae de GitHub el estado de los Issues creados por el portal (etiqueta
-// «gerencia») y lo guarda en chat_conversaciones. Se consulta como máximo cada 10 minutos (al abrir el panel o
+// «gerencia») y lo guarda en chat_solicitudes. Se consulta como máximo cada 10 minutos (al abrir el panel o
 // «Mis requerimientos»); si GitHub falla, queda el último estado conocido con su fecha.
 // Sin "server-only" para poder probarlo con un GitHub simulado: la configuración (token incluido) llega por parámetro.
 import type Database from "better-sqlite3";
@@ -83,17 +83,17 @@ export function aplicarEstados(db: DB, repo: string, lista: EstadoIssue[], ahora
     let n = 0;
     // El número de un Issue solo es único dentro de su repositorio (cada módulo tiene el suyo)
     const upd = db.prepare(
-      "UPDATE chat_conversaciones SET issue_estado = ?, issue_motivo = ?, issue_asignado = ? WHERE issue_repo = ? AND issue_numero = ?",
+      "UPDATE chat_solicitudes SET issue_estado = ?, issue_motivo = ?, issue_asignado = ? WHERE issue_repo = ? AND issue_numero = ?",
     );
     for (const i of lista) n += upd.run(i.estado, i.motivo, i.asignado, repo, i.numero).changes;
-    db.prepare("UPDATE chat_conversaciones SET issue_actualizado_en = ? WHERE issue_repo = ? AND issue_numero IS NOT NULL").run(iso, repo);
+    db.prepare("UPDATE chat_solicitudes SET issue_actualizado_en = ? WHERE issue_repo = ? AND issue_numero IS NOT NULL").run(iso, repo);
     return n;
   })();
 }
 
 /** Repositorios con Issues creados por el portal (los únicos que hay que consultar). */
 export function reposConIssues(db: DB): string[] {
-  return (db.prepare("SELECT DISTINCT issue_repo AS r FROM chat_conversaciones WHERE issue_numero IS NOT NULL AND issue_repo IS NOT NULL ORDER BY 1").all() as { r: string }[]).map(
+  return (db.prepare("SELECT DISTINCT issue_repo AS r FROM chat_solicitudes WHERE issue_numero IS NOT NULL AND issue_repo IS NOT NULL ORDER BY 1").all() as { r: string }[]).map(
     (x) => x.r,
   );
 }

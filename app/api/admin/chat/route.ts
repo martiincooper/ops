@@ -5,21 +5,22 @@ import { manejar } from "@/lib/http";
 import { configGithub, githubConfigurado, repositoriosPorModulo } from "@/lib/chat/github";
 import { CUENTA_DATASHEQ } from "@/lib/chat/githubApi";
 import { codigoTicket } from "@/lib/chat/modulos";
-import { INACTIVIDAD_MIN, estadoSalas } from "@/lib/chat/salas";
+import { estadoSalas } from "@/lib/chat/salas";
 import { estadoVisible, sincronizar } from "@/lib/chat/seguimiento";
-import { TURNOS_MAX } from "@/lib/chat/uso";
 import { MAX_REINTENTOS } from "@/lib/chat/envio";
 
 interface Fila {
-  ticket: number | null;
+  ticket: number;
+  estado: string;
   issue_numero: number | null;
   issue_estado: string | null;
   issue_motivo: string | null;
   issue_asignado: string | null;
+  participantes: string | null;
 }
 
 /**
- * Panel del administrador: estado de las salas e historial de conversaciones con su Issue.
+ * Panel del administrador: estado de las salas e historial de solicitudes con su Issue.
  * Trae el estado de los Issues de GitHub como máximo cada 10 minutos; ?actualizar=1 (botón), cada minuto.
  */
 export const GET = manejar(async (req) => {
@@ -28,29 +29,28 @@ export const GET = manejar(async (req) => {
   const seguimiento = await sincronizar(db, configGithub(), { forzar: req.nextUrl.searchParams.get("actualizar") === "1" });
   const filas = db
     .prepare(
-      `SELECT c.id, c.modulo, c.usuario_nombre, c.usuario_email, c.estado, c.completitud, c.iniciada_en, c.terminada_en,
-              c.ticket, c.titulo, c.prioridad, c.clasificacion, c.issue_numero, c.issue_url, c.issue_repo, c.issue_error,
-              c.issue_estado, c.issue_motivo, c.issue_asignado, c.issue_actualizado_en, c.issue_intentos, c.issue_proximo_intento,
-              (SELECT COUNT(*) FROM chat_mensajes m WHERE m.conversacion_id = c.id AND m.autor = 'usuario') AS respuestas
-         FROM chat_conversaciones c
-        ORDER BY c.iniciada_en DESC
+      `SELECT s.id, s.sala, s.estado, s.iniciada_en, s.terminada_en, s.ticket, s.titulo,
+              s.issue_numero, s.issue_url, s.issue_repo, s.issue_error, s.issue_estado, s.issue_motivo, s.issue_asignado,
+              s.issue_actualizado_en, s.issue_intentos, s.issue_proximo_intento,
+              (SELECT COUNT(*) FROM chat_mensajes m WHERE m.solicitud_id = s.id) AS mensajes,
+              (SELECT group_concat(p.nombre, ', ') FROM chat_participantes p WHERE p.solicitud_id = s.id) AS participantes
+         FROM chat_solicitudes s
+        ORDER BY s.ticket DESC
         LIMIT 300`,
     )
     .all() as Fila[];
   return NextResponse.json({
-    salas: estadoSalas(db, null, true),
+    salas: estadoSalas(db, true),
     historial: filas.map((f) => ({
       ...f,
-      ticket: f.ticket ? codigoTicket(f.ticket) : null,
-      estado_issue: f.ticket ? estadoVisible(f) : null,
+      ticket: codigoTicket(f.ticket),
+      estado_issue: f.estado === "terminada" ? estadoVisible(f) : null,
     })),
     seguimiento,
     config: {
       github: githubConfigurado(),
       cuenta: configGithub()?.cuenta ?? (process.env.GITHUB_CUENTA || CUENTA_DATASHEQ),
       repositorios: repositoriosPorModulo(),
-      inactividad_min: INACTIVIDAD_MIN,
-      turnos_max: TURNOS_MAX,
       reintentos_max: MAX_REINTENTOS,
     },
   });
