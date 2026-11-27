@@ -28,6 +28,11 @@ export interface FotoTurno {
   type: string;
   base64: string;
 }
+export interface ArchivoTurno {
+  name: string;
+  type: "application/pdf";
+  base64: string;
+}
 export interface MensajeTurno {
   /** Texto: el asiento rechaza (400) los ids numéricos. */
   id: string;
@@ -36,6 +41,8 @@ export interface MensajeTurno {
   text: string;
   at: string;
   photos: FotoTurno[];
+  /** PDF adjuntos (nunca van en `photos`: el asiento responde 400). Un asiento antiguo ignora este campo. */
+  files: ArchivoTurno[];
 }
 export interface DocumentoModulo {
   file: string;
@@ -186,9 +193,11 @@ export const esperaTurnoMin = (intentos: number) => ESPERAS_TURNO_MIN[intentos -
 const enCurso = new Set<string>();
 const iso = (d: Date) => d.toISOString();
 
-function fotosDe(db: DB, m: Mensaje, dataDir?: string): FotoTurno[] {
+function fotosDe(db: DB, m: Mensaje, dataDir?: string): FotoTurno[];
+function fotosDe(db: DB, m: Mensaje, dataDir: string | undefined, pdf: true): ArchivoTurno[];
+function fotosDe(db: DB, m: Mensaje, dataDir?: string, pdf = false): (FotoTurno | ArchivoTurno)[] {
   const raiz = dirAdjuntos(dataDir);
-  return m.adjuntos.flatMap((a) => {
+  return m.adjuntos.filter((a) => (a.tipo === "application/pdf") === pdf).flatMap((a) => {
     const f = db.prepare("SELECT ruta FROM chat_adjuntos WHERE id = ?").get(a.id) as { ruta: string } | undefined;
     const archivo = f && path.resolve(raiz, f.ruta);
     return archivo && archivo.startsWith(raiz + path.sep) && fs.existsSync(archivo)
@@ -218,6 +227,7 @@ export function peticionTurno(db: DB, s: Solicitud, dataDir?: string): { peticio
         text: x.texto,
         at: x.creado_en,
         photos: fotosDe(db, x, dataDir),
+        files: fotosDe(db, x, dataDir, true),
       })),
     },
   };

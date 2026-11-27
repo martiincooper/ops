@@ -1,7 +1,7 @@
 // Asiento de entrevista simulado (sin Claude real) para el CI y las pruebas e2e. Cumple el contrato del asiento:
 // GET /api/interview/health, POST /api/interview/turn y POST /api/interview/close, con `Authorization: Bearer <token>`.
 // Guion: hace dos preguntas y, en el tercer turno, informa `done` con un resumen. Al cerrar devuelve un título y una
-// especificación fijos. Un turno con una foto la menciona (así se comprueba que viajó en base64).
+// especificación fijos. Un turno con fotos o documentos PDF los menciona (así se comprueba que viajó en base64).
 // Control para las pruebas (sin token): POST /control {"falla": 503|0, "fallaCierre": 503|0, "demora": ms} · GET /control (turnos recibidos).
 // Uso: INTERVIEW_TOKEN=... node scripts/asiento-falso.mjs [archivo-del-puerto]
 import fs from "node:fs";
@@ -18,9 +18,10 @@ const turnos = [];
 function turno(json, responder) {
   const hechas = json.messages.filter((m) => m.role === "asistente").length;
   const fotos = json.messages.reduce((n, m) => n + m.photos.length, 0);
-  turnos.push({ requestId: json.requestId, repo: json.repo, kind: json.kind, session: json.session, mensajes: json.messages.length, fotos, cuerpo: json.kind === "propuesta" ? json : undefined });
+  const documentos = json.messages.reduce((n, m) => n + (m.files ?? []).length, 0);
+  turnos.push({ requestId: json.requestId, repo: json.repo, kind: json.kind, session: json.session, mensajes: json.messages.length, fotos, documentos, cuerpo: json.kind === "propuesta" ? json : undefined });
   const sesion = json.session ?? `sesion-${json.requestId}`;
-  if (hechas === 0) return responder(200, { session: sesion, message: `¿Qué necesitan resolver exactamente?${fotos ? ` (recibí ${fotos} foto${fotos > 1 ? "s" : ""})` : ""}`, done: false, summary: null });
+  if (hechas === 0) return responder(200, { session: sesion, message: `¿Qué necesitan resolver exactamente?${fotos ? ` (recibí ${fotos} foto${fotos > 1 ? "s" : ""})` : ""}${documentos ? ` (recibí ${documentos} documento${documentos > 1 ? "s" : ""})` : ""}`, done: false, summary: null });
   if (hechas === 1) return responder(200, { session: sesion, message: "¿Quién usaría esto y cada cuánto?", done: false, summary: null });
   return responder(200, { session: sesion, message: "Entendido todo. Este es el resumen.", done: true, summary: "Resumen de prueba del requerimiento." });
 }
@@ -44,6 +45,13 @@ const servidor = http.createServer((req, res) => {
     if (pathname === "/api/interview/health") return responder(200, { ok: true });
     // Igual que el asiento real: ids de mensaje como texto y tickets de las especificaciones como enteros; si no, 400
     if (req.method === "POST" && pathname.startsWith("/api/interview/")) {
+      // Las fotos solo pueden ser imágenes y los documentos solo PDF (el asiento real responde 400 si no)
+      for (const [i, x] of (json.messages ?? []).entries()) {
+        const mala = (x.photos ?? []).findIndex((f) => !/^image\/(jpeg|png|webp)$/.test(f.type));
+        if (mala >= 0) return responder(400, { error: `messages[${i}].photos[${mala}] must be an image` });
+        const malo = (x.files ?? []).findIndex((f) => f.type !== "application/pdf" || !f.base64);
+        if (malo >= 0) return responder(400, { error: `messages[${i}].files[${malo}] must be a PDF` });
+      }
       const m = (json.messages ?? []).findIndex((x) => typeof x.id !== "string" || !x.id);
       if (m >= 0) return responder(400, { error: `messages[${m}].id must be a string` });
       const e = (json.module?.specs ?? []).findIndex((x) => !Number.isInteger(x.ticket));
@@ -54,7 +62,7 @@ const servidor = http.createServer((req, res) => {
       return setTimeout(() => turno(json, responder), demora);
     }
     if (pathname === "/api/interview/close" && req.method === "POST") {
-      cierres.push({ requestId: json.requestId, kind: json.kind, session: json.session, mensajes: json.messages.length, fotos: json.messages.reduce((n, m) => n + m.photos.length, 0), cuerpo: json.kind === "propuesta" ? json : undefined });
+      cierres.push({ requestId: json.requestId, kind: json.kind, session: json.session, mensajes: json.messages.length, fotos: json.messages.reduce((n, m) => n + m.photos.length, 0), documentos: json.messages.reduce((n, m) => n + (m.files ?? []).length, 0), cuerpo: json.kind === "propuesta" ? json : undefined });
       if (fallaCierre) return responder(fallaCierre, { error: "falla simulada" });
       if (json.kind === "propuesta") {
         return responder(200, {

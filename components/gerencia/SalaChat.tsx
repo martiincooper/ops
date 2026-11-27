@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Bot, Check, ImagePlus, LoaderCircle, SendHorizontal, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, FileText, ImagePlus, LoaderCircle, SendHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/ui";
@@ -16,7 +16,7 @@ interface Mensaje {
   rol: "gerente" | "asistente" | "sistema";
   texto: string;
   creado_en: string;
-  adjuntos: { id: number; nombre: string }[];
+  adjuntos: { id: number; nombre: string; tipo: string; tamano: number }[];
 }
 
 interface Solicitud {
@@ -39,6 +39,10 @@ interface Vista {
 
 const FOTOS_MAX = 6;
 const FOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+const esPdf = (tipo: string) => tipo === "application/pdf";
+/** Tamaño legible de un archivo adjunto (KB o MB). */
+const tamanoLegible = (b: number) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`);
 
 /** Cada cuánto se consultan los mensajes nuevos (2 a 3 segundos). */
 const REFRESCO_MS = 2500;
@@ -135,9 +139,12 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
     const nuevas = Array.from(lista ?? []);
     if (selector.current) selector.current.value = "";
     if (!nuevas.length) return;
-    if (fotos.length + nuevas.length > FOTOS_MAX) return setError(`Una solicitud admite como máximo ${FOTOS_MAX} fotos`);
+    if (fotos.length + nuevas.length > FOTOS_MAX) return setError(`Una solicitud admite como máximo ${FOTOS_MAX} archivos`);
+    if (nuevas.some((f) => f.type !== "application/pdf" && !/^image\/(jpeg|png|webp)$/.test(f.type))) {
+      return setError("Solo se aceptan fotos JPG, PNG o WEBP y documentos PDF");
+    }
     const grande = nuevas.find((f) => f.size > FOTO_MAX_BYTES);
-    if (grande) return setError(`Cada foto debe pesar como máximo 5 MB («${grande.name}»)`);
+    if (grande) return setError(`Cada archivo debe pesar como máximo 5 MB («${grande.name}»)`);
     setError(null);
     setFotos((f) => [...f, ...nuevas.map((archivo) => ({ archivo, url: URL.createObjectURL(archivo) }))]);
   };
@@ -269,7 +276,25 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
                           {m.texto}
                           {m.adjuntos?.length > 0 && (
                             <span className={cx("grid gap-1.5", m.texto && "mt-2", m.adjuntos.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
-                              {m.adjuntos.map((a) => (
+                              {m.adjuntos.map((a) =>
+                                esPdf(a.tipo) ? (
+                                  <a
+                                    key={a.id}
+                                    href={`/api/chat/adjuntos/${a.id}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    aria-label={`Abrir PDF ${a.nombre}`}
+                                    className={cx(
+                                      "flex min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2",
+                                      propio ? "bg-white/15" : "bg-fondo",
+                                      m.adjuntos.length > 1 && "col-span-2",
+                                    )}
+                                  >
+                                    <FileText size={18} className="shrink-0" aria-hidden />
+                                    <span className="min-w-0 flex-1 truncate">{a.nombre}</span>
+                                    <span className={cx("shrink-0 text-xs", propio ? "text-white/70" : "text-tinta-3")}>{tamanoLegible(a.tamano)}</span>
+                                  </a>
+                                ) : (
                                 <button
                                   key={a.id}
                                   type="button"
@@ -280,7 +305,8 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={`/api/chat/adjuntos/${a.id}`} alt={a.nombre} loading="lazy" className="max-h-48 w-full object-cover" />
                                 </button>
-                              ))}
+                                ),
+                              )}
                             </span>
                           )}
                           <time dateTime={m.creado_en} className={cx("mt-1 block text-[11px]", propio ? "text-white/70" : "text-tinta-3")}>
@@ -344,11 +370,18 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
             </p>
           )}
           {fotos.length > 0 && (
-            <ul className="mb-2 flex flex-wrap gap-2" aria-label="Fotos por enviar">
+            <ul className="mb-2 flex flex-wrap gap-2" aria-label="Archivos por enviar">
               {fotos.map((f, i) => (
                 <li key={f.url} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={f.url} alt={f.archivo.name} className="h-16 w-16 rounded-xl object-cover" />
+                  {f.archivo.type === "application/pdf" ? (
+                    <span className="flex h-16 max-w-[12rem] items-center gap-2 rounded-xl bg-superficie px-3 pr-4 text-sm text-tinta shadow-tarjeta">
+                      <FileText size={20} className="shrink-0" aria-hidden />
+                      <span className="min-w-0 truncate">{f.archivo.name}</span>
+                    </span>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={f.url} alt={f.archivo.name} className="h-16 w-16 rounded-xl object-cover" />
+                  )}
                   <button
                     type="button"
                     onClick={() => quitarFoto(i)}
@@ -372,9 +405,9 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
               ref={selector}
               type="file"
               multiple
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
               className="sr-only"
-              aria-label="Elegir fotos"
+              aria-label="Elegir fotos o PDF"
               data-testid="elegir-fotos"
               tabIndex={-1}
               onChange={(e) => agregarFotos(e.target.files)}
@@ -383,8 +416,8 @@ export default function SalaChat({ modulo, nombre, email, esAdmin }: { modulo: M
               type="button"
               onClick={() => selector.current?.click()}
               disabled={enviando}
-              aria-label="Adjuntar fotos"
-              title="Adjuntar fotos"
+              aria-label="Adjuntar fotos o PDF"
+              title="Adjuntar fotos o PDF"
               className="boton-icono h-11 w-11 shrink-0 bg-superficie sm:h-[3.25rem] sm:w-[3.25rem]"
             >
               <ImagePlus size={20} />

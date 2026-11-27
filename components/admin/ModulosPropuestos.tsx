@@ -53,12 +53,19 @@ function Conversacion({ mensajes }: { mensajes: Mensaje[] }) {
           <p className="whitespace-pre-wrap text-tinta-2">{m.texto}</p>
           {m.adjuntos.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-2">
-              {m.adjuntos.map((a) => (
-                <a key={a.id} href={`/api/chat/adjuntos/${a.id}`} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/api/chat/adjuntos/${a.id}`} alt={a.nombre} className="h-24 w-24 rounded-2xl object-cover" />
-                </a>
-              ))}
+              {m.adjuntos.map((a) =>
+                a.tipo === "application/pdf" ? (
+                  <a key={a.id} href={`/api/chat/adjuntos/${a.id}`} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1.5 rounded-xl bg-fondo px-3 py-2 text-xs text-indigo-tinta">
+                    <FileText size={14} className="shrink-0" aria-hidden />
+                    <span className="truncate">{a.nombre}</span>
+                  </a>
+                ) : (
+                  <a key={a.id} href={`/api/chat/adjuntos/${a.id}`} target="_blank" rel="noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/chat/adjuntos/${a.id}`} alt={a.nombre} className="h-24 w-24 rounded-2xl object-cover" />
+                  </a>
+                ),
+              )}
             </div>
           )}
         </li>
@@ -68,10 +75,18 @@ function Conversacion({ mensajes }: { mensajes: Mensaje[] }) {
 }
 
 function Fotos({ mensajes }: { mensajes: Mensaje[] }) {
-  const fotos = mensajes.flatMap((m) => m.adjuntos);
-  if (!fotos.length) return null;
+  const todos = mensajes.flatMap((m) => m.adjuntos);
+  const fotos = todos.filter((a) => a.tipo !== "application/pdf");
+  const pdfs = todos.filter((a) => a.tipo === "application/pdf");
+  if (!todos.length) return null;
   return (
     <div className="flex flex-wrap gap-2" data-fotos>
+      {pdfs.map((a) => (
+        <a key={a.id} href={`/api/chat/adjuntos/${a.id}`} target="_blank" rel="noreferrer" title={a.nombre} className="inline-flex max-w-full items-center gap-1.5 rounded-xl bg-fondo px-3 py-2 text-xs text-indigo-tinta">
+          <FileText size={14} className="shrink-0" aria-hidden />
+          <span className="truncate">{a.nombre}</span>
+        </a>
+      ))}
       {fotos.map((a) => (
         <a key={a.id} href={`/api/chat/adjuntos/${a.id}`} target="_blank" rel="noreferrer" title={a.nombre}>
           {/* eslint-disable-next-line @next/next/no-img-element */}

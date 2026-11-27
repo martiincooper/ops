@@ -227,6 +227,27 @@ export const MIGRACIONES_CONTROL: string[] = [
   `
   ALTER TABLE chat_solicitudes ADD COLUMN modulo_nuevo INTEGER NOT NULL DEFAULT 0;
   `,
+  // v13 — documentos PDF en los chats: chat_adjuntos admite también application/pdf. SQLite no cambia un CHECK, así que
+  //       se reconstruye la tabla conservando las filas y el índice.
+  `
+  CREATE TABLE chat_adjuntos_nueva (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mensaje_id INTEGER NOT NULL REFERENCES chat_mensajes(id) ON DELETE CASCADE,
+    solicitud_id TEXT NOT NULL REFERENCES chat_solicitudes(id) ON DELETE CASCADE,
+    n INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    tipo TEXT NOT NULL CHECK (tipo IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+    tamano INTEGER NOT NULL CHECK (tamano > 0),
+    ruta TEXT NOT NULL,
+    creado_en TEXT NOT NULL DEFAULT ${ISO_AHORA},
+    UNIQUE (solicitud_id, n)
+  );
+  INSERT INTO chat_adjuntos_nueva (id, mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta, creado_en)
+    SELECT id, mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta, creado_en FROM chat_adjuntos;
+  DROP TABLE chat_adjuntos;
+  ALTER TABLE chat_adjuntos_nueva RENAME TO chat_adjuntos;
+  CREATE INDEX idx_chat_adjuntos_mensaje ON chat_adjuntos (mensaje_id);
+  `,
 ];
 
 export const MIGRACIONES_EMPRESA: string[] = [

@@ -28,12 +28,13 @@ export interface ResultadoEnvio {
   reintento_en?: string | null;
 }
 
-/** Enlace (protegido por el login de ops) a una foto de la solicitud; PORTAL_URL es la dirección pública de ops. */
+/** Enlace (protegido por el login de ops) a una foto o PDF de la solicitud; PORTAL_URL es la dirección pública de ops. */
 export const enlaceFoto = (id: number) => `${(process.env.PORTAL_URL ?? "").replace(/\/+$/, "")}/api/chat/adjuntos/${id}`;
 
 function datosDelIssue(db: DB, id: string): DatosIssue {
   const s = solicitud(db, id);
   if (!s || s.estado !== "terminada" || !s.titulo || !s.spec) throw new Error("La solicitud no tiene especificación");
+  const adjuntos = mensajes(db, id).flatMap((m) => m.adjuntos);
   return {
     ticket: s.ticket,
     modulo: moduloPorClave(db, s.sala) as Modulo,
@@ -41,7 +42,8 @@ function datosDelIssue(db: DB, id: string): DatosIssue {
     spec: s.spec,
     solicitantes: participantes(db, id),
     moduloNuevo: !!s.modulo_nuevo,
-    fotos: mensajes(db, id).flatMap((m) => m.adjuntos.map((a) => ({ nombre: a.nombre, url: enlaceFoto(a.id) }))),
+    fotos: adjuntos.filter((a) => a.tipo !== "application/pdf").map((a) => ({ nombre: a.nombre, url: enlaceFoto(a.id) })),
+    documentos: adjuntos.filter((a) => a.tipo === "application/pdf").map((a) => ({ nombre: a.nombre, url: enlaceFoto(a.id) })),
   };
 }
 

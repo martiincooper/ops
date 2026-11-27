@@ -185,10 +185,13 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   (`GET /api/chat/salas/<sala>?desde=<id>`), así los mensajes ajenos aparecen sin recargar. Modelo en `control.db`:
   `chat_solicitudes` (a lo más una abierta por sala), `chat_mensajes`, `chat_participantes`, `chat_adjuntos` y
   `chat_modulos` (las salas que administra el administrador).
-- **Fotos**: cada mensaje puede llevar fotos JPG, PNG o WEBP (se validan por su contenido, no por el nombre), de hasta
-  5 MB cada una y 6 por solicitud. Se guardan en `DATA_DIR/adjuntos/<solicitud>/` (el respaldo `scripts/backup.mjs`
+- **Fotos y PDF**: cada mensaje puede llevar fotos JPG, PNG o WEBP y documentos PDF (se validan por su contenido, no por
+  el nombre ni el tipo declarado), de hasta 5 MB cada archivo y 6 por solicitud entre fotos y PDF. Se guardan en `DATA_DIR/adjuntos/<solicitud>/` (el respaldo `scripts/backup.mjs`
   las copia junto a las bases) y solo las sirve `GET /api/chat/adjuntos/<id>` a administradores y usuarios del
-  portal (401 sin sesión, 403 sin acceso).
+  portal (401 sin sesión, 403 sin acceso). En el chat un PDF por enviar es una ficha con su nombre y uno enviado es un
+  enlace que abre el PDF en otra pestaña. Al asiento de entrevista las fotos viajan en `messages[].photos` y los PDF en
+  `messages[].files` (`{ name, type: "application/pdf", base64 }`; `[]` si el mensaje no tiene); un asiento antiguo
+  ignora `files`.
 - **Turno del asistente**: tras un mensaje, el asistente de entrevista responde en la misma sala; mientras piensa,
   todos ven «El asistente está pensando…». Los mensajes que llegan durante un turno viajan juntos en el siguiente, así
   la conversación no se bifurca. Si el turno falla, se reintenta solo a 1, 2, 5, 15 y 30 minutos y después cada 30
@@ -200,8 +203,8 @@ Capturas: [ingreso](docs/capturas/v09-21-portal-ingreso.png) ·
   especificación, la sala muestra «enviando…» mientras se crea el Issue y luego «Guardado y enviado a revisión ✓»;
   el siguiente mensaje de la sala abre una solicitud nueva.
 - **Issue de especificación**: título `[GER-0001][<sala>] <título>` (el título lo redacta el asistente). El cuerpo es la
-  especificación, una sección **Fotos** con los enlaces a las fotos en ops (con `PORTAL_URL`; protegidos por el
-  login) y al final «Enviado desde el portal gerencial por <participantes>». Etiquetas: `gerencia`, `spec`, el nombre
+  especificación, las secciones **Fotos** y **Documentos** (cada una solo si hay) con los enlaces en ops (con `PORTAL_URL`;
+  protegidos por el login) y al final «Enviado desde el portal gerencial por <participantes>». Etiquetas: `gerencia`, `spec`, el nombre
   de la sala y `ready-for-human` (se crean solas si no existen). Lo dispara **Terminar**; el envío y sus reintentos
   están descritos abajo.
 - **Reintentos automáticos del envío**: si GitHub falla por un problema pasajero (red, tiempo de espera, error 5xx o
@@ -489,7 +492,7 @@ server {
 `scripts/backup.mjs` respalda **todas** las bases (`control.db` y una por empresa) con la API de respaldo en
 caliente de SQLite, verifica cada copia con `integrity_check` y deja `respaldos/AAAAMMDD-HHMMSS/`. No copies los
 `.db` con `cp` mientras la aplicación corre: sin el archivo `-wal` la copia puede quedar inconsistente. También copia
-`adjuntos/` (las fotos de los chats de las salas).
+`adjuntos/` (las fotos y PDF de los chats de las salas).
 
 Estructura de datos:
 
@@ -497,7 +500,7 @@ Estructura de datos:
 /data/control.db                         administradores y supervisión
 /data/empresas/aether-tech/app.db        datos de Aether Tech
 /data/empresas/datasheq/app.db           datos de Datasheq
-/data/adjuntos/<solicitud>/<n>.<ext>    fotos de los chats de las salas
+/data/adjuntos/<solicitud>/<n>.<ext>    fotos y PDF de los chats de las salas
 /data/respaldos/                         copias de scripts/backup.mjs
 ```
 
@@ -573,7 +576,7 @@ producción.
 | `TIPO_CAMBIO_USD` | — (dólar observado del día) | Fija el dólar para las compras en US$ (pruebas o sin salida a internet) |
 | `GITHUB_TOKEN` | — (Issues quedan pendientes) | Token clásico (`repo`) de la cuenta de DataSHEQ, colaboradora de los repositorios de los módulos |
 | `INTERVIEW_URL`, `INTERVIEW_TOKEN` | — (el asistente no responde; los mensajes se guardan y se reintenta) | URL y token (bearer) del asiento de entrevista de implement-all-cloud |
-| `PORTAL_URL` | — (los enlaces a fotos del Issue quedan relativos) | Dirección pública de ops, sin barra final; los Issues enlazan las fotos con ella |
+| `PORTAL_URL` | — (los enlaces a fotos y PDF del Issue quedan relativos) | Dirección pública de ops, sin barra final; los Issues enlazan las fotos y PDF con ella |
 | `GITHUB_CUENTA` | `datasheq-creator` | Cuenta de GitHub de DataSHEQ: se rechazan los envíos con un token de otra cuenta |
 | `GITHUB_API_URL` | `https://api.github.com` | API de GitHub (GitHub Enterprise o un GitHub simulado en pruebas) |
 
