@@ -42,6 +42,13 @@ const servidor = http.createServer((req, res) => {
     }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return responder(401, { error: "token inválido" });
     if (pathname === "/api/interview/health") return responder(200, { ok: true });
+    // Igual que el asiento real: ids de mensaje como texto y tickets de las especificaciones como enteros; si no, 400
+    if (req.method === "POST" && pathname.startsWith("/api/interview/")) {
+      const m = (json.messages ?? []).findIndex((x) => typeof x.id !== "string" || !x.id);
+      if (m >= 0) return responder(400, { error: `messages[${m}].id must be a string` });
+      const e = (json.module?.specs ?? []).findIndex((x) => !Number.isInteger(x.ticket));
+      if (e >= 0) return responder(400, { error: `module.specs[${e}] must be { ticket, title, spec }` });
+    }
     if (pathname === "/api/interview/turn" && req.method === "POST") {
       if (falla) return responder(falla, { error: "falla simulada" });
       return setTimeout(() => turno(json, responder), demora);

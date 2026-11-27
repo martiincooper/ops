@@ -9,7 +9,6 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 import { dirAdjuntos } from "./adjuntos";
 import { listarModulos, moduloPorClave, repoDe } from "./catalogo";
-import { codigoTicket } from "./modulos";
 import { SIN_REPO, enviarIssue } from "./envio";
 import type { OpcionesPeticion } from "./githubApi";
 import { ErrorSala, type Mensaje, type Solicitud, mensajes, solicitud } from "./salas";
@@ -30,7 +29,8 @@ export interface FotoTurno {
   base64: string;
 }
 export interface MensajeTurno {
-  id: number;
+  /** Texto: el asiento rechaza (400) los ids numéricos. */
+  id: string;
   author: string;
   role: "gerente" | "asistente";
   text: string;
@@ -46,7 +46,8 @@ export interface DocumentoModulo {
 export interface ModuloPropuesto {
   context: string;
   adrs: DocumentoModulo[];
-  specs: { ticket: string; title: string; spec: string }[];
+  /** Número entero del ticket (el asiento arma «GER-0001»); con texto responde 400. */
+  specs: { ticket: number; title: string; spec: string }[];
 }
 /** Repositorio de la guía de interfaz de la casa: el asiento lo lee en las salas propuestas. */
 export const REPO_GUIA_UI = "martiincooper/ui-guidelines";
@@ -211,7 +212,7 @@ export function peticionTurno(db: DB, s: Solicitud, dataDir?: string): { peticio
       session: s.asistente_sesion,
       room: { nombre: m.nombre, descripcion: m.descripcion },
       messages: msgs.map((x) => ({
-        id: x.id,
+        id: String(x.id),
         author: x.rol === "asistente" ? "Asistente" : x.autor_nombre,
         role: x.rol as "gerente" | "asistente",
         text: x.texto,
@@ -233,7 +234,7 @@ function moduloDe(db: DB, m: Modulo): ModuloPropuesto {
   const fila = db.prepare("SELECT contexto, adrs FROM chat_modulos WHERE clave = ?").get(m.clave) as { contexto: string; adrs: string };
   const adrs = (JSON.parse(fila.adrs) as { archivo: string; titulo: string; contenido: string }[]).map((a) => ({ file: a.archivo, title: a.titulo, content: a.contenido }));
   const specs = (db.prepare("SELECT ticket, titulo, spec FROM chat_solicitudes WHERE sala = ? AND estado = 'terminada' AND spec IS NOT NULL ORDER BY ticket").all(m.clave) as { ticket: number; titulo: string; spec: string }[]).map((x) => ({
-    ticket: codigoTicket(x.ticket),
+    ticket: x.ticket,
     title: x.titulo,
     spec: x.spec,
   }));

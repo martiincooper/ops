@@ -1551,6 +1551,8 @@ async function main() {
       assert.equal(await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => t0, dataDir: dir }), 1);
       const p = a.peticiones[0];
       assert.deepEqual([p.requestId, p.repo, p.session, p.room], [m.solicitud.id, "dueno/repo", null, { nombre: "C-Legal", descripcion: "" }]);
+      // contrato del asiento: los ids de los mensajes viajan como texto (con números responde 400 y el asistente nunca contesta)
+      assert.deepEqual(p.messages.map((x) => x.id), [String(m.mensaje.id)]);
       assert.deepEqual(p.messages.map((x) => [x.author, x.role, x.text, x.photos.map((f) => [f.name, f.type, f.base64])]), [
         ["Ana Pérez", "gerente", "Necesito un informe", [["pantalla.jpg", "image/jpeg", jpg.toString("base64")]]],
       ]);
@@ -1995,7 +1997,8 @@ async function main() {
     assert.deepEqual(p2.module, {
       context: "# Compras\n\nGlosario",
       adrs: [{ file: "0001-x.md", title: "X", content: "# X" }],
-      specs: [{ ticket: codigoTicket(s1.ticket), title: "Informe DS 594", spec: s1.spec! }],
+      // contrato del asiento: el ticket viaja como número entero (el asiento arma «GER-0001»)
+      specs: [{ ticket: s1.ticket, title: "Informe DS 594", spec: s1.spec! }],
     });
     // sala activa: sin kind ni contextRepos
     const { solicitud: sa } = enviarMensaje(d, "c-legal", ana, "hola", mas(11));
