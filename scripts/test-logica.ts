@@ -868,9 +868,9 @@ async function main() {
   await prueba("módulos propuestos (#47): migración conserva las salas como «activo»; proponer abre la sala sin repositorio", async () => {
     const d = new Database(":memory:");
     d.pragma("foreign_keys = ON");
-    MIGRACIONES_CONTROL.slice(0, MIGRACIONES_CONTROL.length - 1).forEach((m) => d.exec(m));
+    MIGRACIONES_CONTROL.slice(0, MIGRACIONES_CONTROL.length - 2).forEach((m) => d.exec(m));
     d.prepare("INSERT INTO chat_modulos (clave, nombre) VALUES ('c-legal', 'C-Legal')").run();
-    d.exec(MIGRACIONES_CONTROL[MIGRACIONES_CONTROL.length - 1]);
+    d.exec(MIGRACIONES_CONTROL[MIGRACIONES_CONTROL.length - 2]);
     const previa = moduloPorClave(d, "c-legal")!;
     assert.deepEqual([previa.estado_modulo, previa.creado_por], ["activo", null]);
     assert.equal(salaAbiertaDe(previa), false); // sin repositorio: gris
@@ -1024,26 +1024,72 @@ async function main() {
       assert.equal(envio("", [{ nombre: "solo.jpg", datos: jpg }], mas(1)).mensaje.texto, "");
       falla(() => envio("", [], mas(1)), "Escribe un mensaje");
       // tipo por contenido, no por nombre
-      falla(() => envio("x", [{ nombre: "renombrada.png", datos: Buffer.from("MZ ejecutable") }]), "Solo se aceptan fotos JPG, PNG o WEBP («renombrada.png»)");
-      falla(() => envio("x", [{ nombre: "vacia.jpg", datos: Buffer.alloc(0) }]), "Solo se aceptan fotos JPG, PNG o WEBP («vacia.jpg»)");
+      falla(() => envio("x", [{ nombre: "renombrada.png", datos: Buffer.from("MZ ejecutable") }]), "Solo se aceptan fotos JPG, PNG o WEBP y documentos PDF («renombrada.png»)");
+      falla(() => envio("x", [{ nombre: "vacia.jpg", datos: Buffer.alloc(0) }]), "Solo se aceptan fotos JPG, PNG o WEBP y documentos PDF («vacia.jpg»)");
       // tamaño: 5 MB exactos pasan, un byte más no
       const justo = Buffer.concat([jpg, Buffer.alloc(FOTO_MAX_BYTES - jpg.length)]);
       assert.equal(envio("justo", [{ nombre: "justo.jpg", datos: justo }], mas(2)).mensaje.adjuntos.length, 1); // 5.ª foto
-      falla(() => envio("x", [{ nombre: "grande.jpg", datos: Buffer.concat([justo, Buffer.alloc(1)]) }]), "Cada foto debe pesar como máximo 5 MB («grande.jpg»)");
+      falla(() => envio("x", [{ nombre: "grande.jpg", datos: Buffer.concat([justo, Buffer.alloc(1)]) }]), "Cada archivo debe pesar como máximo 5 MB («grande.jpg»)");
       // límite de 6 por solicitud, entre todos sus mensajes: la 6.ª pasa, la 7.ª no y no deja nada
       assert.equal(envio("sexta", [{ nombre: "6.jpg", datos: jpg }], mas(3)).mensaje.adjuntos.length, 1);
-      falla(() => envio("séptima", [{ nombre: "7.jpg", datos: jpg }], mas(4)), "Una solicitud admite como máximo 6 fotos");
+      falla(() => envio("séptima", [{ nombre: "7.jpg", datos: jpg }], mas(4)), "Una solicitud admite como máximo 6 archivos");
       assert.equal((d.prepare("SELECT COUNT(*) n FROM chat_adjuntos").get() as { n: number }).n, 6);
       assert.equal(mensajesChat(d, a.solicitud.id).length, 4);
       assert.equal(fs.readdirSync(path.join(dir, "adjuntos", a.solicitud.id)).length, 6);
       // otra solicitud (otra sala) tiene su propio cupo de 6
       assert.equal(enviarMensaje(d, "c-previene", beto, "x", t0, Array.from({ length: 6 }, (_, i) => ({ nombre: `${i}.jpg`, datos: jpg })), dir).mensaje.adjuntos.length, 6);
-      falla(() => envio("siete de golpe", Array.from({ length: 7 }, () => ({ nombre: "z.jpg", datos: jpg }))), "Una solicitud admite como máximo 6 fotos");
+      falla(() => envio("siete de golpe", Array.from({ length: 7 }, () => ({ nombre: "z.jpg", datos: jpg }))), "Una solicitud admite como máximo 6 archivos");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
+  await prueba("PDF (#62): se guardan como <n>.pdf junto a las fotos; se detectan por contenido y comparten los límites", () => {
+    const d = dbControl();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "adjuntos-pdf-"));
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(50)]);
+    const pdf = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(40)]);
+    const envio = (texto: string, fotos: { nombre: string; datos: Buffer }[], t = t0) => enviarMensaje(d, "c-legal", ana, texto, t, fotos, dir);
+    const falla = (fn: () => unknown, msg: string) => assert.throws(fn, (e: ErrorSala) => e.status === 400 && e.message === msg, msg);
+    try {
+      const solo = envio("", [{ nombre: "informe.pdf", datos: pdf }]);
+      assert.deepEqual(solo.mensaje.adjuntos.map((x) => [x.nombre, x.tipo, x.tamano]), [["informe.pdf", "application/pdf", pdf.length]]);
+      assert.ok(fs.existsSync(path.join(dir, "adjuntos", solo.solicitud.id, "1.pdf")));
+      const mixto = envio("con foto", [{ nombre: "foto.jpg", datos: jpg }, { nombre: "otro.pdf", datos: pdf }], mas(1));
+      assert.deepEqual(mixto.mensaje.adjuntos.map((x) => x.tipo), ["image/jpeg", "application/pdf"]);
+      assert.equal(adjuntoGuardado(d, mixto.mensaje.adjuntos[1].id, dir)!.tipo, "application/pdf");
+      // por contenido: un PDF con nombre de foto vale; una foto con nombre .pdf también; texto que se dice PDF no
+      assert.equal(envio("x", [{ nombre: "disfrazado.png", datos: pdf }], mas(2)).mensaje.adjuntos[0].tipo, "application/pdf");
+      falla(() => envio("x", [{ nombre: "falso.pdf", datos: Buffer.from("no es un pdf") }]), "Solo se aceptan fotos JPG, PNG o WEBP y documentos PDF («falso.pdf»)");
+      const grande = Buffer.concat([pdf, Buffer.alloc(FOTO_MAX_BYTES)]);
+      falla(() => envio("x", [{ nombre: "grande.pdf", datos: grande }]), "Cada archivo debe pesar como máximo 5 MB («grande.pdf»)");
+      // límite compartido: 4 usados, 2 más caben, el 7.º no
+      assert.equal(envio("dos", [{ nombre: "a.pdf", datos: pdf }, { nombre: "b.jpg", datos: jpg }], mas(3)).mensaje.adjuntos.length, 2);
+      falla(() => envio("siete", [{ nombre: "c.pdf", datos: pdf }], mas(4)), "Una solicitud admite como máximo 6 archivos");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  await prueba("PDF (#62): la migración v13 conserva las fotos y la base nueva acepta PDF", () => {
+    const d = new Database(":memory:");
+    d.pragma("foreign_keys = ON");
+    const ultima = MIGRACIONES_CONTROL.length - 1;
+    MIGRACIONES_CONTROL.slice(0, ultima).forEach((m) => d.exec(m));
+    d.prepare("INSERT INTO chat_modulos (clave, nombre) VALUES ('c-legal', 'C-Legal')").run();
+    d.prepare("INSERT INTO chat_solicitudes (id, sala, ticket) VALUES ('s1', 'c-legal', 1)").run();
+    d.prepare("INSERT INTO chat_mensajes (solicitud_id, autor_email, autor_nombre, rol, texto) VALUES ('s1', 'a@x.cl', 'Ana', 'gerente', 'hola')").run();
+    d.prepare("INSERT INTO chat_adjuntos (mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta) VALUES (1, 's1', 1, 'a.jpg', 'image/jpeg', 10, 's1/1.jpg')").run();
+    assert.throws(() => d.prepare("INSERT INTO chat_adjuntos (mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta) VALUES (1, 's1', 2, 'a.pdf', 'application/pdf', 10, 's1/2.pdf')").run());
+    d.exec(MIGRACIONES_CONTROL[ultima]);
+    assert.deepEqual(d.prepare("SELECT id, n, nombre, tipo, tamano, ruta FROM chat_adjuntos").all(), [{ id: 1, n: 1, nombre: "a.jpg", tipo: "image/jpeg", tamano: 10, ruta: "s1/1.jpg" }]);
+    d.prepare("INSERT INTO chat_adjuntos (mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta) VALUES (1, 's1', 2, 'a.pdf', 'application/pdf', 10, 's1/2.pdf')").run();
+    assert.ok((d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_chat_adjuntos_mensaje'").get()));
+    assert.throws(() => d.prepare("INSERT INTO chat_adjuntos (mensaje_id, solicitud_id, n, nombre, tipo, tamano, ruta) VALUES (1, 's1', 3, 'a.gif', 'image/gif', 10, 's1/3.gif')").run());
+    const nueva = new Database(":memory:");
+    nueva.pragma("foreign_keys = ON");
+    MIGRACIONES_CONTROL.forEach((m) => nueva.exec(m));
+    assert.ok(nueva.prepare("SELECT sql FROM sqlite_master WHERE name = 'chat_adjuntos'").get());
+  });
   await prueba("fotos (#30): el respaldo copia la carpeta adjuntos", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "respaldo-"));
     try {
@@ -1170,6 +1216,7 @@ async function main() {
     titulo: "Informe DS 594",
     spec: "# Spec",
     fotos: [],
+    documentos: [],
     solicitantes: [{ nombre: "Ana", email: "ana@datasheq.com" }],
   });
   /** Solicitud ya terminada (lo que dejará «Terminar» en un ticket posterior): lista para enviarse como Issue. */
@@ -1547,7 +1594,8 @@ async function main() {
       const d = dbControl();
       const a = asientoGuion();
       const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(50, 7)]);
-      const m = enviarMensaje(d, "c-legal", ana, "Necesito un informe", t0, [{ nombre: "pantalla.jpg", datos: jpg }], dir);
+      const pdf = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(30, 3)]);
+      const m = enviarMensaje(d, "c-legal", ana, "Necesito un informe", t0, [{ nombre: "pantalla.jpg", datos: jpg }, { nombre: "norma.pdf", datos: pdf }], dir);
       assert.equal(await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => t0, dataDir: dir }), 1);
       const p = a.peticiones[0];
       assert.deepEqual([p.requestId, p.repo, p.session, p.room], [m.solicitud.id, "dueno/repo", null, { nombre: "C-Legal", descripcion: "" }]);
@@ -1556,6 +1604,8 @@ async function main() {
       assert.deepEqual(p.messages.map((x) => [x.author, x.role, x.text, x.photos.map((f) => [f.name, f.type, f.base64])]), [
         ["Ana Pérez", "gerente", "Necesito un informe", [["pantalla.jpg", "image/jpeg", jpg.toString("base64")]]],
       ]);
+      // #62: los PDF viajan en `files` (nunca en `photos`) y los mensajes sin PDF llevan `files: []`
+      assert.deepEqual(p.messages[0].files, [{ name: "norma.pdf", type: "application/pdf", base64: pdf.toString("base64") }]);
       const s = solicitud(d, m.solicitud.id)!;
       assert.deepEqual([s.asistente_estado, s.asistente_sesion, s.terminado, s.resumen], ["idle", "S1", 0, null]);
       const msgs = mensajesChat(d, s.id);
@@ -1566,6 +1616,7 @@ async function main() {
       await dispararTurno(d, s.id, a.cliente, { ahora: () => mas(1), dataDir: dir });
       assert.deepEqual(a.peticiones[1].messages.map((x) => x.role), ["gerente", "asistente", "gerente"]);
       assert.equal(a.peticiones[1].messages[0].photos.length, 1);
+      assert.deepEqual(a.peticiones[1].messages.slice(1).map((x) => x.files), [[], []]);
       assert.equal(a.peticiones[1].session, "S1");
       assert.equal(await dispararTurno(d, s.id, a.cliente), 0);
       assert.equal(a.peticiones.length, 2);
@@ -1716,7 +1767,8 @@ async function main() {
   /** Sala con una solicitud en la que el asistente ya informó que terminó (con una foto de Ana). */
   const salaTerminada = async (d: ReturnType<typeof dbControl>, a: ReturnType<typeof asientoGuion>, dir: string, sala = "c-legal") => {
     const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(50, 7)]);
-    const m = enviarMensaje(d, sala, ana, "uno", t0, [{ nombre: "pantalla.jpg", datos: jpg }], dir);
+    const pdf = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(30, 3)]);
+    const m = enviarMensaje(d, sala, ana, "uno", t0, [{ nombre: "pantalla.jpg", datos: jpg }, { nombre: "norma.pdf", datos: pdf }], dir);
     enviarMensaje(d, sala, beto, "dos", t0);
     await dispararTurno(d, m.solicitud.id, a.cliente, { ahora: () => t0, dataDir: dir });
     enviarMensaje(d, sala, ana, "tres", mas(1));
@@ -1812,13 +1864,16 @@ async function main() {
       // el asiento recibió la transcripción completa con la sesión y las fotos, igual que un turno
       assert.deepEqual([a.cierres.length, a.cierres[0].requestId, a.cierres[0].session, a.cierres[0].repo], [1, id, "S1", "dueno/repo"]);
       assert.equal(a.cierres[0].messages[0].photos.length, 1);
+      assert.deepEqual(a.cierres[0].messages[0].files.map((x) => [x.name, x.type]), [["norma.pdf", "application/pdf"]]);
+      assert.ok(a.cierres[0].messages.slice(1).every((x) => Array.isArray(x.files) && x.files.length === 0));
       const foto = mensajesChat(d, id)[0].adjuntos[0].id;
+      const doc = mensajesChat(d, id)[0].adjuntos[1].id;
       const e = enviado!;
       assert.equal(e.title, "[GER-0001][C-Legal] Informe DS 594");
       assert.deepEqual([...e.labels].sort(), ["C-Legal", "gerencia", "ready-for-human", "spec"]);
       assert.equal(
         e.body,
-        `## Decisiones del negocio\n\nTodo claro @\u200bana\n\n## Fotos\n\n- [pantalla.jpg](https://ops.example/api/chat/adjuntos/${foto})\n\n---\nEnviado desde el portal gerencial por Ana Pérez, Beto Rojas`,
+        `## Decisiones del negocio\n\nTodo claro @\u200bana\n\n## Fotos\n\n- [pantalla.jpg](https://ops.example/api/chat/adjuntos/${foto})\n\n## Documentos\n\n- [norma.pdf](https://ops.example/api/chat/adjuntos/${doc})\n\n---\nEnviado desde el portal gerencial por Ana Pérez, Beto Rojas`,
       );
       assert.equal(enlaceFoto(foto), `https://ops.example/api/chat/adjuntos/${foto}`);
       const s = solicitud(d, id)!;

@@ -182,6 +182,8 @@ export interface DatosIssue {
   spec: string;
   /** Fotos de la solicitud, con su enlace protegido por el login de ops. */
   fotos: { nombre: string; url: string }[];
+  /** PDF de la solicitud, con su enlace protegido. */
+  documentos: { nombre: string; url: string }[];
   /** Quienes escribieron en la solicitud. */
   solicitantes: { nombre: string; email: string }[];
   /** Guardada mientras la sala era un módulo propuesto: lleva además la etiqueta «modulo-nuevo». */
@@ -191,11 +193,12 @@ export interface DatosIssue {
 /** Título del Issue: empieza con el ticket, que es lo que se busca para no duplicarlo. */
 export const tituloIssue = (d: DatosIssue) => `[${codigoTicket(d.ticket)}][${d.modulo.nombre}] ${d.titulo}`.slice(0, 250);
 
-/** Cuerpo del Issue: la especificación, la sección «Fotos» (si hay) y quién lo envió. */
+/** Cuerpo del Issue: la especificación, las secciones «Fotos» y «Documentos» (si hay) y quién lo envió. */
 export function cuerpoIssue(d: DatosIssue): string {
+  const documentos = d.documentos.length ? `\n\n## Documentos\n\n${d.documentos.map((f) => `- [${f.nombre}](${f.url})`).join("\n")}` : "";
   const fotos = d.fotos.length ? `\n\n## Fotos\n\n${d.fotos.map((f) => `- [${f.nombre}](${f.url})`).join("\n")}` : "";
   const por = d.solicitantes.map((x) => x.nombre).join(", ") || "—";
-  return `${sinMenciones(d.spec.trim())}${fotos}\n\n---\nEnviado desde el portal gerencial por ${sinMenciones(por)}`;
+  return `${sinMenciones(d.spec.trim())}${fotos}${documentos}\n\n---\nEnviado desde el portal gerencial por ${sinMenciones(por)}`;
 }
 
 /**

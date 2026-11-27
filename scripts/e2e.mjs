@@ -1123,11 +1123,11 @@ async function main() {
     const fot = (await cuenta(admin, D, "portal.fotos@datasheq.com", "Francisca Fotos", "executive", "270518")).cliente;
     // tipos y tamaño: por contenido, no por nombre ni tipo declarado
     let r = await enviarFotos(fot, "texto", [["falsa.png", Buffer.from("%PDF-1.4 no es una imagen"), "image/png"]]);
-    assert.deepEqual([r.status, r.datos.error], [400, "Solo se aceptan fotos JPG, PNG o WEBP («falsa.png»)"]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Solo se aceptan fotos JPG, PNG o WEBP y documentos PDF («falsa.png»)"]);
     r = await enviarFotos(fot, "texto", [["grande.jpg", Buffer.concat([jpg, Buffer.alloc(5 * 1024 * 1024)]), "image/jpeg"]]);
-    assert.deepEqual([r.status, r.datos.error], [400, "Cada foto debe pesar como máximo 5 MB («grande.jpg»)"]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Cada archivo debe pesar como máximo 5 MB («grande.jpg»)"]);
     r = await enviarFotos(fot, "texto", Array.from({ length: 7 }, (_, i) => [`f${i}.jpg`, jpg, "image/jpeg"]));
-    assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 fotos"]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 archivos"]);
     assert.deepEqual((await fot.pedir("/api/chat/salas/c-previene")).datos.mensajes, []); // nada se guardó
     // texto y fotos: se guarda y los demás lo ven con sus fotos
     r = await enviarFotos(fot, "Así se ve la falla", [["falla.jpg", jpg, "image/jpeg"], ["otra.png", png, "image/png"]]);
@@ -1137,7 +1137,7 @@ async function main() {
     r = await enviarFotos(fot, "", Array.from({ length: 4 }, (_, i) => [`g${i}.jpg`, jpg, "image/jpeg"]));
     assert.equal(r.status, 200, JSON.stringify(r.datos));
     r = await enviarFotos(fot, "una más", [["h.jpg", jpg, "image/jpeg"]]);
-    assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 fotos"]);
+    assert.deepEqual([r.status, r.datos.error], [400, "Una solicitud admite como máximo 6 archivos"]);
     const vistas = (await gEquipo.pedir("/api/chat/salas/c-previene")).datos.mensajes.filter(deGerente);
     assert.deepEqual(vistas.map((m) => [m.texto, m.adjuntos.length]), [["Así se ve la falla", 2], ["", 4]]);
     // la foto: portal (gerente y administrador) sí; sin sesión 401; equipo y otra empresa 403
