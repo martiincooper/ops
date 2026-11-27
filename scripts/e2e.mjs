@@ -1122,7 +1122,7 @@ async function main() {
     };
     const fot = (await cuenta(admin, D, "portal.fotos@datasheq.com", "Francisca Fotos", "executive", "270518")).cliente;
     // tipos y tamaño: por contenido, no por nombre ni tipo declarado
-    let r = await enviarFotos(fot, "texto", [["falsa.png", Buffer.from("%PDF-1.4 no es una imagen"), "image/png"]]);
+    let r = await enviarFotos(fot, "texto", [["falsa.png", Buffer.from("MZ no es una imagen ni un PDF"), "image/png"]]);
     assert.deepEqual([r.status, r.datos.error], [400, "Solo se aceptan fotos JPG, PNG o WEBP y documentos PDF («falsa.png»)"]);
     r = await enviarFotos(fot, "texto", [["grande.jpg", Buffer.concat([jpg, Buffer.alloc(5 * 1024 * 1024)]), "image/jpeg"]]);
     assert.deepEqual([r.status, r.datos.error], [400, "Cada archivo debe pesar como máximo 5 MB («grande.jpg»)"]);
@@ -1190,10 +1190,23 @@ async function main() {
     const form = new FormData();
     form.set("texto", "Mira cómo se ve hoy");
     form.append("fotos", new Blob([jpg], { type: "image/jpeg" }), "hoy.jpg");
-    assert.equal((await gEquipo.pedir("/api/chat/salas/c-lidera/mensajes", { metodo: "POST", form })).status, 200);
+    // #62: y un PDF en el mismo mensaje: viaja en `files` (el asiento falso rechaza con 400 un PDF en `photos`)
+    const pdf = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(100, 5)]);
+    form.append("fotos", new Blob([pdf], { type: "application/pdf" }), "norma.pdf");
+    const rp = await gEquipo.pedir("/api/chat/salas/c-lidera/mensajes", { metodo: "POST", form });
+    assert.equal(rp.status, 200, JSON.stringify(rp.datos));
+    assert.deepEqual(rp.datos.mensaje.adjuntos.map((a) => [a.nombre, a.tipo]), [["hoy.jpg", "image/jpeg"], ["norma.pdf", "application/pdf"]]);
     await respuestas(gGerente, 2);
     const turnos = (await control()).turnos.slice(antes);
-    assert.deepEqual(turnos.map((t) => [t.repo, t.mensajes, t.fotos]), [["prueba/c-lidera", 1, 0], ["prueba/c-lidera", 3, 1]]);
+    assert.deepEqual(turnos.map((t) => [t.repo, t.mensajes, t.fotos, t.documentos]), [["prueba/c-lidera", 1, 0, 0], ["prueba/c-lidera", 3, 1, 1]]);
+    // la sala devuelve el PDF como adjunto y /api/chat/adjuntos lo sirve como PDF solo al portal
+    const enSala = (await vista(gGerente)).mensajes.find((m) => m.id === rp.datos.mensaje.id);
+    const idPdf = enSala.adjuntos.find((a) => a.tipo === "application/pdf").id;
+    const archivoPdf = await gGerente.pedir(`/api/chat/adjuntos/${idPdf}`);
+    assert.deepEqual([archivoPdf.status, archivoPdf.headers.get("content-type"), archivoPdf.headers.get("x-content-type-options")], [200, "application/pdf", "nosniff"]);
+    assert.ok(Buffer.from(archivoPdf.datos).equals(pdf));
+    assert.equal((await anon.pedir(`/api/chat/adjuntos/${idPdf}`)).status, 401);
+    assert.equal((await gTeam.pedir(`/api/chat/adjuntos/${idPdf}`)).status, 403);
     assert.equal(turnos[1].session, turnos[0].requestId ? `sesion-${turnos[0].requestId}` : null);
     // salud del asiento y estado del turno en el panel
     const panel = (await gAdmin.pedir("/api/admin/chat")).datos;
@@ -1275,7 +1288,7 @@ async function main() {
     const issue = await esperar(async () => (await (await fetch(`${GITHUB}/control/issues`)).json()).find((i) => i.repo === "prueba/c-lidera"), "Issue creado");
     assert.equal(issue.title, `[GER-${String(solicitud.ticket).padStart(4, "0")}][C-Lidera] Requerimiento de prueba`);
     assert.deepEqual([...issue.labels].sort(), ["C-Lidera", "gerencia", "ready-for-human", "spec"]);
-    assert.match(issue.body, /^## Decisiones del negocio\n\nEspecificación de prueba\n\n## Fotos\n\n- \[hoy\.jpg\]\(.*\/api\/chat\/adjuntos\/\d+\)\n\n---\nEnviado desde el portal gerencial por .*Gonzalo Gerente/);
+    assert.match(issue.body, /^## Decisiones del negocio\n\nEspecificación de prueba\n\n## Fotos\n\n- \[hoy\.jpg\]\(.*\/api\/chat\/adjuntos\/\d+\)\n\n## Documentos\n\n- \[norma\.pdf\]\(.*\/api\/chat\/adjuntos\/\d+\)\n\n---\nEnviado desde el portal gerencial por .*Gonzalo Gerente/);
     assert.equal((await (await fetch(`${GITHUB}/control/issues`)).json()).filter((i) => i.repo === "prueba/c-lidera").length, 1);
     assert.equal((await (await fetch(`${process.env.ASIENTO}/control`)).json()).cierres.length >= 1, true);
     // marcador para todos; el siguiente mensaje abre otra solicitud
